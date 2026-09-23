@@ -23,6 +23,13 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/logging"
 )
 
+// version is stamped at build time by the Dockerfile and the Makefile:
+//
+//	go build -ldflags "-X main.version=v0.3.0" ./cmd/server
+//
+// A plain `go run` leaves it as "dev".
+var version = "dev"
+
 func main() {
 	// main stays tiny: everything that can fail lives in run, which returns
 	// an error instead of calling os.Exit, so it's testable and defers run.
@@ -53,6 +60,7 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 		return err
 	}
 	logger := logging.New(stdout, cfg.Log, cfg.Env)
+	logger.InfoContext(ctx, "starting", slog.String("role", role), slog.String("version", version))
 
 	pool, err := database.Open(ctx, cfg.Database)
 	if err != nil {

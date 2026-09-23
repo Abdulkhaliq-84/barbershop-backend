@@ -15,6 +15,11 @@ export LOG_FORMAT ?= text
 
 GOBIN := $(shell go env GOPATH)/bin
 
+# Version stamped into the binary: the nearest tag plus commits since, e.g. v0.1.0-3-gabc1234.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X main.version=$(VERSION)
+IMAGE   ?= barbershop-backend:local
+
 .PHONY: help
 help: ## List the commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "} {printf "  \033[32m%-14s\033[0m %s\n", $$1, $$2}'
@@ -88,7 +93,21 @@ tidy: ## Tidy go.mod / go.sum
 
 .PHONY: build
 build: ## Build a static binary into bin/server
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/server ./cmd/server
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/server ./cmd/server
+
+## ---- containers ----------------------------------------------------------
+
+.PHONY: docker-build
+docker-build: ## Build the production image locally (IMAGE=barbershop-backend:local)
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) .
+
+.PHONY: app-up
+app-up: ## Run a built or released image with Compose: make app-up BARBERSHOP_IMAGE=ghcr.io/abdulkhaliq-84/barbershop-backend:v0.1.0
+	docker compose --profile app up -d
+
+.PHONY: app-down
+app-down: ## Stop the Compose app and database
+	docker compose --profile app down
 
 .PHONY: check
 check: ## Everything CI checks: tidy, lint, all tests, build

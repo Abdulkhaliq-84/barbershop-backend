@@ -1,0 +1,14 @@
+# Only what the build needs goes into the Docker build context.
+.git
+.github
+.claude
+docs
+bin
+tmp
+coverage.out
+*.md
+.env
+.env.*
+compose.yaml
+Dockerfile
+.dockerignore
