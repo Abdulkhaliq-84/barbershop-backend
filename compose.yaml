@@ -1,0 +1,28 @@
+# Local infrastructure for development. `make db-up` starts it; the Go app
+# itself runs on your machine (`make dev`) so edits reload instantly.
+#
+# postgis/postgis publishes amd64 images only: on Apple Silicon, Docker
+# Desktop runs it under emulation (slower to start, works fine).
+name: barbershop
+
+services:
+  db:
+    image: postgis/postgis:18-3.6
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: barbershop
+      POSTGRES_PASSWORD: barbershop # local development only
+      POSTGRES_DB: barbershop
+    ports:
+      - "127.0.0.1:5432:5432" # reachable from this machine only
+    volumes:
+      - db-data:/var/lib/postgresql # Postgres 18+ mounts the parent directory
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U barbershop -d barbershop"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  db-data:
