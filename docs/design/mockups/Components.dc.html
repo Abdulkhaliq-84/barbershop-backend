@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<title>المكوّنات الأساسية</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;font-family:"IBM Plex Sans Arabic","IBM Plex Sans",sans-serif;color:#13203F;background:#FAFBFC}
+a{color:#127A56;text-decoration:none}a:hover{color:#0E6246}
+button{font-family:inherit;border:0;margin:0;cursor:pointer}
+input{font-family:inherit}
+svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.num{font-feature-settings:"tnum" 1}
+</style>
+</helmet>
+<div dir="rtl" style="width: 1440px; height: 1020px; box-sizing: border-box; padding: 64px; display: flex; flex-direction: column; gap: 40px; background: #FAFBFC; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; color: #13203F;">
+
+<div style="display: flex; align-items: baseline; gap: 12px;">
+<h1 style="margin: 0; font-size: 32px; line-height: 44px; font-weight: 700;">المكوّنات الأساسية</h1>
+<span dir="ltr" style="font-size: 16px; line-height: 24px; color: #6B7684; font-family: 'IBM Plex Sans', sans-serif;">Core components · RTL-first</span>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px;">
+
+<div style="background: #FFFFFF; border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(19,32,63,.06), 0 0 0 1px #E9EDF1; display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0 0 8px; font-size: 17px; line-height: 26px; font-weight: 600;">الأزرار <span dir="ltr" style="color: #6B7684; font-weight: 400; font-family: 'IBM Plex Sans', sans-serif;">· Buttons</span></h2>
+<button type="button" style="height: 56px; border-radius: 999px; background: #127A56; color: #FFFFFF; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 24px rgba(18,122,86,.24);">احجز الآن<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></button>
+<button type="button" style="height: 56px; border-radius: 999px; background: #13203F; color: #FFFFFF; font-size: 15px; font-weight: 600;">تواصل مع الصالون</button>
+<button type="button" style="height: 56px; border-radius: 999px; background: #E8F5EF; color: #0A4A35; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>إضافة خدمة</button>
+<button type="button" style="height: 52px; border-radius: 999px; background: #FFFFFF; color: #13203F; font-size: 15px; font-weight: 600; box-shadow: inset 0 0 0 1.5px #D7DDE3;">عرض على الخريطة</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: transparent; color: #C62F2F; font-size: 15px; font-weight: 600;">إلغاء الحجز</button>
+</div>
+
+<div style="background: #FFFFFF; border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(19,32,63,.06), 0 0 0 1px #E9EDF1; display: flex; flex-direction: column; gap: 16px;">
+<h2 style="margin: 0 0 4px; font-size: 17px; line-height: 26px; font-weight: 600;">الفلاتر والمواعيد <span dir="ltr" style="color: #6B7684; font-weight: 400; font-family: 'IBM Plex Sans', sans-serif;">· Chips &amp; slots</span></h2>
+<div style="display: flex; flex-wrap: wrap; gap: 8px;">
+<button type="button" style="height: 40px; padding: 0 16px; border-radius: 999px; background: #E8F5EF; color: #0A4A35; box-shadow: inset 0 0 0 1.5px #127A56; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px;"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>مفتوح الآن</button>
+<button type="button" style="height: 40px; padding: 0 16px; border-radius: 999px; background: #E8F5EF; color: #0A4A35; box-shadow: inset 0 0 0 1.5px #127A56; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px;"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>قص شعر</button>
+<button type="button" style="height: 40px; padding: 0 16px; border-radius: 999px; background: #F4F6F8; color: #3C4550; font-size: 13px; font-weight: 500;">لحية</button>
+<button type="button" style="height: 40px; padding: 0 16px; border-radius: 999px; background: #F4F6F8; color: #3C4550; font-size: 13px; font-weight: 500;">أطفال</button>
+<button type="button" style="height: 40px; padding: 0 16px; border-radius: 999px; background: #F4F6F8; color: #3C4550; font-size: 13px; font-weight: 500;">الأعلى تقييمًا</button>
+</div>
+<div style="font-size: 13px; line-height: 18px; font-weight: 500; color: #6B7684;">مساءً وبعد منتصف الليل</div>
+<div class="num" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;">
+<button type="button" disabled="disabled" style="height: 44px; border-radius: 999px; background: #F4F6F8; color: #8E99A6; font-size: 14px; font-weight: 600; text-decoration: line-through; cursor: default;">4:00 م</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: #127A56; color: #FFFFFF; font-size: 14px; font-weight: 600; box-shadow: 0 6px 16px rgba(18,122,86,.28);">4:30 م</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: #FFFFFF; color: #13203F; font-size: 14px; font-weight: 600; box-shadow: inset 0 0 0 1.5px #D7DDE3;">5:15 م</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: #FFFFFF; color: #13203F; font-size: 14px; font-weight: 600; box-shadow: inset 0 0 0 1.5px #D7DDE3;">6:00 م</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: #FFFFFF; color: #13203F; font-size: 14px; font-weight: 600; box-shadow: inset 0 0 0 1.5px #D7DDE3;">6:45 م</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: #FFFFFF; color: #13203F; font-size: 14px; font-weight: 600; box-shadow: inset 0 0 0 1.5px #D7DDE3;">7:30 م</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: #FFFFFF; color: #13203F; font-size: 14px; font-weight: 600; box-shadow: inset 0 0 0 1.5px #D7DDE3;">12:15 ص</button>
+<button type="button" style="height: 44px; border-radius: 999px; background: #FFFFFF; color: #13203F; font-size: 14px; font-weight: 600; box-shadow: inset 0 0 0 1.5px #D7DDE3;">1:00 ص</button>
+</div>
+</div>
+
+<div style="background: #FFFFFF; border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(19,32,63,.06), 0 0 0 1px #E9EDF1; display: flex; flex-direction: column; gap: 20px;">
+<h2 style="margin: 0; font-size: 17px; line-height: 26px; font-weight: 600;">الحالات والحلاقين <span dir="ltr" style="color: #6B7684; font-weight: 400; font-family: 'IBM Plex Sans', sans-serif;">· Status &amp; barbers</span></h2>
+<div style="display: flex; flex-wrap: wrap; gap: 8px;">
+<span style="height: 28px; padding: 0 12px; border-radius: 8px; background: #E8F5EF; color: #0A4A35; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #127A56;"></span>مؤكد</span>
+<span style="height: 28px; padding: 0 12px; border-radius: 8px; background: #FFF4E0; color: #A15F00; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #A15F00;"></span>بانتظار التأكيد</span>
+<span style="height: 28px; padding: 0 12px; border-radius: 8px; background: #EEF1F8; color: #1C2A52; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #394D82;"></span>مكتمل</span>
+<span style="height: 28px; padding: 0 12px; border-radius: 8px; background: #F4F6F8; color: #525C69; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #8E99A6;"></span>ملغي</span>
+<span style="height: 28px; padding: 0 12px; border-radius: 8px; background: #FDECEC; color: #C62F2F; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #C62F2F;"></span>لم يحضر</span>
+</div>
+<div style="display: flex; gap: 20px;">
+<button type="button" style="background: transparent; display: flex; flex-direction: column; align-items: center; gap: 8px; color: #13203F; font-size: 13px; font-weight: 600;"><span style="width: 56px; height: 56px; border-radius: 999px; background: #E8F5EF; color: #127A56; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 4px #127A56;"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 24px; height: 24px;"><path d="M4 7h3c2.2 0 3.3 1.2 4.5 3.5l1 2c1.2 2.3 2.3 3.5 4.5 3.5H20M4 17h3c1.1 0 1.9-.3 2.6-.9M13.9 7.9c.7-.6 1.5-.9 2.6-.9H20M17.5 4.5L20 7l-2.5 2.5M17.5 13.5L20 16l-2.5 2.5"></path></svg></span>أي حلاق</button>
+<button type="button" style="background: transparent; display: flex; flex-direction: column; align-items: center; gap: 8px; color: #13203F; font-size: 13px; font-weight: 500;"><span style="position: relative; width: 56px; height: 56px; border-radius: 999px; background: #EEF1F8; color: #13203F; font-size: 20px; font-weight: 600; display: flex; align-items: center; justify-content: center;">أ<span style="position: absolute; bottom: 2px; left: 2px; width: 12px; height: 12px; border-radius: 999px; background: #127A56; box-shadow: 0 0 0 2px #FFFFFF;"></span></span>أحمد</button>
+<button type="button" style="background: transparent; display: flex; flex-direction: column; align-items: center; gap: 8px; color: #13203F; font-size: 13px; font-weight: 500;"><span style="width: 56px; height: 56px; border-radius: 999px; background: #EEF1F8; color: #13203F; font-size: 20px; font-weight: 600; display: flex; align-items: center; justify-content: center;">خ</span>خالد</button>
+<button type="button" style="background: transparent; display: flex; flex-direction: column; align-items: center; gap: 8px; color: #13203F; font-size: 13px; font-weight: 500;"><span style="width: 56px; height: 56px; border-radius: 999px; background: #EEF1F8; color: #13203F; font-size: 20px; font-weight: 600; display: flex; align-items: center; justify-content: center;">س</span>سالم</button>
+</div>
+</div>
+
+<div style="background: #FFFFFF; border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(19,32,63,.06), 0 0 0 1px #E9EDF1; display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0 0 10px; font-size: 17px; line-height: 26px; font-weight: 600;">الدخول برقم الجوال <span dir="ltr" style="color: #6B7684; font-weight: 400; font-family: 'IBM Plex Sans', sans-serif;">· Phone &amp; OTP</span></h2>
+<label for="phone" style="font-size: 13px; line-height: 18px; font-weight: 500; color: #3C4550;">رقم الجوال</label>
+<div dir="ltr" style="height: 56px; box-sizing: border-box; border-radius: 12px; background: #F4F6F8; display: flex; align-items: center; gap: 12px; padding: 0 16px; box-shadow: inset 0 0 0 1.5px #127A56;">
+<span style="font-size: 16px; font-weight: 600; color: #13203F; padding-right: 12px; border-right: 1px solid #D7DDE3;">+966</span>
+<input id="phone" type="tel" placeholder="5X XXX XXXX" value="55 123 4567" style="border: 0; background: transparent; font-size: 16px; flex-grow: 1; min-width: 0; outline: none; color: #13203F; font-family: 'IBM Plex Sans', sans-serif;">
+</div>
+<div style="height: 10px;"></div>
+<span style="font-size: 13px; line-height: 18px; font-weight: 500; color: #3C4550;">رمز التحقق</span>
+<div dir="ltr" style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px;">
+<input aria-label="الرقم 1" value="4" style="height: 56px; box-sizing: border-box; border: 0; border-radius: 12px; background: #F4F6F8; text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 22px; color: #13203F; min-width: 0;">
+<input aria-label="الرقم 2" value="8" style="height: 56px; box-sizing: border-box; border: 0; border-radius: 12px; background: #F4F6F8; text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 22px; color: #13203F; min-width: 0;">
+<input aria-label="الرقم 3" value="2" style="height: 56px; box-sizing: border-box; border: 0; border-radius: 12px; background: #F4F6F8; text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 22px; color: #13203F; min-width: 0;">
+<input aria-label="الرقم 4" value="1" style="height: 56px; box-sizing: border-box; border: 0; border-radius: 12px; background: #F4F6F8; text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 22px; color: #13203F; min-width: 0;">
+<input aria-label="الرقم 5" value="" style="height: 56px; box-sizing: border-box; border: 0; border-radius: 12px; background: #FFFFFF; box-shadow: inset 0 0 0 2px #127A56; text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 22px; color: #13203F; min-width: 0;">
+<input aria-label="الرقم 6" value="" style="height: 56px; box-sizing: border-box; border: 0; border-radius: 12px; background: #F4F6F8; text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 22px; color: #13203F; min-width: 0;">
+</div>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; color: #6B7684;"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px;"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>إعادة الإرسال بعد <span class="num" dir="ltr">0:42</span></div>
+</div>
+
+<div style="background: #FFFFFF; border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(19,32,63,.06), 0 0 0 1px #E9EDF1; display: flex; flex-direction: column; gap: 16px;">
+<h2 style="margin: 0; font-size: 17px; line-height: 26px; font-weight: 600;">عمود الحلاق <span dir="ltr" style="color: #6B7684; font-weight: 400; font-family: 'IBM Plex Sans', sans-serif;">· Signature stripe</span></h2>
+<p style="margin: 0; font-size: 14px; line-height: 22px; color: #525C69;">عمود الحلاق الكلاسيكي بألواننا: أخضر وأبيض وكحلي بزاوية 45°. يظهر باعتدال في شاشة البداية، والتحميل، وتذكرة الحجز.</p>
+<div style="height: 20px; border-radius: 999px; background: repeating-linear-gradient(-45deg, #127A56 0 10px, #FFFFFF 10px 18px, #13203F 18px 28px, #FFFFFF 28px 36px); box-shadow: 0 0 0 1px #D7DDE3;"></div>
+<div style="height: 6px; border-radius: 999px; background: #E9EDF1; display: flex;">
+<div style="width: 62%; border-radius: 999px; background: repeating-linear-gradient(-45deg, #127A56 0 6px, #6FC19C 6px 12px);"></div>
+</div>
+<div style="border-radius: 16px; background: #FFFFFF; box-shadow: 0 8px 24px rgba(19,32,63,.10), 0 0 0 1px #E9EDF1; overflow: hidden; display: flex; flex-direction: column;">
+<div style="padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;">
+<span style="font-size: 14px; font-weight: 600;">تذكرة الحجز</span>
+<span dir="ltr" style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #13203F;">BK-7Q4M-2X</span>
+</div>
+<div style="height: 8px; background: repeating-linear-gradient(-45deg, #127A56 0 8px, #FFFFFF 8px 14px, #13203F 14px 22px, #FFFFFF 22px 28px);"></div>
+</div>
+</div>
+
+<div style="background: #FFFFFF; border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(19,32,63,.06), 0 0 0 1px #E9EDF1; display: flex; flex-direction: column; gap: 20px;">
+<h2 style="margin: 0; font-size: 17px; line-height: 26px; font-weight: 600;">الزوايا والظلال <span dir="ltr" style="color: #6B7684; font-weight: 400; font-family: 'IBM Plex Sans', sans-serif;">· Radius &amp; elevation</span></h2>
+<div style="display: flex; gap: 12px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px;"><div style="width: 56px; height: 56px; border-radius: 8px; background: #E8F5EF; box-shadow: inset 0 0 0 1.5px #9FD6BC;"></div><span class="num" style="font-size: 12px; color: #6B7684;">8</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px;"><div style="width: 56px; height: 56px; border-radius: 12px; background: #E8F5EF; box-shadow: inset 0 0 0 1.5px #9FD6BC;"></div><span class="num" style="font-size: 12px; color: #6B7684;">12</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px;"><div style="width: 56px; height: 56px; border-radius: 16px; background: #E8F5EF; box-shadow: inset 0 0 0 1.5px #9FD6BC;"></div><span class="num" style="font-size: 12px; color: #6B7684;">16</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px;"><div style="width: 56px; height: 56px; border-radius: 24px; background: #E8F5EF; box-shadow: inset 0 0 0 1.5px #9FD6BC;"></div><span class="num" style="font-size: 12px; color: #6B7684;">24</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px;"><div style="width: 56px; height: 56px; border-radius: 999px; background: #E8F5EF; box-shadow: inset 0 0 0 1.5px #9FD6BC;"></div><span style="font-size: 12px; color: #6B7684;">كامل</span></div>
+</div>
+<div style="border-radius: 16px; background: #F4F6F8; padding: 16px; display: flex; gap: 16px;">
+<div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;"><div style="width: 100%; height: 56px; border-radius: 16px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(19,32,63,.06);"></div><span dir="ltr" style="font-size: 12px; color: #6B7684; font-family: 'IBM Plex Mono', monospace;">e1</span></div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;"><div style="width: 100%; height: 56px; border-radius: 16px; background: #FFFFFF; box-shadow: 0 8px 24px rgba(19,32,63,.08);"></div><span dir="ltr" style="font-size: 12px; color: #6B7684; font-family: 'IBM Plex Mono', monospace;">e2</span></div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;"><div style="width: 100%; height: 56px; border-radius: 16px; background: #FFFFFF; box-shadow: 0 16px 40px rgba(19,32,63,.16);"></div><span dir="ltr" style="font-size: 12px; color: #6B7684; font-family: 'IBM Plex Mono', monospace;">e3</span></div>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1020}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+# Node.js → Go: the mindset shift
+
+A living guide written while building this project. Each milestone adds the idioms it introduced.
+
+## 1. The big shifts
+
+| In Node.js you… | In Go you… | Why it matters here |
+|---|---|---|
+| `throw` / `try…catch` | return `error` as the last value and handle it right there | Every failure path in booking is visible in the code — no surprise crash in the middle of a transaction |
+| Write classes with `this` | Write `struct`s with methods; composition, not inheritance | Aggregates are structs with unexported fields + behaviour methods |
+| `implements Interface` explicitly | Satisfy interfaces **implicitly** (just have the methods) | Define tiny interfaces in the consumer (`app/ports.go`); adapters satisfy them without knowing |
+| Rely on the event loop, `async/await` | Write blocking code; each HTTP request already runs in its own goroutine | Straight-line code, no promise chains; concurrency only where you ask for it |
+| `Promise.all` | `errgroup.Group` | Loading windows for several barbers in parallel |
+| `AbortController` / timeouts per library | `context.Context` passed everywhere | Request cancelled → DB query cancelled automatically |
+| DI containers / decorators (Nest) | Plain constructors wired by hand in `main` | You can read `main.go` and see the whole app |
+| `export` / `private` keywords | Capitalised names are exported, lowercase are package-private | Domain fields are lowercase → only methods can change state |
+| One file = one module | One **directory** = one package | Folder structure *is* the architecture |
+| `npm install` a package per tiny need | Standard library first (`net/http`, `log/slog`, `crypto`, `time`, `testing`) | Fewer dependencies to trust and update |
+| `undefined` / `null` everywhere | Zero values (`""`, `0`, `nil`, empty struct) — design types so zero is useful or invalid-by-construction | Constructors return `(T, error)` so invalid values can't exist |
+| Runtime type checks (zod) | The compiler checks types; validation is for business rules | Value objects: `NewPhoneNumber`, `NewMoney` |
+| Jest + mocks everywhere | `go test`, table-driven tests, small hand-written fakes | Domain tests need no mocks at all |
+| Prisma generates a client from a schema | sqlc generates Go from **your SQL** | You keep full control of queries (PostGIS, exclusion constraints) |
+
+## 2. Idioms you will meet first (M1–M2)
+
+```go
+// Errors: wrap with context, check with errors.Is / errors.As
+if err := repo.Save(ctx, user); err != nil {
+    return fmt.Errorf("register user: %w", err)
+}
+if errors.Is(err, domain.ErrOTPExpired) { /* map to 400 otp_expired */ }
+
+// Constructors enforce invariants; fields stay unexported
+type PhoneNumber struct{ e164 string }
+func NewPhoneNumber(raw string) (PhoneNumber, error) { /* parse, validate, normalise */ }
+func (p PhoneNumber) String() string { return p.e164 }
+
+// Interfaces are small and live where they're used
+type OTPSender interface {
+    SendOTP(ctx context.Context, to PhoneNumber, code string) error
+}
+
+// Table-driven tests
+func TestNewPhoneNumber(t *testing.T) {
+    tests := []struct {
+        name    string
+        in      string
+        wantErr bool
+    }{
+        {"valid saudi mobile", "+966512345678", false},
+        {"local format", "0512345678", false},
+        {"landline", "+966112345678", true},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            _, err := NewPhoneNumber(tt.in)
+            if (err != nil) != tt.wantErr {
+                t.Fatalf("NewPhoneNumber(%q) error = %v, wantErr %v", tt.in, err, tt.wantErr)
+            }
+        })
+    }
+}
+```
+
+## 3. Pointers vs values (the question everyone asks)
+
+- Use **values** for small immutable things: value objects (`Money`, `PhoneNumber`, `Interval`).
+- Use **pointers** for aggregates you mutate (`*Appointment`) and for large structs.
+- Be consistent per type: if one method needs a pointer receiver, give all methods pointer receivers.
+
+## 4. Things that will feel strange (and are fine)
+
+- `if err != nil` everywhere — it's the point: every failure is handled where it happens.
+- No generics-heavy abstractions — use generics for small utilities, not to rebuild inheritance.
+- No "repository base class" — a bit of repetition beats a clever abstraction.
+- `gofmt` decides formatting — no style debates.
+
+## 5. Reading list
+
+- *Effective Go* and *Go Code Review Comments* (go.dev) — the idioms reviewers expect.
+- *Go with the Domain* (Three Dots Labs) + the **Wild Workouts** example repo — DDD in Go.
+- *100 Go Mistakes and How to Avoid Them* — Teiva Harsanyi.
+- *Learn Go with Tests* — Chris James.
+- sqlc, pgx and River documentation — the libraries we use daily.
