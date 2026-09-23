@@ -73,7 +73,7 @@ flowchart LR
 
 | Workflow | Trigger | Jobs | Arrives in |
 |---|---|---|---|
-| `ci.yml` | pull request, push to `main` | `lint` (gofumpt, golangci-lint incl. module-boundary + gosec rules, `go vet`) · `generated` (sqlc + oapi-codegen regenerate → `git diff --exit-code`, OpenAPI lint) · `test` (`go test -race -cover` against a PostGIS service container; migrations applied from scratch) · `build` (`go build`, Docker build without push) | M1 |
+| `ci.yml` | pull request, push to `main` | `lint` (`go mod tidy -diff`, golangci-lint incl. gofumpt/goimports, module-boundary + gosec rules, `go vet`) · `generated` (from M2: sqlc + oapi-codegen regenerate → `git diff --exit-code`, OpenAPI lint) · `test` (`go test -race -cover` against a PostGIS service container; migrations applied from scratch) · `build` (static `go build`; Docker build without push from M1.5) | M1 |
 | `pr-title.yml` | pull request | Conventional Commit title check | M1 |
 | `dependabot.yml` (config) | weekly | Go modules, GitHub Actions, Docker base image | M1 |
 | `security.yml` | pull request, weekly | `govulncheck`, `gitleaks` (secrets), dependency review (new vulnerable/incompatible-licence deps), **CodeQL** (Go SAST) | M1.5 |

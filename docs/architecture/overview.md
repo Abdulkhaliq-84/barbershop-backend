@@ -57,6 +57,7 @@ barbershop-backend/
 ├── internal/
 │   ├── platform/                 # technical plumbing, zero business rules
 │   │   ├── config/               # env → typed config, validated at startup
+│   │   ├── logging/              # slog setup (JSON in production, text locally)
 │   │   ├── database/             # pgx pool, tx helpers
 │   │   ├── httpx/                # router, middleware (request id, logging, recover, auth, rate limit), problem+json
 │   │   ├── auth/                 # JWT verification, Principal in context
@@ -75,9 +76,10 @@ barbershop-backend/
 │   ├── billing/
 │   ├── notification/
 │   └── media/
-├── migrations/                   # goose SQL migrations (forward-only once merged)
+├── migrations/                   # goose SQL migrations, embedded into the binary (forward-only once merged)
 ├── deploy/
-│   └── docker-compose.yml        # PostGIS (+ app later)
+│   └── postgres/init/            # first-run SQL for the local database (creates the test DB)
+├── compose.yaml                  # local PostGIS (`make db-up`)
 ├── docs/                         # you are here
 ├── sqlc.yaml
 ├── Makefile

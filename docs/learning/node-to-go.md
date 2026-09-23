@@ -62,6 +62,31 @@ func TestNewPhoneNumber(t *testing.T) {
 }
 ```
 
+## 2b. What M1 introduced (read the code next to this)
+
+| Idiom | Where | Node.js equivalent |
+|---|---|---|
+| `main` stays tiny; `run(ctx, args, environ, stdout) error` does the work | `cmd/server/main.go` | `main()` wrapped in `try/catch` + `process.exit(1)` — but testable |
+| `signal.NotifyContext` → a context cancelled on SIGTERM | `cmd/server/main.go` | `process.on('SIGTERM', …)` |
+| Graceful shutdown: `srv.Shutdown(ctx)` with a deadline | `internal/platform/httpx/server.go` | `server.close()` + a timeout |
+| A goroutine + buffered channel to run the server, `select` to wait | `httpx/server.go` | a Promise you `await` alongside a signal |
+| Middleware = `func(http.Handler) http.Handler` | `httpx/middleware.go` | Express `(req, res, next)` |
+| Values in `context.Context` with an unexported key type | `httpx/middleware.go` (request ID) | `res.locals` / AsyncLocalStorage |
+| `defer` + `recover()` turns a panic into a 500 | `httpx/middleware.go` | an Express error handler |
+| Interface declared where it's used, satisfied implicitly (`Pinger` ← `*pgxpool.Pool`) | `httpx/health.go` | duck typing — but checked by the compiler |
+| Hand-written fakes instead of a mocking library | `httpx/httpx_test.go` (`fakePinger`) | `jest.fn()` |
+| Typed errors: `errors.As(err, &target)` | `config/config.go` (`withEnvNames`) | `err instanceof ParseError` |
+| `errors.Join` to report several problems at once | `config/config.go` | `AggregateError` |
+| Struct tags drive parsing (`env:"HTTP_ADDR" envDefault:":8080"`) | `config/config.go` | decorators / zod schemas |
+| `//go:embed *.sql` bakes files into the binary | `migrations/migrations.go` | bundling assets with a build step |
+| Generics for small helpers: `decode[T any]` | `httpx/httpx_test.go` | TypeScript generics |
+| `httptest.NewRecorder` + `router.ServeHTTP` | `httpx/httpx_test.go` | supertest |
+| `t.Skip` when an integration dependency is missing | `database/database_test.go` | `describe.skip` / `test.skipIf` |
+| `t.Parallel()` + `-race` | all tests | jest workers — plus a data-race detector Node doesn't have |
+
+Try this: run `make test-all`, then break something on purpose (e.g. remove `defer cancel()` in
+`health.go`) and see which linter or test catches it.
+
 ## 3. Pointers vs values (the question everyone asks)
 
 - Use **values** for small immutable things: value objects (`Money`, `PhoneNumber`, `Interval`).

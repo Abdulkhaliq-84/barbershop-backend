@@ -1,11 +1,31 @@
 # barbershop-backend
 
+[![CI](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/ci.yml)
+
 Multi-tenant **barbershop booking SaaS** backend in **Go** — built with Domain-Driven Design as a
 modular monolith, PostgreSQL + PostGIS for map search, and phone-OTP authentication.
 The mobile app (Flutter, Arabic-first) will consume this API.
 
-> **Status: M0 — Planning.** The architecture, domain model and roadmap are in [`docs/`](docs/PLAN.md).
-> Implementation starts with M1 (walking skeleton).
+> **Status: M1 — walking skeleton + CI.** Config, structured logging, HTTP server with graceful shutdown,
+> health checks, embedded migrations and CI are in place. Business modules start in M2.
+> The architecture, domain model and roadmap are in [`docs/`](docs/PLAN.md).
+
+## Getting started
+
+Requires **Go 1.27+** and **Docker**.
+
+```bash
+make tools     # install pinned golangci-lint and air
+make db-up     # PostgreSQL 18 + PostGIS in Docker
+make migrate   # apply migrations
+make dev       # API on http://localhost:8080 with live reload
+
+curl localhost:8080/healthz   # {"status":"ok"}
+curl localhost:8080/readyz    # {"status":"ok","checks":{"database":"ok"}}
+
+make check     # everything CI checks — run before pushing
+make           # list all commands
+```
 
 ## What it does
 
@@ -66,7 +86,7 @@ GitHub Actions · GHCR · release-please · Trivy · CodeQL
 ## Roadmap
 
 - [x] M0 — Planning: domain model, architecture, ADRs, design direction
-- [ ] M1 — Walking skeleton + CI: server, config, Postgres/PostGIS, migrations, lint/test/build on every PR
+- [x] M1 — Walking skeleton + CI: server, config, Postgres/PostGIS, migrations, lint/test/build on every PR
 - [ ] M1.5 — CD & releases: scanned, attested Docker images on GHCR, SemVer releases
 - [ ] M2 — Shared kernel + IAM: phone OTP, JWT, refresh rotation
 - [ ] M3 — Business onboarding: verification, branches, staff, plans

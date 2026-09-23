@@ -11,8 +11,8 @@ schedules. **Customers** find branches nearby or by city and book a specific bar
 one or more services, and pay at the shop. Businesses pay a **subscription plan**. The mobile app is
 **Flutter** (separate repo, later) and consumes this API; owners/barbers use a "Business mode" in the same app.
 
-**Status**: planning is done (M0); implementation starts at **M1**. The current milestone is the first
-unchecked item in the README roadmap.
+**Status**: the current milestone is the first unchecked item in the README roadmap. M1 delivered
+the walking skeleton (config, logging, HTTP server, health checks, migrations) and CI.
 
 ## 2. Where things are
 
@@ -22,7 +22,7 @@ unchecked item in the README roadmap.
 | Layers, folder layout, module rules, Go conventions, stack | `docs/architecture/overview.md` |
 | Bounded contexts, aggregates, invariants, events, availability algorithm, authorization | `docs/architecture/domain-model.md` |
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
-| API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M1/M2) |
+| API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
 | Why a decision was made | `docs/adr/` (0001–0011) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
@@ -102,7 +102,7 @@ under `/v1/businesses/{business_id}/…`, `Idempotency-Key` on creates, `version
 - Workflows: actions pinned by commit SHA, minimal `permissions:`, no secrets in the repo or images.
 - **Build once, promote**: releases re-tag the image built for that commit; never rebuild or overwrite `:sha-*` / `:vX.Y.Z`.
 - Migrations are forward-only once merged and backward compatible (expand → migrate → contract).
-- Run `make check` before pushing (commands below arrive in M1).
+- Run `make check` before pushing (see §11).
 
 ## 10. Design system — quick reference (full: `.claude/skills/design-system/SKILL.md`)
 
@@ -117,7 +117,20 @@ under `/v1/businesses/{business_id}/…`, `Idempotency-Key` on creates, `version
 
 ## 11. Commands
 
-To be added in M1 (`make dev`, `make check`, `make test`, `make lint`, `make generate`, `make migrate-up`).
+Go 1.27+ and Docker are required; `make tools` installs the pinned golangci-lint and air.
+
+| Command | Does |
+|---|---|
+| `make db-up` / `make db-down` / `make db-reset` | Start / stop / wipe local PostGIS (`compose.yaml`) |
+| `make migrate` | Apply migrations (`server migrate`) |
+| `make migration name=<module>_<what>` | Create the next numbered goose file in `migrations/` |
+| `make dev` / `make run` | API with live reload / once, on `:8080` |
+| `make fmt` · `make lint` | Format · lint (incl. depguard architecture rules) |
+| `make test` · `make test-all` | Unit tests · all tests incl. database (`TEST_DATABASE_URL`) |
+| `make check` | **What CI runs** — tidy, lint, all tests, build. Run before every push. |
+
+Binary roles: `server api` (default), `server migrate`; `worker` arrives in M3. Config is env vars only — see `.env.example`.
+Database tests skip unless `TEST_DATABASE_URL` is set; CI always sets it.
 
 ## 12. Don'ts
 
