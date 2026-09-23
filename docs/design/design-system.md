@@ -3,6 +3,12 @@
 Arabic-first, RTL-native, built for Flutter (Material 3 under the hood, customised so it doesn't look
 like stock Material). Designed in Figma in parallel with the backend; screens drive the API contract.
 
+| File | Purpose |
+|---|---|
+| [`tokens.json`](tokens.json) | Machine-readable tokens (colours, themes A/B/dark, type, spacing, radius, shadow, motion, motif) → Figma variables and Flutter theme |
+| [`mockups/`](mockups/) | Source of the style canvas: foundations, components and four screens with exact values |
+| `.claude/skills/design-system/SKILL.md` | Condensed rules AI sessions load for any UI work |
+
 ## 1. Direction
 
 **Modern heritage barbershop**: the trust and craft of a classic barbershop, expressed with a clean,
