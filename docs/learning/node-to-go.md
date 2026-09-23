@@ -102,6 +102,22 @@ Try this: run `make test-all`, then break something on purpose (e.g. remove `def
 Try this: after the first release, run `gh attestation verify` on the image and read which workflow and
 commit produced it — that's supply-chain provenance you can check yourself.
 
+## 2d. What M2 introduces — part 1: the shared kernel
+
+| Idiom | Where | Node.js equivalent |
+|---|---|---|
+| **Value objects**: unexported fields + validating constructor = a value that is valid by construction | `internal/shared/*.go` | a class with a private constructor + zod parse |
+| Sentinel errors checked with `errors.Is` | `ErrInvalidPhoneNumber`, `ErrCurrencyMismatch` … | `err.code === 'INVALID_PHONE'` |
+| Generics with a **phantom type**: `ID[UserTag]` and `ID[BranchTag]` can't be mixed up | `internal/shared/id.go` | TypeScript "branded" types |
+| `slog.LogValuer`: a type decides how it appears in logs (phone numbers log masked) | `internal/shared/phone.go` | a custom `toJSON()` / pino redaction |
+| Integers for money, with overflow checks | `internal/shared/money.go` | `dinero.js` / integer cents |
+| Runes vs bytes: `for _, r := range s` walks Unicode characters (Arabic digits) | `NewPhoneNumber` | `for (const ch of str)` |
+| **Fuzzing** built into `go test` | `FuzzNewPhoneNumber`, `FuzzIntervalOverlaps` | fast-check (a library in JS) |
+| **Example tests**: documentation whose output is verified | `internal/shared/example_test.go` | doctests (not built into Node) |
+| A `Clock` interface so tests control time | `internal/platform/clock` | `jest.useFakeTimers()` |
+
+Try this: `go test ./internal/shared -fuzz=FuzzNewPhoneNumber -fuzztime=1m`, then `go doc ./internal/shared PhoneNumber`.
+
 ## 3. Pointers vs values (the question everyone asks)
 
 - Use **values** for small immutable things: value objects (`Money`, `PhoneNumber`, `Interval`).

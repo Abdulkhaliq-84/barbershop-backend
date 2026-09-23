@@ -38,6 +38,14 @@ linters:
               desc: the domain must not know about HTTP routing
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/platform
               desc: the domain may import only the standard library and internal/shared
+        # The shared kernel stays tiny and dependency-free (internal/shared/doc.go).
+        shared-kernel-is-stable:
+          files:
+            - "**/internal/shared/**"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+            - github.com/Abdulkhaliq-84/barbershop-backend/internal/shared
         # Platform plumbing must never depend on business modules.
         platform-has-no-business:
           files:
