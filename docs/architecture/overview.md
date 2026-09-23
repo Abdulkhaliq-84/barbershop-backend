@@ -108,7 +108,8 @@ internal/booking/
 │   ├── ports.go                  # SchedulingReader, CatalogReader, BranchReader, Clock …
 │   └── policy.go                 # who may do what
 ├── adapters/
-│   ├── http/                     # handlers + DTO ↔ command mapping
+│   ├── httpapi/                  # implements the generated strict-server interface; errors → problem+json
+│   │                             # (not `http/`: that name would shadow net/http in every file)
 │   ├── postgres/
 │   │   ├── queries.sql           # sqlc input
 │   │   ├── sqlcgen/              # generated — never edited by hand
@@ -216,7 +217,7 @@ func (a *Appointment) Cancel(by Actor, now time.Time, p CancellationPolicy) erro
 | Config | [caarlos0/env](https://github.com/caarlos0/env) | dotenv + zod |
 | Logging | `log/slog` (stdlib) | pino / winston |
 | Push | Firebase Admin SDK for Go (FCM) | firebase-admin |
-| Tests | `testing` + [go-cmp](https://github.com/google/go-cmp) + [testcontainers-go](https://golang.testcontainers.org) | jest + supertest |
+| Tests | `testing` + [go-cmp](https://github.com/google/go-cmp), a throwaway database per test (`dbtest`, [ADR-0012](../adr/0012-test-database-per-test.md)) | jest + supertest |
 | Lint | [golangci-lint](https://golangci-lint.run) (+ depguard, gosec, revive, errcheck) | eslint |
 | Live reload | [air](https://github.com/air-verse/air) | nodemon |
 | Local infra | Docker Compose with `postgis/postgis` | docker compose |
@@ -228,8 +229,8 @@ func (a *Appointment) Cancel(by Actor, now time.Time, p CancellationPolicy) erro
 |---|---|---|---|
 | Domain unit | aggregates, value objects, availability, state machines | `testing`, table-driven, **fuzzing** | most tests |
 | Application | use cases with in-memory fakes of ports | `testing`, fake clock | many |
-| Integration | repositories, SQL, constraints (e.g. the exclusion constraint really rejects overlaps) | testcontainers (PostGIS) | some |
-| End-to-end | critical HTTP flows: login → search → book → cancel | real server + DB | few |
+| Integration | repositories, SQL, constraints (e.g. the exclusion constraint really rejects overlaps) | `dbtest.NewDatabase(t)` on PostGIS | some |
+| End-to-end | critical HTTP flows: login → search → book → cancel | `httptest` server + real router + `dbtest` DB | few |
 
 `go test -race ./...` in CI. Concurrency test for booking: N goroutines book the same slot → exactly
 one succeeds.

@@ -25,7 +25,7 @@ delivery pipeline (Docker image, security scans, GHCR publishing, release-please
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0011) |
+| Why a decision was made | `docs/adr/` (0001–0012) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
@@ -88,7 +88,7 @@ The owner is moving from **Node.js to Go** and wants to learn, not just receive 
 - Money = `int64` halalas + currency, never floats. IDs = UUIDv7, typed per aggregate.
 - `log/slog` structured logs; never log OTPs, tokens or full phone numbers.
 - Short lowercase package names by responsibility; no `utils`/`common`/`helpers`.
-- Tests: table-driven, fakes over mocks, testcontainers (PostGIS) for repositories, `-race`; fuzz the availability calculator.
+- Tests: table-driven, fakes over mocks, a throwaway database per test (`dbtest.NewDatabase`) for repositories and HTTP flows, `-race`; fuzz the availability calculator.
 
 ## 8. API rules
 
@@ -126,14 +126,16 @@ Go 1.27+ and Docker are required; `make tools` installs the pinned golangci-lint
 | `make migrate` | Apply migrations (`server migrate`) |
 | `make migration name=<module>_<what>` | Create the next numbered goose file in `migrations/` |
 | `make dev` / `make run` | API with live reload / once, on `:8080` |
+| `make generate` | Regenerate `internal/apigen` (oapi-codegen, from `api/openapi.yaml`) and `*/sqlcgen` (sqlc, from `migrations/` + `queries.sql`); commit the output — CI fails on drift |
 | `make fmt` · `make lint` | Format · lint (incl. depguard architecture rules) |
 | `make test` · `make test-all` | Unit tests · all tests incl. database (`TEST_DATABASE_URL`) |
-| `make check` | **What CI runs** — tidy, lint, all tests, build. Run before every push. |
+| `make check` | **What CI runs** — generate, tidy, lint, all tests, build. Run before every push. |
 | `make docker-build` · `make app-up BARBERSHOP_IMAGE=…` · `make app-down` | Build the production image · run an image (local or a GHCR release) with Compose |
 
 Binary roles: `server api` (default), `server migrate`; `worker` arrives in M3. Config is env vars only — see `.env.example`.
 `main.version` is stamped at build time (`-ldflags -X`); releases are cut by merging release-please's Release PR — never tag by hand.
-Database tests skip unless `TEST_DATABASE_URL` is set; CI always sets it.
+Database tests skip unless `TEST_DATABASE_URL` is set (in CI a missing URL fails); each test gets its own database (ADR-0012).
+Login locally: `make run`, `POST /v1/auth/otp/request`, read the code from the API log (`SMS_PROVIDER=console`), `POST /v1/auth/otp/verify`.
 
 ## 12. Don'ts
 

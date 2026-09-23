@@ -118,6 +118,25 @@ commit produced it — that's supply-chain provenance you can check yourself.
 
 Try this: `go test ./internal/shared -fuzz=FuzzNewPhoneNumber -fuzztime=1m`, then `go doc ./internal/shared PhoneNumber`.
 
+## 2e. What M2 introduces — part 2: phone OTP login
+
+| Idiom | Where | Node.js equivalent |
+|---|---|---|
+| **Contract first**: write `api/openapi.yaml`, generate types + a server interface, implement it; the compiler says what's missing | `api/`, `internal/apigen`, `adapters/httpapi` | tsoa / zod-openapi, but generated *from* the spec |
+| Request validation middleware driven by the same spec | `httpx.MountAPI` (kin-openapi) | express-openapi-validator |
+| **sqlc**: write SQL, get typed Go functions — no ORM, no query builder | `adapters/postgres/queries.sql` → `sqlcgen/` | Prisma's typed client, but from your SQL |
+| Hexagonal **ports**: the use case needs "something that sends an SMS", not Twilio | `app/ports.go`, `adapters/sms` | dependency injection with interfaces (NestJS providers) |
+| **Update-function pattern**: `repo.UpdateLatest(ctx, phone, func(c *OTPChallenge) error {…})` — lock, change, save in one transaction | `domain/repository.go`, `adapters/postgres` | `prisma.$transaction(async tx => …)` |
+| `SELECT … FOR UPDATE` against parallel guesses — and a test that fails without it | `repository_test.go` | the same SQL; Node devs often skip the test |
+| `crypto/subtle.ConstantTimeCompare`, HMAC-SHA256, `crypto/rand` | `domain/otp.go`, `adapters/otpcode` | `crypto.timingSafeEqual`, `createHmac`, `randomInt` |
+| Error types carrying data: `*RetryLaterError` + `errors.As` → `Retry-After` header | `domain/errors.go`, `httpapi/handlers.go` | `class RetryLaterError extends Error { after }` + `instanceof` |
+| In-memory **fakes** of ports: use-case tests in microseconds | `app/app_test.go` | hand-written fakes instead of `jest.mock` |
+| A throwaway database per test; `httptest.Server` for end-to-end | `dbtest`, `internal/iam/iam_test.go` | supertest + a test DB per worker |
+
+Try this: `make run`, then
+`curl -s localhost:8080/v1/auth/otp/request -H 'content-type: application/json' -d '{"phone":"0551234567"}'`,
+read the code from the log, and verify it with `/v1/auth/otp/verify`. Then guess wrong six times and read the errors.
+
 ## 3. Pointers vs values (the question everyone asks)
 
 - Use **values** for small immutable things: value objects (`Money`, `PhoneNumber`, `Interval`).

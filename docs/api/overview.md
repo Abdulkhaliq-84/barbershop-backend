@@ -36,8 +36,8 @@ Error example:
 ```
 
 Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `forbidden`,
-`not_found`, `conflict`, `rate_limited`, `otp_invalid`, `otp_expired`, `otp_too_many_attempts`,
-`refresh_token_reused`, `business_not_active`, `plan_limit_reached`, `slot_unavailable`,
+`not_found`, `conflict`, `rate_limited`, `internal`, `otp_invalid`, `otp_expired`, `otp_too_many_attempts`,
+`otp_cooldown`, `user_blocked`, `refresh_token_reused`, `business_not_active`, `plan_limit_reached`, `slot_unavailable`,
 `outside_booking_window`, `outside_cancellation_window`, `too_many_active_bookings`,
 `invalid_state_transition`.
 
@@ -54,6 +54,24 @@ Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `
 | GET / PATCH | `/v1/me` | user |
 | GET | `/v1/me/memberships` → businesses & roles (drives "Business mode" switch) | user |
 | POST / DELETE | `/v1/me/devices` (FCM token) | user — M7 |
+
+**Phone OTP login (M2.2).** Status: request + verify are live; verify returns `{user, is_new_user}`
+and gains the access/refresh tokens in M2.3.
+
+| Rule | Value | Error when broken |
+|---|---|---|
+| Phone | Saudi mobile, any common spelling (`05…`, `+9665…`, `009665…`, spaces, Arabic digits) | 422 `validation_failed` |
+| Code | 6 digits, Western or Arabic-Indic, single use, stored only as an HMAC-SHA256 hash | 401 `otp_invalid` |
+| Lifetime | 5 minutes | 401 `otp_expired` |
+| Wrong guesses | 5 per code, then the code is dead — request a new one | 429 `otp_too_many_attempts` |
+| Resend cooldown | 60 s between codes for one phone | 429 `otp_cooldown` + `Retry-After` |
+| Hourly cap | 5 codes per phone per hour | 429 `rate_limited` + `Retry-After` |
+| Blocked account | platform admin blocked the user | 403 `user_blocked` |
+
+The per-IP hourly cap from [ADR-0007](../adr/0007-auth-phone-otp-jwt.md) lands with the first real SMS
+provider (M7); until then `SMS_PROVIDER=console` is the only provider and is refused in production.
+An unknown phone and an already-used code get the same `otp_invalid` as a wrong code; the client
+shows one message ("the code is wrong or no longer valid") and offers "send a new code".
 
 ### Discovery (public) — M6
 
