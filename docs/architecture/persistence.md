@@ -123,6 +123,8 @@ safe to expose in URLs, and creatable before insert (useful for idempotency and 
 
 - goose, plain SQL files in `migrations/`, one global ordered sequence (modules share one DB).
 - **Forward-only once merged** — never edit a merged migration; add a new one.
+- Down migrations never drop **extensions** (shared infrastructure that may predate the migration;
+  dropping `postgis` would destroy geography columns).
 - Every migration runs in CI against a fresh PostGIS container; destructive changes follow
   expand → migrate → contract across releases.
 - River ships its own migrations; we run them via its migrator at the same step.

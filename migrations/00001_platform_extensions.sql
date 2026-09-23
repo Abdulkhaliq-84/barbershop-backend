@@ -9,6 +9,9 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- +goose Down
-DROP EXTENSION IF EXISTS pg_trgm;
-DROP EXTENSION IF EXISTS btree_gist;
-DROP EXTENSION IF EXISTS postgis;
+-- Intentionally keeps the extensions. They are shared database infrastructure
+-- and may predate this migration (the postgis/postgis image pre-installs
+-- postgis with postgis_topology and postgis_tiger_geocoder depending on it).
+-- Dropping postgis would also destroy every geography column; removing an
+-- extension is a deliberate manual decision, never a rollback side effect.
+SELECT 1;

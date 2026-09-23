@@ -50,18 +50,7 @@ func TestMigrations(t *testing.T) {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
-	for _, ext := range []string{"postgis", "btree_gist", "pg_trgm"} {
-		var installed bool
-		err := pool.QueryRow(ctx,
-			"SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)", ext,
-		).Scan(&installed)
-		if err != nil {
-			t.Fatalf("query extension %s: %v", ext, err)
-		}
-		if !installed {
-			t.Errorf("extension %s not installed after Migrate", ext)
-		}
-	}
+	assertExtensions(t, pool)
 
 	// Every migration must be reversible: go all the way down, then up again.
 	db := stdlib.OpenDBFromPool(pool)
@@ -73,6 +62,8 @@ func TestMigrations(t *testing.T) {
 	if _, err := provider.DownTo(ctx, 0); err != nil {
 		t.Fatalf("DownTo(0) error = %v", err)
 	}
+	// Rolling back must not remove shared extensions (see 00001's Down).
+	assertExtensions(t, pool)
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("Up() after DownTo(0) error = %v", err)
 	}
@@ -84,5 +75,21 @@ func TestMigrations(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Errorf("second Up() applied %d migrations, want 0", len(results))
+	}
+}
+
+func assertExtensions(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	for _, ext := range []string{"postgis", "btree_gist", "pg_trgm"} {
+		var installed bool
+		err := pool.QueryRow(t.Context(),
+			"SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)", ext,
+		).Scan(&installed)
+		if err != nil {
+			t.Fatalf("query extension %s: %v", ext, err)
+		}
+		if !installed {
+			t.Errorf("extension %s is not installed", ext)
+		}
 	}
 }
