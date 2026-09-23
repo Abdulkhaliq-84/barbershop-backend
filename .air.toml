@@ -1,0 +1,17 @@
+# Live reload for `make dev`: rebuilds and restarts the API when a .go or .sql file changes.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/server ./cmd/server"
+  entrypoint = ["./tmp/server", "api"]
+  include_ext = ["go", "sql"]
+  exclude_dir = ["tmp", "bin", "docs", ".github", ".claude"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 300 # ms
+  stop_on_error = true
+  send_interrupt = true # SIGINT → graceful shutdown, like production
+  kill_delay = "5s"
+
+[misc]
+  clean_on_exit = true

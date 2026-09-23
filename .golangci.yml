@@ -1,0 +1,74 @@
+# golangci-lint v2 — https://golangci-lint.run
+# Run locally with `make lint` (and `make fmt` to auto-format). CI runs the same version.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose     # HTTP response bodies are closed
+    - depguard      # architecture boundaries (see rules below)
+    - errname       # error types end in Error, sentinels start with Err
+    - errorlint     # use errors.Is/As with wrapped errors
+    - gocritic      # common bug patterns and simplifications
+    - gosec         # security issues (timeouts, crypto, injections)
+    - misspell
+    - nilerr        # returning nil when an error was checked
+    - noctx         # I/O without a context
+    - revive        # idiomatic Go style
+    - unconvert
+    - usestdlibvars # http.MethodGet instead of "GET", etc.
+  settings:
+    depguard:
+      rules:
+        # docs/architecture/overview.md §1: the domain layer is pure Go.
+        domain-is-pure:
+          files:
+            - "**/internal/*/domain/**"
+          deny:
+            - pkg: net/http
+              desc: the domain must not know about HTTP (map errors in adapters/http)
+            - pkg: database/sql
+              desc: the domain must not know about the database (use a repository interface)
+            - pkg: github.com/jackc/pgx
+              desc: the domain must not know about the database (use a repository interface)
+            - pkg: github.com/go-chi
+              desc: the domain must not know about HTTP routing
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/platform
+              desc: the domain may import only the standard library and internal/shared
+        # Platform plumbing must never depend on business modules.
+        platform-has-no-business:
+          files:
+            - "**/internal/platform/**"
+          deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
+              desc: platform code must not import business modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
+              desc: platform code must not import business modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
+              desc: platform code must not import business modules
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Test fixtures use fake credentials on purpose.
+      - path: _test\.go
+        linters: [gosec]
+        text: G101
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofumpt   # stricter gofmt
+    - goimports # grouped imports: stdlib, third-party, this module
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Abdulkhaliq-84/barbershop-backend
