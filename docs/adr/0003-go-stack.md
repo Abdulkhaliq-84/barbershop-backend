@@ -1,6 +1,6 @@
 # ADR-0003: Idiomatic Go stack — net/http + chi, pgx + sqlc, goose
 
-- Status: Accepted · Date: 2026-09-23
+- Status: Accepted · Date: 2026-09-23 · Test tooling amended by [ADR-0012](0012-test-database-per-test.md)
 
 ## Context
 Coming from Express + Prisma, the tempting path is Gin/Echo + GORM. ORMs tend to leak persistence
