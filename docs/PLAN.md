@@ -30,6 +30,7 @@ platform earns money through **subscription plans** per business.
 | API | OpenAPI-first REST, `/v1` | Dart client generated for Flutter — [ADR-0006](adr/0006-openapi-first.md) |
 | Auth | Own auth: phone OTP + JWT + rotating refresh tokens | [ADR-0007](adr/0007-auth-phone-otp-jwt.md) |
 | Hosting | **localhost** (Docker Compose) for now | 12-factor config → any host later (Render / Fly / AWS me-central) |
+| CI/CD | GitHub Actions: CI on every PR; CD publishes a scanned, attested image to GHCR on every merge; release-please versions + GitHub Releases | Deploy stage (staging → prod) added when hosting is chosen — [pipeline lifecycle](operations/ci-cd.md), [ADR-0011](adr/0011-ci-cd-github-actions.md) |
 | Repo | `barbershop-backend`, **public**, backend only | Flutter app in its own repo later |
 | Design | Figma, **in parallel** with backend | IBM Plex Sans Arabic + IBM Plex Sans; green · navy · white — [design system](design/design-system.md) |
 | Workflow | **Guided AI scaffolding** | I scaffold the first instance of each pattern, you write the next one — see §6 |
@@ -81,6 +82,7 @@ Deep dives:
 - [Persistence](architecture/persistence.md) — tenancy, schemas, key tables and constraints, time and money
 - [API overview](api/overview.md) — conventions and the v1 endpoint inventory
 - [Design system](design/design-system.md) — brand, tokens, RTL, screen inventory, Figma plan
+- [CI/CD pipeline lifecycle](operations/ci-cd.md) — stages, workflows, artifact, releases, future deploy
 - [Node → Go mindset guide](learning/node-to-go.md)
 - [Architecture Decision Records](adr/)
 
@@ -115,14 +117,15 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 | # | Milestone | What ships | Go concepts you learn | Your exercise |
 |---|---|---|---|---|
 | M0 | **Planning** (this PR) | Plan, ADRs, design direction, AI guardrails (`CLAUDE.md`) | — | Review and challenge the plan |
-| M1 | **Walking skeleton** | `go.mod`, `cmd/api`, config, slog, chi, `/healthz` `/readyz`, graceful shutdown, Docker Compose (PostGIS), goose, sqlc, Makefile, golangci-lint (+ module-boundary rules), GitHub Actions CI, air | packages & modules, `main` wiring, `context`, `http.Server`, errors as values | Add `GET /version` using `debug.ReadBuildInfo` |
+| M1 | **Walking skeleton + CI** | `go.mod`, `cmd/server`, config, slog, chi, `/healthz` `/readyz`, graceful shutdown, Docker Compose (PostGIS), goose, sqlc, Makefile (`make check`), golangci-lint (+ module-boundary rules), air; **CI**: `ci.yml` (lint · generated-code drift · tests `-race` with PostGIS · build), PR-title check, Dependabot, branch ruleset | packages & modules, `main` wiring, `context`, `http.Server`, errors as values; workflow anatomy, service containers, caching, required checks | Add `GET /version` using `debug.ReadBuildInfo` |
+| M1.5 | **CD & releases** | Dockerfile (multi-stage, distroless nonroot), `cd.yml` (multi-arch build once → Trivy scan → provenance + SBOM attestations → GHCR `:sha`), `release.yml` (release-please → tag → GitHub Release → promote image), `security.yml` (govulncheck, gitleaks, dependency review, CodeQL), compose runs a released image | artifacts vs. source, immutable tags, SemVer + Conventional Commits, supply-chain security, build once / promote | Cut `v0.1.0` and run it locally from GHCR; verify its attestation |
 | M2 | **Shared kernel + IAM** | Value objects (PhoneNumber, Money, LocalizedText, GeoPoint), OTP request/verify (console SMS adapter), Ed25519 JWT, refresh rotation, auth middleware, `GET /me` | constructors & invariants, unexported fields, consumer-side interfaces, sqlc + pgx transactions, table-driven tests, testcontainers | Implement `PATCH /me` |
 | M3 | **Business onboarding** | Register business, CR upload (media), submit/approve/reject, branches with location, staff invitations + roles, authorization policy, plans & entitlements (billing), River outbox | state machines, domain events, transactional outbox, object-level authorization | Implement suspend / reactivate business |
 | M4 | **Catalog + Scheduling** | Service categories, services, barber offerings, opening hours, closures, barber schedules (overnight), time off | modelling time (`time.Location`, wall-clock vs instant), validation-heavy value objects | Implement branch closures end-to-end |
 | M5 | **Booking core ★** | Availability calculator (pure), slots query (specific / any / multi-service), book with `Idempotency-Key`, exclusion constraint → 409, cancel policy, shop actions, staff bookings, pending-expiry job | pure domain services, **fuzz tests**, benchmarks, `errgroup`, race-safe concurrency tests | "My appointments" with cursor pagination |
 | M6 | **Discovery** | Read-model projections from events, PostGIS nearby, city search, Arabic-normalised trigram search, open-now, branch public profile | CQRS read models, idempotent handlers, geo queries, `EXPLAIN ANALYZE` | Add "sort by starting price" |
 | M7 | **Notifications** | Device tokens, FCM adapter, ar/en templates, reminders as scheduled River jobs, real SMS adapter | background workers, retries/backoff, external API adapters, HTTP client timeouts | Add the 24 h reminder |
-| M8 | **Hardening + Flutter hand-off** | RLS as defence in depth, rate limiting, OpenTelemetry, govulncheck, k6 load tests, seed data (demo Riyadh shops), published OpenAPI + generated Dart client, Postman collection | profiling (`pprof`), observability, security review | Write a k6 scenario for the booking flow |
+| M8 | **Hardening + Flutter hand-off** | RLS as defence in depth, rate limiting, OpenTelemetry, OpenSSF Scorecard, k6 load tests, seed data (demo Riyadh shops), published OpenAPI + generated Dart client, Postman collection | profiling (`pprof`), observability, security review | Write a k6 scenario for the booking flow |
 
 ### Design track (in parallel, in Figma)
 
@@ -144,8 +147,9 @@ least as a wireframe), so the API returns exactly what the screen needs — no m
 3. **You review and ask** — questions in PR comments; nothing merges until you understand it.
 4. **You write the next instance yourself** (the PR's "Your turn" exercise), open a PR, and I review it
    like a senior Go reviewer would (idioms, errors, tests, boundaries).
-5. **Guardrails stay on** — `CLAUDE.md` holds the rules every AI session must follow in this repo;
-   CI (lint + tests + boundary checks) catches what reviews miss.
+5. **Guardrails stay on** — `CLAUDE.md` and the project skills in `.claude/skills/` hold the context
+   and rules every AI session follows in this repo; the pipeline (lint + tests + boundary checks +
+   scans) catches what reviews miss — see [CI/CD](operations/ci-cd.md).
 
 ## 7. Risks and how the design handles them
 

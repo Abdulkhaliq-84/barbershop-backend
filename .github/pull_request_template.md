@@ -11,6 +11,7 @@
 <!-- The follow-up exercise for the owner (guided scaffolding). -->
 
 ## Checklist
+- [ ] PR title follows Conventional Commits (`feat(scope): …`, `fix: …`) — it becomes the squash commit and drives the version
 - [ ] Lint and tests pass locally (`-race`)
 - [ ] OpenAPI spec updated first (if the API changed) and code regenerated
 - [ ] New migration is forward-only; no merged migration edited

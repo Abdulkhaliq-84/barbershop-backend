@@ -218,6 +218,7 @@ func (a *Appointment) Cancel(by Actor, now time.Time, p CancellationPolicy) erro
 | Lint | [golangci-lint](https://golangci-lint.run) (+ depguard, gosec, revive, errcheck) | eslint |
 | Live reload | [air](https://github.com/air-verse/air) | nodemon |
 | Local infra | Docker Compose with `postgis/postgis` | docker compose |
+| CI/CD | GitHub Actions, GHCR, release-please, Trivy, CodeQL — see [pipeline](../operations/ci-cd.md) | GitHub Actions + semantic-release |
 
 ## 8. Testing strategy
 

@@ -41,11 +41,13 @@ flowchart LR
 - **Hexagonal layers** per module: pure `domain` → `app` use cases → `adapters` (HTTP, Postgres, providers).
 - **Double booking is impossible by construction**: a Postgres exclusion constraint on each barber's time ranges.
 - **Transactional outbox** (River) for reliable domain events and scheduled reminders.
+- **Pipeline as code**: CI on every PR; every merge publishes a scanned, attested image — build once, promote on release.
 
 ## Tech stack
 
 Go · net/http + chi · PostgreSQL + PostGIS · pgx + sqlc · goose · River · OpenAPI (oapi-codegen) ·
-JWT (EdDSA) · log/slog · testcontainers-go · golangci-lint · Docker Compose · GitHub Actions
+JWT (EdDSA) · log/slog · testcontainers-go · golangci-lint · Docker Compose ·
+GitHub Actions · GHCR · release-please · Trivy · CodeQL
 
 ## Documentation
 
@@ -57,13 +59,15 @@ JWT (EdDSA) · log/slog · testcontainers-go · golangci-lint · Docker Compose 
 | [Persistence](docs/architecture/persistence.md) | tenancy, schemas, constraints, time & money |
 | [API overview](docs/api/overview.md) | conventions and v1 endpoints |
 | [Design system](docs/design/design-system.md) | mobile design direction (IBM Plex, green · navy · white, RTL) |
+| [CI/CD pipeline](docs/operations/ci-cd.md) | lifecycle from commit to released image (and later, deploy) |
 | [ADRs](docs/adr/) | why each major decision was made |
 | [Node → Go guide](docs/learning/node-to-go.md) | the mindset shift, written along the way |
 
 ## Roadmap
 
 - [x] M0 — Planning: domain model, architecture, ADRs, design direction
-- [ ] M1 — Walking skeleton: server, config, Postgres/PostGIS, migrations, CI
+- [ ] M1 — Walking skeleton + CI: server, config, Postgres/PostGIS, migrations, lint/test/build on every PR
+- [ ] M1.5 — CD & releases: scanned, attested Docker images on GHCR, SemVer releases
 - [ ] M2 — Shared kernel + IAM: phone OTP, JWT, refresh rotation
 - [ ] M3 — Business onboarding: verification, branches, staff, plans
 - [ ] M4 — Catalog + scheduling: services, opening hours, barber schedules

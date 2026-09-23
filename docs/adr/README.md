@@ -15,3 +15,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0008](0008-double-booking-exclusion-constraint.md) | Prevent double booking with a Postgres exclusion constraint | Accepted |
 | [0009](0009-domain-events-outbox-river.md) | Domain events via transactional outbox on River | Accepted |
 | [0010](0010-pay-at-shop-first.md) | Pay at the shop in v1 | Accepted |
+| [0011](0011-ci-cd-github-actions.md) | CI/CD on GitHub Actions — build once, publish versioned images, deploy later | Accepted |
