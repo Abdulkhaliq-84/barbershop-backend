@@ -1,0 +1,30 @@
+# sqlc turns the SQL in each module's queries.sql into type-safe Go.
+# Run with `make generate`; the output (sqlcgen/) is committed, never edited.
+# Rule: a module's queries only touch its own schema.
+version: "2"
+sql:
+  - name: iam
+    engine: postgresql
+    schema: migrations # goose files; sqlc ignores the Down sections
+    queries: internal/iam/adapters/postgres/queries.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/iam/adapters/postgres/sqlcgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true

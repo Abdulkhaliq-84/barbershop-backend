@@ -17,6 +17,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/config"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
@@ -71,12 +76,43 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	if role == "migrate" {
 		return database.Migrate(ctx, pool, logger)
 	}
-	return serveAPI(ctx, cfg.HTTP, pool, logger)
+
+	handler, err := newHandler(cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+	return serveAPI(ctx, cfg.HTTP, handler, logger)
 }
 
-func serveAPI(ctx context.Context, cfg config.HTTP, db httpx.Pinger, logger *slog.Logger) error {
+// apiServer is the whole API: one embedded handler set per module. Embedding
+// promotes each module's methods, so together they satisfy the generated
+// apigen.StrictServerInterface. New modules add a line here.
+type apiServer struct {
+	*httpapi.Handlers // iam: /v1/auth/*
+}
+
+// newHandler builds every module and mounts the API next to the health checks.
+func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, error) {
+	iamModule, err := iam.New(iam.Deps{
+		Pool:      pool,
+		Clock:     clock.System{},
+		Logger:    logger,
+		OTPSecret: []byte(cfg.Auth.OTPSecret),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
+	if err := httpx.MountAPI(router, apiServer{iamModule.HTTP()}, logger); err != nil {
+		return nil, err
+	}
+	return router, nil
+}
+
+func serveAPI(ctx context.Context, cfg config.HTTP, handler http.Handler, logger *slog.Logger) error {
 	srv := &http.Server{
-		Handler:           httpx.NewRouter(logger, httpx.NewHealth(db, logger)),
+		Handler:           handler,
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,

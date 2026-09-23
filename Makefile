@@ -6,12 +6,18 @@ SHELL := /bin/bash
 
 GOLANGCI_LINT_VERSION := v2.13.2
 AIR_VERSION           := v1.67.4
+OAPI_CODEGEN_VERSION  := v2.8.0
+SQLC_VERSION          := v1.31.1
 
 # Local database from compose.yaml. Override on the command line if yours differs.
 DATABASE_URL      ?= postgres://barbershop:barbershop@localhost:5432/barbershop?sslmode=disable
 TEST_DATABASE_URL ?= postgres://barbershop:barbershop@localhost:5432/barbershop_test?sslmode=disable
 export DATABASE_URL
 export LOG_FORMAT ?= text
+# Login codes are printed to the log (SMS_PROVIDER=console). The secret below is
+# for local development only; every real environment sets its own.
+export OTP_SECRET   ?= local-development-otp-secret-not-for-real-use
+export SMS_PROVIDER ?= console
 
 GOBIN := $(shell go env GOPATH)/bin
 
@@ -57,6 +63,13 @@ migration: ## Create the next migration file: make migration name=iam_users
 	file=migrations/$$(printf '%05d' $$((last + 1)))_$(name).sql; \
 	printf -- '-- +goose Up\n\n-- +goose Down\n' > $$file; \
 	echo "created $$file"
+
+## ---- code generation ---------------------------------------------------
+
+.PHONY: generate
+generate: ## Regenerate code from api/openapi.yaml (oapi-codegen) and SQL (sqlc)
+	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) -config api/oapi-codegen.yaml api/openapi.yaml
+	CGO_ENABLED=1 go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 
 ## ---- run -----------------------------------------------------------------
 
@@ -110,7 +123,8 @@ app-down: ## Stop the Compose app and database
 	docker compose --profile app down
 
 .PHONY: check
-check: ## Everything CI checks: tidy, lint, all tests, build
+check: ## Everything CI checks: generated code, tidy, lint, all tests, build
+	$(MAKE) generate
 	go mod tidy -diff
 	$(MAKE) lint test-all build
 

@@ -38,6 +38,31 @@ jobs:
         with:
           version: v2.13.2
 
+  # Generated code (internal/apigen, */sqlcgen) is committed so the repo builds
+  # with plain `go build`. This job fails when it no longer matches its sources
+  # (api/openapi.yaml, migrations, queries.sql) — someone forgot `make generate`.
+  generated:
+    name: Generated code
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Regenerate (oapi-codegen, sqlc)
+        run: make generate
+      - name: Generated code matches its sources
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            git diff
+            echo "::error::Generated code is out of date: run 'make generate' and commit the result."
+            exit 1
+          fi
+
   test:
     name: Test
     runs-on: ubuntu-24.04

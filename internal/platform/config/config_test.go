@@ -9,12 +9,15 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/config"
 )
 
-const dbURL = "DATABASE_URL=postgres://u:p@localhost:5432/db?sslmode=disable"
+const (
+	dbURL     = "DATABASE_URL=postgres://u:p@localhost:5432/db?sslmode=disable"
+	otpSecret = "OTP_SECRET=test-only-secret-0123456789abcdef-xyz"
+)
 
 func TestLoadDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := config.Load([]string{dbURL})
+	cfg, err := config.Load([]string{dbURL, otpSecret})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -41,7 +44,8 @@ func TestLoadOverrides(t *testing.T) {
 
 	cfg, err := config.Load([]string{
 		dbURL,
-		"APP_ENV=production",
+		otpSecret,
+		"APP_ENV=staging",
 		"HTTP_ADDR=:9000",
 		"HTTP_SHUTDOWN_TIMEOUT=45s",
 		"DATABASE_MAX_CONNS=25",
@@ -52,7 +56,7 @@ func TestLoadOverrides(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.Env != config.EnvProduction || cfg.HTTP.Addr != ":9000" ||
+	if cfg.Env != config.EnvStaging || cfg.HTTP.Addr != ":9000" ||
 		cfg.HTTP.ShutdownTimeout != 45*time.Second || cfg.Database.MaxConns != 25 ||
 		cfg.Log.Level != slog.LevelDebug || cfg.Log.Format != "text" {
 		t.Errorf("overrides not applied: %+v", cfg)
@@ -69,13 +73,17 @@ func TestLoadErrors(t *testing.T) {
 		environ []string
 		wantErr string // substring the error must contain
 	}{
-		{"missing database url", nil, "DATABASE_URL"},
-		{"empty database url", []string{"DATABASE_URL="}, "DATABASE_URL"},
-		{"unknown environment", []string{dbURL, "APP_ENV=staging"}, "APP_ENV"},
-		{"unknown log format", []string{dbURL, "LOG_FORMAT=xml"}, "LOG_FORMAT"},
-		{"bad log level", []string{dbURL, "LOG_LEVEL=loud"}, "LOG_LEVEL"},
-		{"bad duration", []string{dbURL, "HTTP_READ_TIMEOUT=soon"}, "HTTP_READ_TIMEOUT"},
-		{"zero pool size", []string{dbURL, "DATABASE_MAX_CONNS=0"}, "DATABASE_MAX_CONNS"},
+		{"missing database url", []string{otpSecret}, "DATABASE_URL"},
+		{"empty database url", []string{"DATABASE_URL=", otpSecret}, "DATABASE_URL"},
+		{"missing otp secret", []string{dbURL}, "OTP_SECRET"},
+		{"short otp secret", []string{dbURL, "OTP_SECRET=too-short"}, "OTP_SECRET"},
+		{"unknown sms provider", []string{dbURL, otpSecret, "SMS_PROVIDER=pigeon"}, "SMS_PROVIDER"},
+		{"console sms in production", []string{dbURL, otpSecret, "APP_ENV=production"}, "not allowed in production"},
+		{"unknown environment", []string{dbURL, otpSecret, "APP_ENV=qa"}, "APP_ENV"},
+		{"unknown log format", []string{dbURL, otpSecret, "LOG_FORMAT=xml"}, "LOG_FORMAT"},
+		{"bad log level", []string{dbURL, otpSecret, "LOG_LEVEL=loud"}, "LOG_LEVEL"},
+		{"bad duration", []string{dbURL, otpSecret, "HTTP_READ_TIMEOUT=soon"}, "HTTP_READ_TIMEOUT"},
+		{"zero pool size", []string{dbURL, otpSecret, "DATABASE_MAX_CONNS=0"}, "DATABASE_MAX_CONNS"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,7 +103,7 @@ func TestLoadErrors(t *testing.T) {
 func TestLoadReportsAllProblemsAtOnce(t *testing.T) {
 	t.Parallel()
 
-	_, err := config.Load([]string{dbURL, "APP_ENV=staging", "LOG_FORMAT=xml"})
+	_, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=qa", "LOG_FORMAT=xml"})
 	if err == nil {
 		t.Fatal("Load() error = nil, want error")
 	}

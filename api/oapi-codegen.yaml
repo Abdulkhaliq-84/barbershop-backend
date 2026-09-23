@@ -1,0 +1,9 @@
+# oapi-codegen settings — run with `make generate`. Output is committed and
+# never edited by hand; CI fails if it is out of date.
+package: apigen
+output: internal/apigen/apigen.gen.go
+generate:
+  models: true
+  chi-server: true
+  strict-server: true # handlers take and return typed request/response objects
+  embedded-spec: true # the spec travels in the binary for request validation
