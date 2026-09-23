@@ -53,7 +53,7 @@ flowchart LR
 | **Fail fast** | Cheapest checks first (format, lint) so most mistakes fail in ~1 minute. Target: whole PR pipeline < 10 min. |
 | **Build once, promote** | The image is built once per commit on `main`. Releases *re-tag* that exact image — what you tested is what you ship. |
 | **Immutable artifacts** | `:sha-<commit>` and `:vX.Y.Z` tags are never overwritten; only moving tags (`:main`, `:latest`, `:X.Y`) move. |
-| **Reproducible** | Go version pinned in `go.mod` (`toolchain`), actions pinned by commit SHA, Docker base images pinned by digest; Dependabot bumps them via PRs. |
+| **Reproducible** | Go version pinned in `go.mod`, actions pinned by commit SHA, Docker base images pinned by digest; Dependabot bumps them via PRs. |
 | **Least privilege** | Every workflow declares minimal `permissions:`; publishing uses the built-in `GITHUB_TOKEN`/OIDC — no long-lived secrets. |
 | **Local parity** | `make check` runs the same lint/test/build as CI, so CI surprises are rare. |
 | **Secure supply chain** | Dependency, secret, code and image scanning, plus signed provenance and an SBOM for every image. |
@@ -73,29 +73,41 @@ flowchart LR
 
 | Workflow | Trigger | Jobs | Arrives in |
 |---|---|---|---|
-| `ci.yml` | pull request, push to `main` | `lint` (`go mod tidy -diff`, golangci-lint incl. gofumpt/goimports, module-boundary + gosec rules, `go vet`) · `generated` (from M2: sqlc + oapi-codegen regenerate → `git diff --exit-code`, OpenAPI lint) · `test` (`go test -race -cover` against a PostGIS service container; migrations applied from scratch) · `build` (static `go build`; Docker build without push from M1.5) | M1 |
+| `ci.yml` | pull request, push to `main` | `lint` (`go mod tidy -diff`, golangci-lint incl. gofumpt/goimports, module-boundary + gosec rules, `go vet`) · `test` (`go test -race -cover` against a PostGIS service container; migrations applied from scratch) · `build` (static `go build` + Docker build and **Trivy** scan, not pushed) · `generated` (from M2: sqlc + oapi-codegen drift) | M1 · image build M1.5 |
 | `pr-title.yml` | pull request | Conventional Commit title check | M1 |
-| `dependabot.yml` (config) | weekly | Go modules, GitHub Actions, Docker base image | M1 |
-| `security.yml` | pull request, weekly | `govulncheck`, `gitleaks` (secrets), dependency review (new vulnerable/incompatible-licence deps), **CodeQL** (Go SAST) | M1.5 |
-| `cd.yml` | push to `main` | buildx multi-arch image (`linux/amd64`, `linux/arm64`) → **Trivy** scan (fail on fixable HIGH/CRITICAL) → provenance + SBOM **attestations** → push `ghcr.io/abdulkhaliq-84/barbershop-backend:sha-<commit>` and `:main` | M1.5 |
-| `release.yml` | push to `main` | **release-please** keeps a Release PR (version bump + `CHANGELOG.md`); when merged → tag `vX.Y.Z` + GitHub Release → promote the image built for that commit to `:vX.Y.Z`, `:X.Y`, `:latest` | M1.5 |
+| `dependabot.yml` (config) | weekly | Go modules, GitHub Actions, Docker base images | M1 · docker M1.5 |
+| `security.yml` | pull request, `main`, weekly | `govulncheck`, `gitleaks` (secrets, full history), dependency review (PRs), **CodeQL** (Go SAST → Security tab) | M1.5 |
+| `cd.yml` | push to `main` | `release-please` (keeps the Release PR; on merge tags `vX.Y.Z` + GitHub Release) → `image` (build amd64 → **Trivy** scan → build `linux/amd64`+`linux/arm64` → push `:sha-<commit>` and `:main` with BuildKit SBOM + provenance → GitHub **attestation**) → `promote` (release only: re-tag that digest as `:vX.Y.Z`, `:X.Y`, `:latest`) | M1.5 |
 | `deploy.yml` | tag / manual | staging (auto) → production (manual approval) — see §7 | when hosting is chosen |
 
 Jobs that don't depend on each other run in parallel; Go module and build caches keep them fast.
 
 ## 5. The artifact
 
-- **One binary, several roles**: `server api`, `server worker`, `server migrate` (runs goose + River migrations).
-- **Dockerfile**: multi-stage — `golang` builder (`CGO_ENABLED=0`, `-trimpath`, `-ldflags "-s -w -X …"`) →
-  `gcr.io/distroless/static` **nonroot** runtime. Small, no shell, no package manager to exploit.
-- **Build info**: commit SHA, version (from release-please's manifest at that commit) and build time are
-  embedded and served at `GET /version`, and set as OCI image labels.
-- **Run a release locally**:
+- **One binary, several roles**: `server api`, `server migrate` (goose; River's migrations join in M3), `server worker` (M3).
+- **Dockerfile**: multi-stage — `golang` builder on `$BUILDPLATFORM` cross-compiling with `GOOS/GOARCH`
+  (`CGO_ENABLED=0`, `-trimpath`, `-ldflags "-s -w -X main.version=…"`) → `gcr.io/distroless/static-debian13`
+  **nonroot** runtime. ~6 MB to download, no shell, no package manager to exploit. Base images pinned by digest.
+- **Version**: the release tag (`v0.3.0`) or `sha-<7 chars>` is stamped into `main.version` and logged at startup;
+  OCI labels (source, revision, created) come from `docker/metadata-action`. (`GET /version` is the M1 exercise.)
+- **Supply chain**: BuildKit attaches an SBOM and max-mode provenance to every pushed image, and a GitHub
+  artifact attestation (Sigstore-signed via OIDC) proves which workflow built which digest.
+- **Run an image locally**:
 
   ```bash
-  BARBERSHOP_IMAGE=ghcr.io/abdulkhaliq-84/barbershop-backend:v0.3.0 docker compose up -d
-  gh attestation verify oci://ghcr.io/abdulkhaliq-84/barbershop-backend:v0.3.0 -R Abdulkhaliq-84/barbershop-backend
+  make docker-build && make app-up BARBERSHOP_IMAGE=barbershop-backend:local        # what you just built
+  make app-up BARBERSHOP_IMAGE=ghcr.io/abdulkhaliq-84/barbershop-backend:v0.1.0      # a release
+  gh attestation verify oci://ghcr.io/abdulkhaliq-84/barbershop-backend:v0.1.0 -R Abdulkhaliq-84/barbershop-backend
+  docker buildx imagetools inspect ghcr.io/abdulkhaliq-84/barbershop-backend:v0.1.0 --format '{{ json .SBOM }}'
   ```
+
+### One-time repository settings
+
+| Setting | Why |
+|---|---|
+| Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests** | release-please opens the Release PR with `GITHUB_TOKEN`; without this the `Release PR / tag` job fails |
+| Settings → Rules → Rulesets → `main`: require PR + checks **Lint, Test, Build, Conventional Commit title**; add **Repository admin** to the bypass list | protects `main`; the bypass is needed because PRs opened by `GITHUB_TOKEN` (the Release PR) don't trigger CI — a GitHub App token can replace this later |
+| Packages → `barbershop-backend` → Package settings → **Change visibility → Public** (after the first publish) | lets anyone `docker pull` without logging in to GHCR |
 
 ## 6. Secrets and configuration
 
@@ -141,6 +153,6 @@ flowchart LR
 | Step | You will learn |
 |---|---|
 | M1 — `ci.yml` | Workflow anatomy (triggers, jobs, steps, matrices, service containers), caching, required checks, reading failed logs |
-| M1.5 — `cd.yml` + `release.yml` | Artifacts vs. source, image tags and immutability, multi-arch builds, scanning, attestations/SBOM, SemVer + changelogs, promotion |
+| M1.5 — `cd.yml` + `security.yml` | Artifacts vs. source, image tags and immutability, multi-arch builds, scanning, attestations/SBOM, SemVer + changelogs, promotion |
 | Hosting milestone — `deploy.yml` | Environments, approvals, migrations in deploys, smoke tests, rollback, DORA metrics |
 | Anytime | Run workflows locally with [`act`](https://github.com/nektos/act) to iterate faster |
