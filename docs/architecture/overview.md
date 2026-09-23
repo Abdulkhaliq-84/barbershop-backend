@@ -212,7 +212,7 @@ func (a *Appointment) Cancel(by Actor, now time.Time, p CancellationPolicy) erro
 | Migrations | [goose](https://github.com/pressly/goose) | prisma migrate / knex |
 | Jobs + outbox | [River](https://riverqueue.com) (Postgres) | BullMQ (Redis) |
 | Auth | [golang-jwt v5](https://github.com/golang-jwt/jwt) (EdDSA), `crypto/*` stdlib | jsonwebtoken / bcrypt |
-| Phone numbers | [nyaruka/phonenumbers](https://github.com/nyaruka/phonenumbers) | libphonenumber-js |
+| Phone numbers | Own Saudi parser in `shared.NewPhoneNumber` (v1 is KSA-only); swap in [nyaruka/phonenumbers](https://github.com/nyaruka/phonenumbers) when GCC arrives | libphonenumber-js |
 | Config | [caarlos0/env](https://github.com/caarlos0/env) | dotenv + zod |
 | Logging | `log/slog` (stdlib) | pino / winston |
 | Push | Firebase Admin SDK for Go (FCM) | firebase-admin |
