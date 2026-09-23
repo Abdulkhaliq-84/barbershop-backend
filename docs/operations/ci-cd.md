@@ -105,6 +105,7 @@ Jobs that don't depend on each other run in parallel; Go module and build caches
 
 | Setting | Why |
 |---|---|
+| Settings → Advanced Security → **Dependency graph → Enable** | the `Dependency review` check fails with "not supported on this repository" until it is on |
 | Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests** | release-please opens the Release PR with `GITHUB_TOKEN`; without this the `Release PR / tag` job fails |
 | Settings → Rules → Rulesets → `main`: require PR + checks **Lint, Test, Build, Conventional Commit title**; add **Repository admin** to the bypass list | protects `main`; the bypass is needed because PRs opened by `GITHUB_TOKEN` (the Release PR) don't trigger CI — a GitHub App token can replace this later |
 | Packages → `barbershop-backend` → Package settings → **Change visibility → Public** (after the first publish) | lets anyone `docker pull` without logging in to GHCR |

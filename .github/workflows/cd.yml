@@ -49,6 +49,9 @@ jobs:
   image:
     name: Build, scan and publish image
     needs: release-please
+    # Publish the image even if the release bot fails (e.g. a repository
+    # setting is missing): a release problem must not block delivery.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
