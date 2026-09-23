@@ -8,6 +8,10 @@ GOLANGCI_LINT_VERSION := v2.13.2
 AIR_VERSION           := v1.67.4
 OAPI_CODEGEN_VERSION  := v2.8.0
 SQLC_VERSION          := v1.31.1
+# Generators are built with the project's Go version (go.mod), not whatever Go
+# is installed: output such as the gzip-embedded OpenAPI spec differs between
+# Go versions, and CI must be able to reproduce the committed code byte for byte.
+GENERATE_GO := GOTOOLCHAIN=go$(shell go list -m -f '{{.GoVersion}}')
 
 # Local database from compose.yaml. Override on the command line if yours differs.
 DATABASE_URL      ?= postgres://barbershop:barbershop@localhost:5432/barbershop?sslmode=disable
@@ -68,8 +72,8 @@ migration: ## Create the next migration file: make migration name=iam_users
 
 .PHONY: generate
 generate: ## Regenerate code from api/openapi.yaml (oapi-codegen) and SQL (sqlc)
-	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) -config api/oapi-codegen.yaml api/openapi.yaml
-	CGO_ENABLED=1 go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
+	$(GENERATE_GO) go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) -config api/oapi-codegen.yaml api/openapi.yaml
+	$(GENERATE_GO) CGO_ENABLED=1 go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 
 ## ---- run -----------------------------------------------------------------
 
