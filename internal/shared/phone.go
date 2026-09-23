@@ -34,13 +34,11 @@ func NewPhoneNumber(raw string) (PhoneNumber, error) {
 	var digits strings.Builder
 	plus := false
 	for i, r := range strings.TrimSpace(raw) {
+		if d, ok := WesternDigit(r); ok {
+			digits.WriteRune(d)
+			continue
+		}
 		switch {
-		case r >= '0' && r <= '9':
-			digits.WriteRune(r)
-		case r >= '٠' && r <= '٩': // U+0660..U+0669 Arabic-Indic
-			digits.WriteRune('0' + (r - '٠'))
-		case r >= '۰' && r <= '۹': // U+06F0..U+06F9 Eastern Arabic-Indic
-			digits.WriteRune('0' + (r - '۰'))
 		case r == '+' && i == 0:
 			plus = true
 		case strings.ContainsRune(" -.()\u00a0", r): // \u00a0 = no-break space
