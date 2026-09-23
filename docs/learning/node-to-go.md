@@ -87,6 +87,21 @@ func TestNewPhoneNumber(t *testing.T) {
 Try this: run `make test-all`, then break something on purpose (e.g. remove `defer cancel()` in
 `health.go`) and see which linter or test catches it.
 
+## 2c. What M1.5 introduced (delivery)
+
+| Idiom | Where | Node.js equivalent |
+|---|---|---|
+| A Go binary is static: the runtime image needs no Go, no libc | `Dockerfile` (distroless static) | `node:alpine` must ship the Node runtime and `node_modules` |
+| Cross-compiling with `GOOS`/`GOARCH` (no emulator) | `Dockerfile` (`--platform=$BUILDPLATFORM`) | prebuilt native addons per platform (node-gyp) |
+| Stamping values at link time: `-ldflags "-X main.version=v0.3.0"` | `Makefile`, `Dockerfile`, `cmd/server/main.go` | `process.env.npm_package_version` / a bundler `define` |
+| Multi-stage build: compile stage + tiny runtime stage | `Dockerfile` | `npm ci && npm run build` then copy `dist/` into a slim image |
+| `govulncheck` reports only vulnerabilities in code you actually call | `security.yml` | `npm audit` (reports everything in the tree) |
+| release-please: Conventional Commits → SemVer + changelog | `cd.yml`, `release-please-config.json` | semantic-release / changesets |
+| Build once, promote by digest | `cd.yml` (`promote` job) | re-running the build per environment — which we avoid |
+
+Try this: after the first release, run `gh attestation verify` on the image and read which workflow and
+commit produced it — that's supply-chain provenance you can check yourself.
+
 ## 3. Pointers vs values (the question everyone asks)
 
 - Use **values** for small immutable things: value objects (`Money`, `PhoneNumber`, `Interval`).

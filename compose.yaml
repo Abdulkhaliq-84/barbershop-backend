@@ -24,5 +24,30 @@ services:
       timeout: 5s
       retries: 20
 
+  # Run a built or released image instead of `make dev` (profile "app"):
+  #   make docker-build && make app-up BARBERSHOP_IMAGE=barbershop-backend:local
+  #   make app-up BARBERSHOP_IMAGE=ghcr.io/abdulkhaliq-84/barbershop-backend:v0.1.0
+  migrate:
+    profiles: [app]
+    image: ${BARBERSHOP_IMAGE:-ghcr.io/abdulkhaliq-84/barbershop-backend:latest}
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://barbershop:barbershop@db:5432/barbershop?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    profiles: [app]
+    image: ${BARBERSHOP_IMAGE:-ghcr.io/abdulkhaliq-84/barbershop-backend:latest}
+    command: ["api"]
+    environment:
+      DATABASE_URL: postgres://barbershop:barbershop@db:5432/barbershop?sslmode=disable
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   db-data:

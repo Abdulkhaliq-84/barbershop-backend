@@ -12,7 +12,8 @@ one or more services, and pay at the shop. Businesses pay a **subscription plan*
 **Flutter** (separate repo, later) and consumes this API; owners/barbers use a "Business mode" in the same app.
 
 **Status**: the current milestone is the first unchecked item in the README roadmap. M1 delivered
-the walking skeleton (config, logging, HTTP server, health checks, migrations) and CI.
+the walking skeleton (config, logging, HTTP server, health checks, migrations) and CI; M1.5 the
+delivery pipeline (Docker image, security scans, GHCR publishing, release-please releases).
 
 ## 2. Where things are
 
@@ -128,8 +129,10 @@ Go 1.27+ and Docker are required; `make tools` installs the pinned golangci-lint
 | `make fmt` · `make lint` | Format · lint (incl. depguard architecture rules) |
 | `make test` · `make test-all` | Unit tests · all tests incl. database (`TEST_DATABASE_URL`) |
 | `make check` | **What CI runs** — tidy, lint, all tests, build. Run before every push. |
+| `make docker-build` · `make app-up BARBERSHOP_IMAGE=…` · `make app-down` | Build the production image · run an image (local or a GHCR release) with Compose |
 
 Binary roles: `server api` (default), `server migrate`; `worker` arrives in M3. Config is env vars only — see `.env.example`.
+`main.version` is stamped at build time (`-ldflags -X`); releases are cut by merging release-please's Release PR — never tag by hand.
 Database tests skip unless `TEST_DATABASE_URL` is set; CI always sets it.
 
 ## 12. Don'ts

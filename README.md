@@ -1,13 +1,16 @@
 # barbershop-backend
 
 [![CI](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/ci.yml)
+[![CD](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/cd.yml/badge.svg)](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/cd.yml)
+[![Security](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/security.yml/badge.svg)](https://github.com/Abdulkhaliq-84/barbershop-backend/actions/workflows/security.yml)
 
 Multi-tenant **barbershop booking SaaS** backend in **Go** — built with Domain-Driven Design as a
 modular monolith, PostgreSQL + PostGIS for map search, and phone-OTP authentication.
 The mobile app (Flutter, Arabic-first) will consume this API.
 
-> **Status: M1 — walking skeleton + CI.** Config, structured logging, HTTP server with graceful shutdown,
-> health checks, embedded migrations and CI are in place. Business modules start in M2.
+> **Status: M1.5 — CD & releases.** Config, logging, HTTP server with graceful shutdown, health checks,
+> embedded migrations, CI, security scanning, and a delivery pipeline that publishes scanned, attested
+> multi-arch images to GHCR with SemVer releases. Business modules start in M2.
 > The architecture, domain model and roadmap are in [`docs/`](docs/PLAN.md).
 
 ## Getting started
@@ -25,6 +28,14 @@ curl localhost:8080/readyz    # {"status":"ok","checks":{"database":"ok"}}
 
 make check     # everything CI checks — run before pushing
 make           # list all commands
+```
+
+Run the production image instead (distroless, non-root, ~6 MB):
+
+```bash
+make docker-build && make app-up BARBERSHOP_IMAGE=barbershop-backend:local
+make app-up BARBERSHOP_IMAGE=ghcr.io/abdulkhaliq-84/barbershop-backend:latest   # latest release
+make app-down
 ```
 
 ## What it does
@@ -87,7 +98,7 @@ GitHub Actions · GHCR · release-please · Trivy · CodeQL
 
 - [x] M0 — Planning: domain model, architecture, ADRs, design direction
 - [x] M1 — Walking skeleton + CI: server, config, Postgres/PostGIS, migrations, lint/test/build on every PR
-- [ ] M1.5 — CD & releases: scanned, attested Docker images on GHCR, SemVer releases
+- [x] M1.5 — CD & releases: scanned, attested Docker images on GHCR, SemVer releases
 - [ ] M2 — Shared kernel + IAM: phone OTP, JWT, refresh rotation
 - [ ] M3 — Business onboarding: verification, branches, staff, plans
 - [ ] M4 — Catalog + scheduling: services, opening hours, barber schedules
