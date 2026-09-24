@@ -2,7 +2,6 @@ package database
 
 import (
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
@@ -10,24 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/config"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 )
-
-// testPool connects to the database named by TEST_DATABASE_URL, or skips the
-// test when it is not set, so `go test ./...` works without a database and CI
-// (which starts PostGIS) runs everything.
-func testPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL not set: run `make db-up` then `make test-all`")
-	}
-	pool, err := Open(t.Context(), config.Database{URL: url, MaxConns: 4})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 func TestOpenDoesNotLeakPassword(t *testing.T) {
 	t.Parallel()
@@ -42,7 +25,8 @@ func TestOpenDoesNotLeakPassword(t *testing.T) {
 }
 
 func TestMigrations(t *testing.T) {
-	pool := testPool(t)
+	t.Parallel()
+	pool := dbtest.NewDatabase(t) // private database: the round-trip below drops everything
 	ctx := t.Context()
 	logger := slog.New(slog.DiscardHandler)
 

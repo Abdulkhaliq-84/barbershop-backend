@@ -29,9 +29,13 @@ it in the PR, and leave the next instance as the "Your turn" exercise.
    `business_id` on tenant-owned rows, constraints that protect invariants, indexes for the queries.
 5. **Persistence** (`internal/<module>/adapters/postgres/`) — `queries.sql` → sqlc (`sqlcgen/`), repository
    mapping rows ↔ domain via `Rehydrate`; events inserted to the outbox (River `InsertTx`) in the same tx.
-   Integration test with testcontainers (PostGIS image).
-6. **HTTP adapter** (`internal/<module>/adapters/http/`) — implement the generated strict-server interface;
-   map DTO → command, domain errors → problem+json codes; no business logic here.
+   Integration test on a throwaway database: `pool := dbtest.NewDatabase(t)` then `database.Migrate`
+   (see `internal/iam/adapters/postgres/repository_test.go`; ADR-0012). For locking/concurrency rules,
+   prove the test **fails** with the protection removed before trusting it.
+6. **HTTP adapter** (`internal/<module>/adapters/httpapi/`) — implement your operations of the generated
+   `apigen.StrictServerInterface`; map request → command, domain errors → problem+json codes
+   (`httpx.APIProblem`); no business logic here. Embed the module's handlers in `apiServer`
+   (`cmd/server/main.go`). Example: `internal/iam/adapters/httpapi/handlers.go`.
 7. **Cross-module needs** — call the other module's **root package** API through an ACL adapter in
    `adapters/acl/` that implements this module's port. Never import its internals.
 8. **Wiring** — `internal/<module>/module.go` (`New(deps)`, routes, event subscriptions) and `cmd/server`.

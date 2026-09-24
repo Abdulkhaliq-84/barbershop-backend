@@ -29,15 +29,33 @@ linters:
             - "**/internal/*/domain/**"
           deny:
             - pkg: net/http
-              desc: the domain must not know about HTTP (map errors in adapters/http)
+              desc: the domain must not know about HTTP (map errors in adapters/httpapi)
             - pkg: database/sql
               desc: the domain must not know about the database (use a repository interface)
             - pkg: github.com/jackc/pgx
               desc: the domain must not know about the database (use a repository interface)
             - pkg: github.com/go-chi
               desc: the domain must not know about HTTP routing
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen
+              desc: API types are an adapter concern (convert them in adapters/httpapi)
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/platform
               desc: the domain may import only the standard library and internal/shared
+        # The application layer (use cases) talks to the outside only through
+        # ports (interfaces in app/ports.go and domain repositories).
+        app-uses-ports:
+          files:
+            - "**/internal/*/app/**"
+          deny:
+            - pkg: net/http
+              desc: use cases must not know about HTTP (the httpapi adapter calls them)
+            - pkg: database/sql
+              desc: use cases must not know about the database (use a repository port)
+            - pkg: github.com/jackc/pgx
+              desc: use cases must not know about the database (use a repository port)
+            - pkg: github.com/go-chi
+              desc: use cases must not know about HTTP routing
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen
+              desc: use cases take their own command structs, not generated API types
         # The shared kernel stays tiny and dependency-free (internal/shared/doc.go).
         shared-kernel-is-stable:
           files:

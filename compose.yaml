@@ -31,8 +31,11 @@ services:
     profiles: [app]
     image: ${BARBERSHOP_IMAGE:-ghcr.io/abdulkhaliq-84/barbershop-backend:latest}
     command: ["migrate"]
-    environment:
+    environment: &app-env
       DATABASE_URL: postgres://barbershop:barbershop@db:5432/barbershop?sslmode=disable
+      # Local development only: codes are printed to the log (docker compose logs api).
+      OTP_SECRET: local-development-otp-secret-not-for-real-use
+      SMS_PROVIDER: console
     depends_on:
       db:
         condition: service_healthy
@@ -41,8 +44,7 @@ services:
     profiles: [app]
     image: ${BARBERSHOP_IMAGE:-ghcr.io/abdulkhaliq-84/barbershop-backend:latest}
     command: ["api"]
-    environment:
-      DATABASE_URL: postgres://barbershop:barbershop@db:5432/barbershop?sslmode=disable
+    environment: *app-env
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

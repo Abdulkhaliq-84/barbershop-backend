@@ -73,7 +73,7 @@ flowchart LR
 
 | Workflow | Trigger | Jobs | Arrives in |
 |---|---|---|---|
-| `ci.yml` | pull request, push to `main` | `lint` (`go mod tidy -diff`, golangci-lint incl. gofumpt/goimports, module-boundary + gosec rules, `go vet`) · `test` (`go test -race -cover` against a PostGIS service container; migrations applied from scratch) · `build` (static `go build` + Docker build and **Trivy** scan, not pushed) · `generated` (from M2: sqlc + oapi-codegen drift) | M1 · image build M1.5 |
+| `ci.yml` | pull request, push to `main` | `lint` (`go mod tidy -diff`, golangci-lint incl. gofumpt/goimports, module-boundary + gosec rules, `go vet`) · `test` (`go test -race -cover` against a PostGIS service container; migrations applied from scratch) · `build` (static `go build` + Docker build and **Trivy** scan, not pushed) · `generated` (`make generate`, then fail if the committed sqlc/oapi-codegen output differs) | M1 · image build M1.5 · generated M2.2 |
 | `pr-title.yml` | pull request | Conventional Commit title check | M1 |
 | `dependabot.yml` (config) | weekly | Go modules, GitHub Actions, Docker base images | M1 · docker M1.5 |
 | `security.yml` | pull request, `main`, weekly | `govulncheck`, `gitleaks` (secrets, full history), dependency review (PRs), **CodeQL** (Go SAST → Security tab) | M1.5 |

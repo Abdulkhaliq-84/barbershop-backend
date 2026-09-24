@@ -1,0 +1,196 @@
+openapi: 3.0.3
+info:
+  title: Barbershop API
+  version: 0.1.0
+  description: |
+    HTTP API for the barbershop booking platform (Saudi Arabia / GCC).
+    This file is the source of truth: the Go server interface is generated from
+    it (`make generate`), and so will the Flutter client be. Change the spec
+    first, then the code. Conventions: docs/api/overview.md.
+
+    Errors are RFC 9457 `application/problem+json` with a stable `code`.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: auth
+    description: Phone number + one-time code login
+
+paths:
+  /v1/auth/otp/request:
+    post:
+      operationId: requestOTP
+      tags: [auth]
+      summary: Send a one-time login code by SMS
+      description: |
+        Sends a 6-digit code to the phone number. The answer is the same
+        whether or not the number already has an account, so the endpoint
+        can't be used to discover who is registered.
+
+        Limits: one code per number per `resend_after_seconds`, and a few
+        codes per number per hour (`429 otp_cooldown` / `429 rate_limited`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OTPRequest"
+      responses:
+        "202":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OTPRequested"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/auth/otp/verify:
+    post:
+      operationId: verifyOTP
+      tags: [auth]
+      summary: Check a one-time code and sign in (registering new numbers)
+      description: |
+        A correct code signs the user in; a number seen for the first time
+        becomes a new user (`is_new_user: true`). Each code works once, expires
+        after a few minutes and allows a few attempts
+        (`401 otp_invalid`, `401 otp_expired`, `429 otp_too_many_attempts`).
+      parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OTPVerify"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Login"
+        default:
+          $ref: "#/components/responses/Problem"
+
+components:
+  parameters:
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      description: Preferred language (`ar` default, `en`). Also the language saved for new users.
+      schema:
+        type: string
+        example: ar-SA
+
+  responses:
+    Problem:
+      description: Error (RFC 9457 problem details)
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying (only on 429)
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          example: about:blank
+        title:
+          type: string
+          example: Too Many Requests
+        status:
+          type: integer
+          example: 429
+        code:
+          type: string
+          description: |
+            Stable machine-readable error code. Known values:
+            `validation_failed`, `not_found`, `method_not_allowed`, `internal`,
+            `not_ready`, `rate_limited`, `otp_cooldown`, `otp_invalid`,
+            `otp_expired`, `otp_too_many_attempts`, `user_blocked`.
+          example: otp_cooldown
+        detail:
+          type: string
+        request_id:
+          type: string
+
+    OTPRequest:
+      type: object
+      additionalProperties: false
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Saudi mobile number in any common format (05…, +9665…, Arabic-Indic digits).
+          example: "0551234567"
+
+    OTPRequested:
+      type: object
+      required: [expires_in_seconds, resend_after_seconds]
+      properties:
+        expires_in_seconds:
+          type: integer
+          example: 300
+        resend_after_seconds:
+          type: integer
+          example: 60
+
+    OTPVerify:
+      type: object
+      additionalProperties: false
+      required: [phone, code]
+      properties:
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          example: "0551234567"
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+          description: The 6-digit code (Western or Arabic-Indic digits).
+          example: "482193"
+
+    Login:
+      type: object
+      required: [user, is_new_user]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        is_new_user:
+          type: boolean
+          description: True when this verification created the account (show onboarding).
+
+    User:
+      type: object
+      required: [id, phone, locale, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+          example: "+966551234567"
+        name:
+          type: string
+          nullable: true
+          example: عبدالرحمن
+        locale:
+          type: string
+          enum: [ar, en]
+        created_at:
+          type: string
+          format: date-time

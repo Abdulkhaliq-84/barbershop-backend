@@ -77,7 +77,7 @@ flowchart LR
 ## Tech stack
 
 Go · net/http + chi · PostgreSQL + PostGIS · pgx + sqlc · goose · River · OpenAPI (oapi-codegen) ·
-JWT (EdDSA) · log/slog · testcontainers-go · golangci-lint · Docker Compose ·
+JWT (EdDSA) · log/slog · golangci-lint · Docker Compose ·
 GitHub Actions · GHCR · release-please · Trivy · CodeQL
 
 ## Documentation

@@ -21,6 +21,7 @@ import (
 const (
 	EnvDevelopment = "development"
 	EnvTest        = "test"
+	EnvStaging     = "staging"
 	EnvProduction  = "production"
 )
 
@@ -30,6 +31,7 @@ type Config struct {
 	HTTP     HTTP
 	Database Database
 	Log      Log
+	Auth     Auth
 }
 
 // HTTP configures the HTTP server. The timeouts protect the server from slow
@@ -50,6 +52,16 @@ type Database struct {
 	// It contains a password: never log it.
 	URL      string `env:"DATABASE_URL,required,notEmpty"`
 	MaxConns int32  `env:"DATABASE_MAX_CONNS" envDefault:"10"`
+}
+
+// Auth configures login.
+type Auth struct {
+	// OTPSecret is the HMAC key for stored one-time codes (≥ 32 bytes).
+	// A secret: never log it, and use a different one per environment.
+	OTPSecret string `env:"OTP_SECRET,required,notEmpty"`
+	// SMSProvider delivers codes. Only "console" (development: prints the
+	// code to the log) exists until a real provider arrives in M7.
+	SMSProvider string `env:"SMS_PROVIDER" envDefault:"console"`
 }
 
 // Log configures structured logging.
@@ -78,8 +90,8 @@ func Load(environ []string) (Config, error) {
 // problem at once (errors.Join) so a misconfigured deploy is fixed in one go.
 func (c Config) validate() error {
 	var errs []error
-	if !slices.Contains([]string{EnvDevelopment, EnvTest, EnvProduction}, c.Env) {
-		errs = append(errs, fmt.Errorf("APP_ENV must be development, test or production, got %q", c.Env))
+	if !slices.Contains([]string{EnvDevelopment, EnvTest, EnvStaging, EnvProduction}, c.Env) {
+		errs = append(errs, fmt.Errorf("APP_ENV must be development, test, staging or production, got %q", c.Env))
 	}
 	if !slices.Contains([]string{"json", "text"}, c.Log.Format) {
 		errs = append(errs, fmt.Errorf("LOG_FORMAT must be json or text, got %q", c.Log.Format))
@@ -89,6 +101,15 @@ func (c Config) validate() error {
 	}
 	if c.HTTP.ShutdownTimeout <= 0 {
 		errs = append(errs, errors.New("HTTP_SHUTDOWN_TIMEOUT must be positive"))
+	}
+	if len(c.Auth.OTPSecret) < 32 {
+		errs = append(errs, errors.New("OTP_SECRET must be at least 32 bytes"))
+	}
+	if c.Auth.SMSProvider != "console" {
+		errs = append(errs, fmt.Errorf("SMS_PROVIDER must be console (the only provider so far), got %q", c.Auth.SMSProvider))
+	}
+	if c.Env == EnvProduction && c.Auth.SMSProvider == "console" {
+		errs = append(errs, errors.New("SMS_PROVIDER=console prints login codes to the log and is not allowed in production"))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
