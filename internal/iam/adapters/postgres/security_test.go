@@ -15,6 +15,11 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
+// noSessions stands in for the session issuer: these tests are about codes.
+type noSessions struct{}
+
+func (noSessions) Start(context.Context, *domain.User) (app.Tokens, error) { return app.Tokens{}, nil }
+
 type testCodes struct {
 	calls   atomic.Int32
 	entered chan struct{}
@@ -129,7 +134,7 @@ func TestOTPPhoneFailuresAreAtomic(t *testing.T) {
 	pool := migratedDB(t)
 	repo := postgres.NewOTPChallenges(pool)
 	policy := domain.DefaultOTPPolicy()
-	verify := app.NewVerifyOTPHandler(repo, postgres.NewUsers(pool), testHasher{}, clock.NewFake(t0), policy)
+	verify := app.NewVerifyOTPHandler(repo, postgres.NewUsers(pool), testHasher{}, noSessions{}, clock.NewFake(t0), policy)
 	var wg sync.WaitGroup
 	var locked atomic.Int32
 	for range 30 {

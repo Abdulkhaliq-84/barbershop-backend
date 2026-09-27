@@ -22,6 +22,12 @@ type VerifyOTP struct {
 type Login struct {
 	User      *domain.User
 	IsNewUser bool
+	Tokens    Tokens
+}
+
+// SessionStarter begins a signed-in session for a user.
+type SessionStarter interface {
+	Start(ctx context.Context, user *domain.User) (Tokens, error)
 }
 
 // VerifyOTPHandler signs users in with a one-time code, registering numbers
@@ -30,16 +36,18 @@ type VerifyOTPHandler struct {
 	challenges domain.OTPChallenges
 	users      domain.Users
 	hasher     CodeHasher
+	sessions   SessionStarter
 	clock      clock.Clock
 	policy     domain.OTPPolicy
 }
 
 // NewVerifyOTPHandler wires the handler's dependencies.
-func NewVerifyOTPHandler(challenges domain.OTPChallenges, users domain.Users, hasher CodeHasher, clk clock.Clock, policy domain.OTPPolicy) *VerifyOTPHandler {
-	return &VerifyOTPHandler{challenges: challenges, users: users, hasher: hasher, clock: clk, policy: policy}
+func NewVerifyOTPHandler(challenges domain.OTPChallenges, users domain.Users, hasher CodeHasher, sessions SessionStarter, clk clock.Clock, policy domain.OTPPolicy) *VerifyOTPHandler {
+	return &VerifyOTPHandler{challenges: challenges, users: users, hasher: hasher, sessions: sessions, clock: clk, policy: policy}
 }
 
-// Handle verifies the code and returns the (possibly new) user.
+// Handle verifies the code and returns the (possibly new) user with the
+// tokens of a new session.
 func (h *VerifyOTPHandler) Handle(ctx context.Context, cmd VerifyOTP) (Login, error) {
 	phone, err := shared.NewPhoneNumber(cmd.Phone)
 	if err != nil {
@@ -95,5 +103,9 @@ func (h *VerifyOTPHandler) Handle(ctx context.Context, cmd VerifyOTP) (Login, er
 	if user.IsBlocked() {
 		return Login{}, domain.ErrUserBlocked
 	}
-	return Login{User: user, IsNewUser: created}, nil
+	tokens, err := h.sessions.Start(ctx, user)
+	if err != nil {
+		return Login{}, fmt.Errorf("verify otp: %w", err)
+	}
+	return Login{User: user, IsNewUser: created, Tokens: tokens}, nil
 }

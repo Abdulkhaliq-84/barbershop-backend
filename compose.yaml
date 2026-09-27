@@ -38,6 +38,7 @@ services:
       # Local development only: codes are printed to the log (docker compose logs api).
       OTP_SECRET: local-development-otp-secret-not-for-real-use
       SMS_PROVIDER: console
+      TOKEN_SIGNING_SECRET: local-development-token-signing-secret-not-for-real-use
     depends_on:
       db:
         condition: service_healthy

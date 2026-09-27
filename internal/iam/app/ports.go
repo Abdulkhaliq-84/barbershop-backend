@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -26,4 +27,27 @@ type CodeHasher interface {
 // development).
 type OTPSender interface {
 	SendOTP(ctx context.Context, to shared.PhoneNumber, code domain.OTPCode) error
+}
+
+// AccessClaims is what an access token says about its holder.
+type AccessClaims struct {
+	UserID       shared.UserID
+	SessionID    domain.SessionID
+	PlatformRole domain.PlatformRole
+	IssuedAt     time.Time
+	ExpiresAt    time.Time
+}
+
+// AccessTokenIssuer signs access tokens (JWT in production).
+type AccessTokenIssuer interface {
+	Issue(claims AccessClaims) (string, error)
+}
+
+// RefreshTokenSecrets creates opaque refresh tokens and hashes presented ones.
+type RefreshTokenSecrets interface {
+	// New returns a fresh token for the client and the hash to store.
+	New() (token string, hash []byte, err error)
+	// Hash returns the stored form of a presented token, or an error when
+	// the token is not even well-formed.
+	Hash(token string) ([]byte, error)
 }

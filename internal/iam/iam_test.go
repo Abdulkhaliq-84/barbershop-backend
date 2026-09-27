@@ -62,13 +62,14 @@ func newEnv(t *testing.T) *env {
 	e := &env{inbox: &inbox{codes: map[string]string{}}, clock: clock.NewFake(time.Now())}
 	mod, err := iam.New(iam.Deps{
 		Pool: pool, Clock: e.clock, Logger: logger, OTPSender: e.inbox,
-		OTPSecret: []byte("test-only-secret-0123456789abcdef-xyz"),
+		OTPSecret:   []byte("test-only-secret-0123456789abcdef-xyz"),
+		TokenSecret: []byte("test-only-token-secret-0123456789abcdef"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	if err := httpx.MountAPI(router, apiServer{mod.HTTP()}, logger); err != nil {
+	if err := httpx.MountAPI(router, apiServer{mod.HTTP()}, logger, mod.Authenticate); err != nil {
 		t.Fatal(err)
 	}
 	e.server = httptest.NewServer(router)
@@ -84,11 +85,23 @@ type response struct {
 
 func (e *env) post(t *testing.T, path, body string, headers ...string) response {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, e.server.URL+path, bytes.NewBufferString(body))
+	return e.do(t, http.MethodPost, path, body, headers...)
+}
+
+func (e *env) get(t *testing.T, path string, headers ...string) response {
+	t.Helper()
+	return e.do(t, http.MethodGet, path, "", headers...)
+}
+
+func (e *env) do(t *testing.T, method, path, body string, headers ...string) response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, e.server.URL+path, bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	for i := 0; i+1 < len(headers); i += 2 {
 		req.Header.Set(headers[i], headers[i+1])
 	}
@@ -101,7 +114,7 @@ func (e *env) post(t *testing.T, path, body string, headers ...string) response 
 	var parsed map[string]any
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &parsed); err != nil {
-			t.Fatalf("POST %s: response is not JSON: %s", path, raw)
+			t.Fatalf("%s %s: response is not JSON: %s", method, path, raw)
 		}
 	}
 	return response{status: resp.StatusCode, headers: resp.Header, body: parsed}
@@ -236,5 +249,124 @@ func TestValidationNeverEchoesUnknownKeys(t *testing.T) {
 		if r.status != 400 || strings.Contains(detail, "551234567") || strings.Contains(detail, "private") {
 			t.Fatalf("unsafe validation response: %v", r)
 		}
+	}
+}
+
+// signIn logs a number in and returns the access and refresh tokens.
+func (e *env) signIn(t *testing.T, phone string) (access, refresh string) {
+	t.Helper()
+	if r := e.post(t, "/v1/auth/otp/request", `{"phone":"`+phone+`"}`); r.status != http.StatusAccepted {
+		t.Fatalf("request code: %d %v", r.status, r.body)
+	}
+	e.clock.Advance(2 * time.Minute) // the next sign-in of this number is past the resend cooldown
+	p, err := shared.NewPhoneNumber(phone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := e.post(t, "/v1/auth/otp/verify", `{"phone":"`+phone+`","code":"`+e.inbox.last(p.String())+`"}`)
+	tokens, _ := r.body["tokens"].(map[string]any)
+	access, _ = tokens["access_token"].(string)
+	refresh, _ = tokens["refresh_token"].(string)
+	if r.status != http.StatusOK || access == "" || refresh == "" || tokens["token_type"] != "Bearer" ||
+		tokens["expires_in"] != float64(900) || tokens["refresh_expires_in"] != float64(30*24*3600) {
+		t.Fatalf("verify: %d %v", r.status, r.body)
+	}
+	return access, refresh
+}
+
+func bearer(token string) []string { return []string{"Authorization", "Bearer " + token} }
+
+func TestSessionFlow(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	access, refresh := e.signIn(t, "0551234567")
+
+	// 1. The access token opens /v1/me.
+	r := e.get(t, "/v1/me", bearer(access)...)
+	if r.status != http.StatusOK || r.body["phone"] != "+966551234567" {
+		t.Fatalf("GET /v1/me: %d %v", r.status, r.body)
+	}
+
+	// 2. Refresh: a new pair, and the old refresh token is spent.
+	r = e.post(t, "/v1/auth/refresh", `{"refresh_token":"`+refresh+`"}`)
+	access2, _ := r.body["access_token"].(string)
+	refresh2, _ := r.body["refresh_token"].(string)
+	if r.status != http.StatusOK || access2 == "" || refresh2 == "" || refresh2 == refresh {
+		t.Fatalf("refresh: %d %v", r.status, r.body)
+	}
+	if r = e.get(t, "/v1/me", bearer(access2)...); r.status != http.StatusOK {
+		t.Fatalf("GET /v1/me with the refreshed token: %d %v", r.status, r.body)
+	}
+
+	// 3. The spent token comes back: it was copied. The session ends…
+	r = e.post(t, "/v1/auth/refresh", `{"refresh_token":"`+refresh+`"}`)
+	if r.status != http.StatusUnauthorized || r.body["code"] != "refresh_token_reused" {
+		t.Fatalf("reuse: %d %v", r.status, r.body)
+	}
+	// …so the newest refresh token is dead as well.
+	r = e.post(t, "/v1/auth/refresh", `{"refresh_token":"`+refresh2+`"}`)
+	if r.status != http.StatusUnauthorized || r.body["code"] != "refresh_token_invalid" {
+		t.Fatalf("after reuse: %d %v", r.status, r.body)
+	}
+}
+
+func TestLogout(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	access, refresh := e.signIn(t, "0551234567")
+
+	for range 2 { // signing out twice is fine
+		if r := e.post(t, "/v1/auth/logout", "", bearer(access)...); r.status != http.StatusNoContent {
+			t.Fatalf("logout: %d %v", r.status, r.body)
+		}
+	}
+	r := e.post(t, "/v1/auth/refresh", `{"refresh_token":"`+refresh+`"}`)
+	if r.status != http.StatusUnauthorized || r.body["code"] != "refresh_token_invalid" {
+		t.Fatalf("refresh after logout: %d %v", r.status, r.body)
+	}
+	// Another sign-in on the same number is a separate session.
+	_, other := e.signIn(t, "0551234567")
+	if r := e.post(t, "/v1/auth/refresh", `{"refresh_token":"`+other+`"}`); r.status != http.StatusOK {
+		t.Fatalf("second session: %d %v", r.status, r.body)
+	}
+}
+
+func TestProtectedOperationsNeedAValidToken(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	access, _ := e.signIn(t, "0551234567")
+
+	tests := map[string][]string{
+		"no header":      nil,
+		"garbage token":  bearer("not-a-token"),
+		"wrong scheme":   {"Authorization", "Basic " + access},
+		"refresh token":  bearer("rt_" + strings.Repeat("A", 43)),
+		"empty bearer":   {"Authorization", "Bearer "},
+		"tampered token": bearer(access[:len(access)-2] + "xx"),
+	}
+	for name, headers := range tests {
+		r := e.get(t, "/v1/me", headers...)
+		if r.status != http.StatusUnauthorized || r.body["code"] != "unauthorized" || !strings.HasPrefix(r.headers.Get("WWW-Authenticate"), "Bearer") {
+			t.Errorf("%s: %d %v WWW-Authenticate=%q", name, r.status, r.body, r.headers.Get("WWW-Authenticate"))
+		}
+	}
+	if r := e.post(t, "/v1/auth/logout", ""); r.status != http.StatusUnauthorized {
+		t.Errorf("logout without token: %d %v", r.status, r.body)
+	}
+
+	// The scheme is case-insensitive.
+	if r := e.get(t, "/v1/me", "Authorization", "bearer "+access); r.status != http.StatusOK {
+		t.Errorf("lower-case scheme: %d %v", r.status, r.body)
+	}
+
+	// Access tokens expire after 15 minutes (plus 30 s allowed clock skew).
+	e.clock.Advance(16 * time.Minute)
+	if r := e.get(t, "/v1/me", bearer(access)...); r.status != http.StatusUnauthorized {
+		t.Errorf("expired token: %d %v", r.status, r.body)
+	}
+
+	// Public operations ignore a bad token instead of failing.
+	if r := e.post(t, "/v1/auth/otp/request", `{"phone":"0559998888"}`, bearer("garbage")...); r.status != http.StatusAccepted {
+		t.Errorf("public operation with a bad token: %d %v", r.status, r.body)
 	}
 }

@@ -22,6 +22,21 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for TokenPairTokenType.
+const (
+	Bearer TokenPairTokenType = "Bearer"
+)
+
+// Valid indicates whether the value is a known member of the TokenPairTokenType enum.
+func (e TokenPairTokenType) Valid() bool {
+	switch e {
+	case Bearer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UserLocale.
 const (
 	Ar UserLocale = "ar"
@@ -43,8 +58,9 @@ func (e UserLocale) Valid() bool {
 // Login defines model for Login.
 type Login struct {
 	// IsNewUser True when this verification created the account (show onboarding).
-	IsNewUser bool `json:"is_new_user"`
-	User      User `json:"user"`
+	IsNewUser bool      `json:"is_new_user"`
+	Tokens    TokenPair `json:"tokens"`
+	User      User      `json:"user"`
 }
 
 // OTPRequest defines model for OTPRequest.
@@ -80,7 +96,8 @@ type Problem struct {
 	// Code Stable machine-readable error code. Known values:
 	// `validation_failed`, `not_found`, `method_not_allowed`, `internal`,
 	// `not_ready`, `rate_limited`, `otp_cooldown`, `otp_invalid`,
-	// `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`.
+	// `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`,
+	// `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`.
 	//
 	//
 	// Example: otp_cooldown
@@ -97,6 +114,34 @@ type Problem struct {
 	// Type Example: about:blank
 	Type string `json:"type"`
 }
+
+// RefreshRequest defines model for RefreshRequest.
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// TokenPair defines model for TokenPair.
+type TokenPair struct {
+	// AccessToken Send as `Authorization: Bearer <access_token>`.
+	AccessToken string `json:"access_token"`
+
+	// ExpiresIn Seconds until the access token expires.
+	//
+	// Example: 900
+	ExpiresIn int `json:"expires_in"`
+
+	// RefreshExpiresIn Seconds until the refresh token expires if unused.
+	//
+	// Example: 2592000
+	RefreshExpiresIn int `json:"refresh_expires_in"`
+
+	// RefreshToken Single use. Store it in the device's secure storage only.
+	RefreshToken string             `json:"refresh_token"`
+	TokenType    TokenPairTokenType `json:"token_type"`
+}
+
+// TokenPairTokenType defines model for TokenPair.TokenType.
+type TokenPairTokenType string
 
 // User defines model for User.
 type User struct {
@@ -129,19 +174,37 @@ type RequestOTPJSONRequestBody = OTPRequest
 // VerifyOTPJSONRequestBody defines body for VerifyOTP for application/json ContentType.
 type VerifyOTPJSONRequestBody = OTPVerify
 
+// RefreshTokensJSONRequestBody defines body for RefreshTokens for application/json ContentType.
+type RefreshTokensJSONRequestBody = RefreshRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Logout Sign out of this session
+	// (POST /v1/auth/logout)
+	Logout(w http.ResponseWriter, r *http.Request)
 	// RequestOTP Send a one-time login code by SMS
 	// (POST /v1/auth/otp/request)
 	RequestOTP(w http.ResponseWriter, r *http.Request)
 	// VerifyOTP Check a one-time code and sign in (registering new numbers)
 	// (POST /v1/auth/otp/verify)
 	VerifyOTP(w http.ResponseWriter, r *http.Request, params VerifyOTPParams)
+	// RefreshTokens Exchange a refresh token for a new token pair
+	// (POST /v1/auth/refresh)
+	RefreshTokens(w http.ResponseWriter, r *http.Request)
+	// GetMe The signed-in user
+	// (GET /v1/me)
+	GetMe(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// Logout Sign out of this session
+// (POST /v1/auth/logout)
+func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // RequestOTP Send a one-time login code by SMS
 // (POST /v1/auth/otp/request)
@@ -155,6 +218,18 @@ func (_ Unimplemented) VerifyOTP(w http.ResponseWriter, r *http.Request, params 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RefreshTokens Exchange a refresh token for a new token pair
+// (POST /v1/auth/refresh)
+func (_ Unimplemented) RefreshTokens(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetMe The signed-in user
+// (GET /v1/me)
+func (_ Unimplemented) GetMe(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
@@ -163,6 +238,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // RequestOTP operation middleware
 func (siw *ServerInterfaceWrapper) RequestOTP(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +299,34 @@ func (siw *ServerInterfaceWrapper) VerifyOTP(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.VerifyOTP(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshTokens operation middleware
+func (siw *ServerInterfaceWrapper) RefreshTokens(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMe operation middleware
+func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMe(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -338,17 +455,66 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/auth/otp/verify", wrapper.VerifyOTP)
 	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/refresh", wrapper.RefreshTokens)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/logout", wrapper.Logout)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/me", wrapper.GetMe)
+	})
 
 	return r
 }
 
 type ProblemResponseHeaders struct {
-	RetryAfter *int
+	RetryAfter      *int
+	WWWAuthenticate *string
 }
 type ProblemApplicationProblemPlusJSONResponse struct {
 	Body Problem
 
 	Headers ProblemResponseHeaders
+}
+
+type LogoutRequestObject struct {
+}
+
+type LogoutResponseObject interface {
+	VisitLogoutResponse(w http.ResponseWriter) error
+}
+
+type Logout204Response struct {
+}
+
+func (response Logout204Response) VisitLogoutResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type LogoutdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response LogoutdefaultApplicationProblemPlusJSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type RequestOTPRequestObject struct {
@@ -388,6 +554,9 @@ func (response RequestOTPdefaultApplicationProblemPlusJSONResponse) VisitRequest
 	w.Header().Set("Content-Type", "application/problem+json")
 	if response.Headers.RetryAfter != nil {
 		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -433,6 +602,100 @@ func (response VerifyOTPdefaultApplicationProblemPlusJSONResponse) VisitVerifyOT
 	if response.Headers.RetryAfter != nil {
 		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
 	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshTokensRequestObject struct {
+	Body *RefreshTokensJSONRequestBody
+}
+
+type RefreshTokensResponseObject interface {
+	VisitRefreshTokensResponse(w http.ResponseWriter) error
+}
+
+type RefreshTokens200JSONResponse TokenPair
+
+func (response RefreshTokens200JSONResponse) VisitRefreshTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshTokensdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response RefreshTokensdefaultApplicationProblemPlusJSONResponse) VisitRefreshTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMeRequestObject struct {
+}
+
+type GetMeResponseObject interface {
+	VisitGetMeResponse(w http.ResponseWriter) error
+}
+
+type GetMe200JSONResponse User
+
+func (response GetMe200JSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetMedefaultApplicationProblemPlusJSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
 	return err
@@ -440,12 +703,21 @@ func (response VerifyOTPdefaultApplicationProblemPlusJSONResponse) VisitVerifyOT
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Logout Sign out of this session
+	// (POST /v1/auth/logout)
+	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
 	// RequestOTP Send a one-time login code by SMS
 	// (POST /v1/auth/otp/request)
 	RequestOTP(ctx context.Context, request RequestOTPRequestObject) (RequestOTPResponseObject, error)
 	// VerifyOTP Check a one-time code and sign in (registering new numbers)
 	// (POST /v1/auth/otp/verify)
 	VerifyOTP(ctx context.Context, request VerifyOTPRequestObject) (VerifyOTPResponseObject, error)
+	// RefreshTokens Exchange a refresh token for a new token pair
+	// (POST /v1/auth/refresh)
+	RefreshTokens(ctx context.Context, request RefreshTokensRequestObject) (RefreshTokensResponseObject, error)
+	// GetMe The signed-in user
+	// (GET /v1/me)
+	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -485,6 +757,30 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// Logout operation middleware
+func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	var request LogoutRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Logout(ctx, request.(LogoutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Logout")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LogoutResponseObject); ok {
+		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // RequestOTP operation middleware
@@ -551,42 +847,113 @@ func (sh *strictHandler) VerifyOTP(w http.ResponseWriter, r *http.Request, param
 	}
 }
 
+// RefreshTokens operation middleware
+func (sh *strictHandler) RefreshTokens(w http.ResponseWriter, r *http.Request) {
+	var request RefreshTokensRequestObject
+
+	var body RefreshTokensJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RefreshTokens(ctx, request.(RefreshTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RefreshTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RefreshTokensResponseObject); ok {
+		if err := validResponse.VisitRefreshTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMe operation middleware
+func (sh *strictHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+	var request GetMeRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMe(ctx, request.(GetMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMe")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMeResponseObject); ok {
+		if err := validResponse.VisitGetMeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
 // Stored as a slice of fixed-width chunks rather than one concatenated
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

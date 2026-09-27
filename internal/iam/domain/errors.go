@@ -20,6 +20,10 @@ var (
 	ErrOTPCooldown        = errors.New("otp: wait before requesting another code")
 	ErrOTPRateLimited     = errors.New("otp: too many codes requested")
 	ErrUserBlocked        = errors.New("user is blocked")
+
+	ErrUnauthenticated     = errors.New("not signed in")
+	ErrRefreshTokenInvalid = errors.New("refresh token: unknown, expired or signed out")
+	ErrRefreshTokenReused  = errors.New("refresh token: already used; session ended")
 )
 
 // RetryLaterError wraps an error that goes away with time and says how long

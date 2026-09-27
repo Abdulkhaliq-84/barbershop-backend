@@ -15,6 +15,16 @@ const (
 	UserBlocked UserStatus = "blocked"
 )
 
+// PlatformRole is a user's role on the platform itself (not in a business:
+// business roles come from staff membership and are checked per request).
+type PlatformRole string
+
+// Platform roles (iam.users.platform_role).
+const (
+	PlatformRoleNone  PlatformRole = "none"
+	PlatformRoleAdmin PlatformRole = "admin" // approves businesses, blocks users
+)
+
 // User is a person who signs in with their phone number. Any user can book
 // as a customer; business roles come from staff membership (business module).
 type User struct {
@@ -23,17 +33,18 @@ type User struct {
 	name      string
 	locale    shared.Language
 	status    UserStatus
+	role      PlatformRole
 	createdAt time.Time
 }
 
 // NewUser registers a phone number. Name is collected later, in onboarding.
 func NewUser(id shared.UserID, phone shared.PhoneNumber, locale shared.Language, now time.Time) *User {
-	return &User{id: id, phone: phone, locale: locale, status: UserActive, createdAt: now}
+	return &User{id: id, phone: phone, locale: locale, status: UserActive, role: PlatformRoleNone, createdAt: now}
 }
 
 // RehydrateUser rebuilds a user loaded from storage.
-func RehydrateUser(id shared.UserID, phone shared.PhoneNumber, name string, locale shared.Language, status UserStatus, createdAt time.Time) *User {
-	return &User{id: id, phone: phone, name: name, locale: locale, status: status, createdAt: createdAt}
+func RehydrateUser(id shared.UserID, phone shared.PhoneNumber, name string, locale shared.Language, status UserStatus, role PlatformRole, createdAt time.Time) *User {
+	return &User{id: id, phone: phone, name: name, locale: locale, status: status, role: role, createdAt: createdAt}
 }
 
 // ID returns the user ID.
@@ -47,6 +58,9 @@ func (u *User) Name() string { return u.name }
 
 // Locale returns the preferred language.
 func (u *User) Locale() shared.Language { return u.locale }
+
+// PlatformRole returns the user's platform role.
+func (u *User) PlatformRole() PlatformRole { return u.role }
 
 // IsBlocked reports whether the platform blocked this user.
 func (u *User) IsBlocked() bool { return u.status == UserBlocked }

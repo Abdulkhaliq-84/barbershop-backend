@@ -9,18 +9,30 @@ info:
     first, then the code. Conventions: docs/api/overview.md.
 
     Errors are RFC 9457 `application/problem+json` with a stable `code`.
+
+    Authentication: every operation needs `Authorization: Bearer <access_token>`
+    unless it declares `security: []`. Access tokens live 15 minutes; renew
+    them with `POST /v1/auth/refresh`. A `401 unauthorized` from a protected
+    operation means "refresh, then retry once".
 servers:
   - url: http://localhost:8080
     description: Local development
 tags:
   - name: auth
-    description: Phone number + one-time code login
+    description: Phone number + one-time code login, tokens and sessions
+  - name: me
+    description: The signed-in user
+
+# Protected by default: an operation is public only if it says `security: []`.
+security:
+  - bearerAuth: []
 
 paths:
   /v1/auth/otp/request:
     post:
       operationId: requestOTP
       tags: [auth]
+      security: []
       summary: Send a one-time login code by SMS
       description: |
         Sends a 6-digit code to the phone number. The answer is the same
@@ -51,6 +63,7 @@ paths:
     post:
       operationId: verifyOTP
       tags: [auth]
+      security: []
       summary: Check a one-time code and sign in (registering new numbers)
       description: |
         A correct code signs the user in; a number seen for the first time
@@ -60,6 +73,9 @@ paths:
         Ten failed verifications within 15 minutes lock the number for 15 minutes
         (`429 otp_locked`, with `Retry-After`). New codes do not reset failures;
         a successful verification or expiration of the failure window does.
+
+        Signing in starts a session: the response carries an access token and
+        a refresh token (`tokens`).
       parameters:
         - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
@@ -78,7 +94,76 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/auth/refresh:
+    post:
+      operationId: refreshTokens
+      tags: [auth]
+      security: []
+      summary: Exchange a refresh token for a new token pair
+      description: |
+        Every refresh token works once: the answer carries a new refresh token
+        that replaces it. Presenting an already-used refresh token means it
+        was copied, so the whole session is ended (`401 refresh_token_reused`)
+        and the user must sign in again. Unknown, expired or signed-out tokens
+        get `401 refresh_token_invalid`.
+
+        Clients must not refresh twice in parallel with the same token (for
+        example two requests that both got `401`): the second call would look
+        like reuse. Share one refresh between concurrent requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Sign out of this session
+      description: |
+        Ends the caller's session: its refresh token stops working at once.
+        The current access token stays valid until it expires (at most 15
+        minutes), so the app should drop it too. Calling it twice is fine.
+      responses:
+        "204":
+          description: Signed out
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/me:
+    get:
+      operationId: getMe
+      tags: [me]
+      summary: The signed-in user
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from `tokens.access_token` (sign-in or refresh).
+
   parameters:
     AcceptLanguage:
       name: Accept-Language
@@ -97,6 +182,10 @@ components:
           description: Seconds to wait before retrying (only on 429)
           schema:
             type: integer
+        WWW-Authenticate:
+          description: 'Bearer challenge (only on 401 from protected operations)'
+          schema:
+            type: string
       content:
         application/problem+json:
           schema:
@@ -122,7 +211,8 @@ components:
             Stable machine-readable error code. Known values:
             `validation_failed`, `not_found`, `method_not_allowed`, `internal`,
             `not_ready`, `rate_limited`, `otp_cooldown`, `otp_invalid`,
-            `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`.
+            `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`,
+            `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`.
           example: otp_cooldown
         detail:
           type: string
@@ -171,13 +261,47 @@ components:
 
     Login:
       type: object
-      required: [user, is_new_user]
+      required: [user, is_new_user, tokens]
       properties:
         user:
           $ref: "#/components/schemas/User"
         is_new_user:
           type: boolean
           description: True when this verification created the account (show onboarding).
+        tokens:
+          $ref: "#/components/schemas/TokenPair"
+
+    TokenPair:
+      type: object
+      required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in]
+      properties:
+        access_token:
+          type: string
+          description: 'Send as `Authorization: Bearer <access_token>`.'
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Seconds until the access token expires.
+          example: 900
+        refresh_token:
+          type: string
+          description: Single use. Store it in the device's secure storage only.
+        refresh_expires_in:
+          type: integer
+          description: Seconds until the refresh token expires if unused.
+          example: 2592000
+
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
+          maxLength: 256
 
     User:
       type: object
