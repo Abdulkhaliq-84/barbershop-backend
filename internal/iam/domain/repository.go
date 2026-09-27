@@ -11,6 +11,16 @@ import (
 // the domain, and implemented by the postgres adapter: the domain says what
 // it needs, the adapter decides how (ports & adapters).
 type OTPChallenges interface {
+	OTPStore
+	// WithPhoneLock serializes all operations for a normalized phone, including
+	// its first request, and commits fn atomically. Errors roll back everything.
+	WithPhoneLock(ctx context.Context, phone shared.PhoneNumber, fn func(OTPStore) error) error
+}
+
+// OTPStore is the transaction-scoped view supplied by WithPhoneLock.
+type OTPStore interface {
+	LoadGuard(ctx context.Context, phone shared.PhoneNumber) (*OTPGuard, error)
+	SaveGuard(ctx context.Context, phone shared.PhoneNumber, guard *OTPGuard) error
 	Add(ctx context.Context, c *OTPChallenge) error
 	// Latest returns the most recent challenge for phone, or ErrNotFound.
 	Latest(ctx context.Context, phone shared.PhoneNumber) (*OTPChallenge, error)

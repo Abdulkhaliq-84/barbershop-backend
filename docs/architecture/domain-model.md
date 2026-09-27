@@ -289,3 +289,9 @@ platform admin — approve/reject/suspend businesses, plans, reference data
 Checks live in the **application layer** of each module (a `Policy` per use case), never in HTTP
 handlers only. Every business-mode request carries the tenant in the path
 (`/v1/businesses/{businessId}/…`) and the membership check is the first thing the use case does.
+
+### IAM phone-level OTP security
+
+In addition to per-challenge attempts, retain failures across resends: ten failures
+within 15 minutes lock request and verify for 15 minutes. Success clears failures;
+locked attempts do not extend the deadline. See [ADR-0013](../adr/0013-otp-phone-security.md).

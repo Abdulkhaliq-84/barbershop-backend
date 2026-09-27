@@ -17,3 +17,5 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0010](0010-pay-at-shop-first.md) | Pay at the shop in v1 | Accepted |
 | [0011](0011-ci-cd-github-actions.md) | CI/CD on GitHub Actions — build once, publish versioned images, deploy later | Accepted |
 | [0012](0012-test-database-per-test.md) | Integration tests get a throwaway database on a shared PostGIS server | Accepted |
+
+- [0013 — OTP phone security](0013-otp-phone-security.md)

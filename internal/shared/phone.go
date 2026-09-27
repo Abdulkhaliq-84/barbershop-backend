@@ -2,6 +2,7 @@ package shared
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -97,3 +98,13 @@ func (p PhoneNumber) Masked() string {
 // LogValue makes slog print the masked form automatically, so a phone number
 // can never leak into logs by accident (CLAUDE.md: never log full numbers).
 func (p PhoneNumber) LogValue() slog.Value { return slog.StringValue(p.Masked()) }
+
+// Format masks phone numbers in fmt-based logs and wrapped errors, including %+v.
+// Call String explicitly only at storage, SMS and owner-facing API boundaries.
+func (p PhoneNumber) Format(s fmt.State, verb rune) {
+	if verb == 'q' {
+		_, _ = fmt.Fprintf(s, "%q", p.Masked())
+		return
+	}
+	_, _ = fmt.Fprint(s, p.Masked())
+}

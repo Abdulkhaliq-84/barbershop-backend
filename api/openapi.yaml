@@ -29,6 +29,8 @@ paths:
 
         Limits: one code per number per `resend_after_seconds`, and a few
         codes per number per hour (`429 otp_cooldown` / `429 rate_limited`).
+        Ten failed verifications within 15 minutes lock the number for 15 minutes
+        (`429 otp_locked`, with `Retry-After`), including requests for new codes.
       requestBody:
         required: true
         content:
@@ -55,6 +57,9 @@ paths:
         becomes a new user (`is_new_user: true`). Each code works once, expires
         after a few minutes and allows a few attempts
         (`401 otp_invalid`, `401 otp_expired`, `429 otp_too_many_attempts`).
+        Ten failed verifications within 15 minutes lock the number for 15 minutes
+        (`429 otp_locked`, with `Retry-After`). New codes do not reset failures;
+        a successful verification or expiration of the failure window does.
       parameters:
         - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
@@ -117,7 +122,7 @@ components:
             Stable machine-readable error code. Known values:
             `validation_failed`, `not_found`, `method_not_allowed`, `internal`,
             `not_ready`, `rate_limited`, `otp_cooldown`, `otp_invalid`,
-            `otp_expired`, `otp_too_many_attempts`, `user_blocked`.
+            `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`.
           example: otp_cooldown
         detail:
           type: string

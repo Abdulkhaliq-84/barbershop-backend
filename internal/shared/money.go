@@ -35,7 +35,7 @@ type Money struct {
 // NewMoney returns amount minor units of currency.
 func NewMoney(amount int64, currency Currency) (Money, error) {
 	if _, ok := minorPerMajor[currency]; !ok {
-		return Money{}, fmt.Errorf("%w: %q", ErrUnsupportedCurrency, currency)
+		return Money{}, ErrUnsupportedCurrency
 	}
 	return Money{amount: amount, currency: currency}, nil
 }

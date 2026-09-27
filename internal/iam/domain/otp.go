@@ -15,12 +15,15 @@ type OTPPolicy struct {
 	TTL            time.Duration // how long a code works
 	ResendCooldown time.Duration // minimum gap between two codes for a number
 	MaxAttempts    int           // wrong guesses allowed per code
-	MaxPerHour     int           // codes a number may request per hour
+	MaxFailures    int           // failures across codes within FailureWindow
+	FailureWindow  time.Duration
+	Lockout        time.Duration
+	MaxPerHour     int // codes a number may request per hour
 }
 
 // DefaultOTPPolicy is the policy agreed in the plan.
 func DefaultOTPPolicy() OTPPolicy {
-	return OTPPolicy{TTL: 5 * time.Minute, ResendCooldown: time.Minute, MaxAttempts: 5, MaxPerHour: 5}
+	return OTPPolicy{TTL: 5 * time.Minute, ResendCooldown: time.Minute, MaxAttempts: 5, MaxPerHour: 5, MaxFailures: 10, FailureWindow: 15 * time.Minute, Lockout: 15 * time.Minute}
 }
 
 // OTPCode is a 6-digit one-time code, digits normalised to 0-9.

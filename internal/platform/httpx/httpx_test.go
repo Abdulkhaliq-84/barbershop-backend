@@ -121,7 +121,7 @@ func TestRequestID(t *testing.T) {
 		wantSame bool
 	}{
 		{"generated when missing", "", false},
-		{"kept when well formed", "abc-123_XYZ.9", true},
+		{"server-owned even when well formed", "abc-123_XYZ.9", false},
 		{"replaced when unsafe", "bad id\nwith newline", false},
 		{"replaced when too long", strings.Repeat("a", 65), false},
 	}
@@ -166,9 +166,33 @@ func TestAccessLogAndRecover(t *testing.T) {
 		t.Errorf("problem code = %q, want internal", p.Code)
 	}
 	out := logs.String()
-	for _, want := range []string{`"msg":"panic recovered"`, `"panic":"kaboom"`, `"msg":"http request"`, `"status":500`} {
+	if strings.Contains(out, "kaboom") {
+		t.Fatal("panic value leaked")
+	}
+	for _, want := range []string{`"msg":"panic recovered"`, `"msg":"http request"`, `"status":500`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("logs missing %s\nlogs: %s", want, out)
 		}
+	}
+}
+
+func TestLogsAndErrorsExcludeRawRequestInput(t *testing.T) {
+	t.Parallel()
+	const private = "0551234567"
+	var logs strings.Builder
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	router := httpx.NewRouter(logger, httpx.NewHealth(fakePinger{}, logger))
+	router.Get("/panic", func(http.ResponseWriter, *http.Request) { panic(private) })
+	for _, path := range []string{"/" + private, "/panic"} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		req.Header.Set(httpx.RequestIDHeader, private)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if strings.Contains(rec.Body.String(), private) {
+			t.Fatal("raw request input in response")
+		}
+	}
+	if strings.Contains(logs.String(), private) {
+		t.Fatal("raw request input in logs")
 	}
 }

@@ -49,23 +49,40 @@ func (h *VerifyOTPHandler) Handle(ctx context.Context, cmd VerifyOTP) (Login, er
 	if err != nil {
 		return Login{}, err
 	}
-	now := h.clock.Now()
-
-	// The update function returns nil even for a wrong code, so the attempt
-	// counter is saved; the verification result travels out in verifyErr.
 	var verifyErr error
-	err = h.challenges.UpdateLatest(ctx, phone, func(c *domain.OTPChallenge) error {
-		verifyErr = c.Verify(h.hasher.Hash(code), now, h.policy.MaxAttempts)
-		return nil
+	err = h.challenges.WithPhoneLock(ctx, phone, func(store domain.OTPStore) error {
+		now := h.clock.Now()
+		guard, err := store.LoadGuard(ctx, phone)
+		if err != nil {
+			return err
+		}
+		if err := guard.Check(now); err != nil {
+			return err
+		}
+		// Keep business failures outside the transaction error: counters must commit.
+		err = store.UpdateLatest(ctx, phone, func(c *domain.OTPChallenge) error {
+			verifyErr = c.Verify(h.hasher.Hash(code), now, h.policy.MaxAttempts)
+			return nil
+		})
+		if errors.Is(err, domain.ErrNotFound) {
+			verifyErr = domain.ErrOTPInvalid
+		} else if err != nil {
+			return err
+		}
+		if verifyErr == nil {
+			guard.Reset()
+		} else if lockErr := guard.Fail(now, h.policy); lockErr != nil {
+			verifyErr = lockErr
+		}
+		return store.SaveGuard(ctx, phone, guard)
 	})
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		return Login{}, domain.ErrOTPInvalid // never requested: same answer as a wrong code
-	case err != nil:
+	if err != nil {
 		return Login{}, fmt.Errorf("verify otp: %w", err)
-	case verifyErr != nil:
+	}
+	if verifyErr != nil {
 		return Login{}, verifyErr
 	}
+	now := h.clock.Now()
 
 	locale := cmd.Locale
 	if locale == "" {

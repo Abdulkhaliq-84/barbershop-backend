@@ -27,7 +27,7 @@ const (
 
 // Config is the complete service configuration.
 type Config struct {
-	Env      string `env:"APP_ENV" envDefault:"development"`
+	Env      string `env:"APP_ENV,required,notEmpty"`
 	HTTP     HTTP
 	Database Database
 	Log      Log
@@ -37,7 +37,7 @@ type Config struct {
 // HTTP configures the HTTP server. The timeouts protect the server from slow
 // or stuck clients; Go's http.Server has no timeouts by default.
 type HTTP struct {
-	Addr              string        `env:"HTTP_ADDR"                envDefault:":8080"`
+	Addr              string        `env:"HTTP_ADDR"                envDefault:"127.0.0.1:8080"`
 	ReadHeaderTimeout time.Duration `env:"HTTP_READ_HEADER_TIMEOUT" envDefault:"5s"`
 	ReadTimeout       time.Duration `env:"HTTP_READ_TIMEOUT"        envDefault:"15s"`
 	WriteTimeout      time.Duration `env:"HTTP_WRITE_TIMEOUT"       envDefault:"15s"`
@@ -91,22 +91,30 @@ func Load(environ []string) (Config, error) {
 func (c Config) validate() error {
 	var errs []error
 	if !slices.Contains([]string{EnvDevelopment, EnvTest, EnvStaging, EnvProduction}, c.Env) {
-		errs = append(errs, fmt.Errorf("APP_ENV must be development, test, staging or production, got %q", c.Env))
+		errs = append(errs, errors.New("APP_ENV must be development, test, staging or production"))
 	}
 	if !slices.Contains([]string{"json", "text"}, c.Log.Format) {
-		errs = append(errs, fmt.Errorf("LOG_FORMAT must be json or text, got %q", c.Log.Format))
+		errs = append(errs, errors.New("LOG_FORMAT must be json or text"))
 	}
 	if c.Database.MaxConns < 1 {
-		errs = append(errs, fmt.Errorf("DATABASE_MAX_CONNS must be at least 1, got %d", c.Database.MaxConns))
+		errs = append(errs, errors.New("DATABASE_MAX_CONNS must be at least 1"))
 	}
-	if c.HTTP.ShutdownTimeout <= 0 {
-		errs = append(errs, errors.New("HTTP_SHUTDOWN_TIMEOUT must be positive"))
+	for key, value := range map[string]time.Duration{
+		"HTTP_READ_HEADER_TIMEOUT": c.HTTP.ReadHeaderTimeout,
+		"HTTP_READ_TIMEOUT":        c.HTTP.ReadTimeout,
+		"HTTP_WRITE_TIMEOUT":       c.HTTP.WriteTimeout,
+		"HTTP_IDLE_TIMEOUT":        c.HTTP.IdleTimeout,
+		"HTTP_SHUTDOWN_TIMEOUT":    c.HTTP.ShutdownTimeout,
+	} {
+		if value <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be positive", key))
+		}
 	}
 	if len(c.Auth.OTPSecret) < 32 {
 		errs = append(errs, errors.New("OTP_SECRET must be at least 32 bytes"))
 	}
 	if c.Auth.SMSProvider != "console" {
-		errs = append(errs, fmt.Errorf("SMS_PROVIDER must be console (the only provider so far), got %q", c.Auth.SMSProvider))
+		errs = append(errs, errors.New("SMS_PROVIDER must be console (the only provider so far)"))
 	}
 	if c.Env == EnvProduction && c.Auth.SMSProvider == "console" {
 		errs = append(errs, errors.New("SMS_PROVIDER=console prints login codes to the log and is not allowed in production"))
@@ -133,7 +141,7 @@ func withEnvNames(err error) error {
 	for _, e := range agg.Errors {
 		var pe env.ParseError
 		if errors.As(e, &pe) && keys[pe.Name] != "" {
-			e = fmt.Errorf("%s: %w", keys[pe.Name], pe.Err)
+			e = fmt.Errorf("%s: invalid value", keys[pe.Name])
 		}
 		errs = append(errs, e)
 	}

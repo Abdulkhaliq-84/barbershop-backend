@@ -174,13 +174,13 @@ func TestValidationErrors(t *testing.T) {
 		wantStatus       int
 		wantDetail       string
 	}{
-		{"missing phone", "/v1/auth/otp/request", `{}`, 400, `property "phone" is missing`},
-		{"unknown field", "/v1/auth/otp/request", `{"phone":"0551234567","admin":true}`, 400, `"admin"`},
-		{"phone too long", "/v1/auth/otp/request", `{"phone":"` + strings.Repeat("5", 65) + `"}`, 400, "phone"},
+		{"missing phone", "/v1/auth/otp/request", `{}`, 400, "API specification"},
+		{"unknown field", "/v1/auth/otp/request", `{"phone":"0551234567","admin":true}`, 400, "API specification"},
+		{"phone too long", "/v1/auth/otp/request", `{"phone":"` + strings.Repeat("5", 65) + `"}`, 400, "API specification"},
 		{"not JSON", "/v1/auth/otp/request", `phone=055`, 400, ""},
 		{"landline", "/v1/auth/otp/request", `{"phone":"0112345678"}`, 422, "phone"},
 		{"code with letters", "/v1/auth/otp/verify", `{"phone":"0551234567","code":"12a456"}`, 422, "code"},
-		{"code too short", "/v1/auth/otp/verify", `{"phone":"0551234567","code":"123"}`, 400, "code"},
+		{"code too short", "/v1/auth/otp/verify", `{"phone":"0551234567","code":"123"}`, 400, "API specification"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -197,5 +197,44 @@ func TestValidationErrors(t *testing.T) {
 				t.Errorf("detail echoes the phone number: %q", detail)
 			}
 		})
+	}
+}
+
+func TestHTTPPhoneLockout(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	// Unknown phones also count failed verification, without revealing registration.
+	for i := range 10 {
+		r := e.post(t, "/v1/auth/otp/verify", `{"phone":"0551234567","code":"000000"}`)
+		if i < 9 && r.status != 401 {
+			t.Fatalf("failure %d: %v", i, r)
+		}
+		if i == 9 && (r.status != 429 || r.body["code"] != "otp_locked" || r.headers.Get("Retry-After") != "900") {
+			t.Fatalf("lockout: %v", r)
+		}
+	}
+	r := e.post(t, "/v1/auth/otp/request", `{"phone":"+966551234567"}`)
+	if r.status != 429 || r.body["code"] != "otp_locked" {
+		t.Fatalf("locked resend: %v", r)
+	}
+	e.clock.Advance(15 * time.Minute)
+	r = e.post(t, "/v1/auth/otp/request", `{"phone":"0551234567"}`)
+	if r.status != 202 {
+		t.Fatalf("after expiry: %v", r)
+	}
+}
+
+func TestValidationNeverEchoesUnknownKeys(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for _, body := range []string{
+		`{"phone":"0551234567","+966551234567-private":true}`,
+		`{"phone":{"+966551234567-private":true}}`,
+	} {
+		r := e.post(t, "/v1/auth/otp/request", body)
+		detail, _ := r.body["detail"].(string)
+		if r.status != 400 || strings.Contains(detail, "551234567") || strings.Contains(detail, "private") {
+			t.Fatalf("unsafe validation response: %v", r)
+		}
 	}
 }

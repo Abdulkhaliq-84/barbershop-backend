@@ -15,7 +15,7 @@ func ExampleNewPhoneNumber() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(p)          // E.164, for storage and SMS
+	fmt.Println(p.String()) // E.164, for storage and SMS
 	fmt.Println(p.Masked()) // for screens and logs
 	// Output:
 	// +966551234567
