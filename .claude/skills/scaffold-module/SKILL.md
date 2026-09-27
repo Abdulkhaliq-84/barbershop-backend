@@ -35,12 +35,17 @@ it in the PR, and leave the next instance as the "Your turn" exercise.
 6. **HTTP adapter** (`internal/<module>/adapters/httpapi/`) — implement your operations of the generated
    `apigen.StrictServerInterface`; map request → command, domain errors → problem+json codes
    (`httpx.APIProblem`); no business logic here. Embed the module's handlers in `apiServer`
-   (`cmd/server/main.go`). Example: `internal/iam/adapters/httpapi/handlers.go`.
+   (`cmd/server/main.go`) through a type alias (every module's type is called `Handlers`). A module's
+   own end-to-end test embeds `notServed` for the other modules' operations
+   (`internal/iam/iam_test.go`); flows across modules are tested in `cmd/server/api_test.go`.
+   Examples: `internal/iam/adapters/httpapi/handlers.go`, `internal/business/adapters/httpapi/handlers.go`.
    Operations are protected by default: take the caller from `auth.PrincipalFrom(ctx)` and pass its
    `UserID` into the command. Add `security: []` in the spec only for truly public operations, and
    say why in the PR (ADR-0014).
 7. **Cross-module needs** — call the other module's **root package** API through an ACL adapter in
-   `adapters/acl/` that implements this module's port. Never import its internals.
+   `adapters/acl/` that implements this module's port. Never import its internals (depguard fails
+   the build; add the new module to the `*-keeps-to-itself` rules in `.golangci.yml`). No foreign
+   keys into another module's schema (ADR-0015).
 8. **Wiring** — `internal/<module>/module.go` (`New(deps)`, routes, event subscriptions) and `cmd/server`.
 9. **Docs** — update `docs/api/overview.md` / domain model if behaviour changed; README roadmap checkbox when a milestone completes.
 
@@ -71,15 +76,17 @@ type BranchRepository interface {
     Update(ctx context.Context, biz shared.BusinessID, id BranchID, fn func(*Branch) error) error
 }
 
-// app: command handler — authorize first, then domain behaviour
+// app: command handler — authorize first, then domain behaviour.
+// authorize lives in internal/business/app/policy.go (ADR-0015): strangers
+// get ErrNotFound (404), staff with too small a role ErrForbidden (403).
 type PublishBranchHandler struct {
     branches domain.BranchRepository
-    members  MembershipChecker // small port, implemented by an adapter
+    staff    domain.Staff // Membership(ctx, businessID, userID)
     clock    clock.Clock
 }
 
 func (h PublishBranchHandler) Handle(ctx context.Context, cmd PublishBranch) error {
-    if err := h.members.Require(ctx, cmd.Actor, cmd.BusinessID, RoleOwner); err != nil {
+    if _, err := authorize(ctx, h.staff, cmd.Actor, cmd.BusinessID, domain.RoleOwner); err != nil {
         return err
     }
     return h.branches.Update(ctx, cmd.BusinessID, cmd.BranchID, func(b *domain.Branch) error {

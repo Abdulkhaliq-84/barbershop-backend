@@ -19,3 +19,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0012](0012-test-database-per-test.md) | Integration tests get a throwaway database on a shared PostGIS server | Accepted |
 | [0013](0013-otp-phone-security.md) | Serialize OTP operations and keep phone-level failures | Accepted |
 | [0014](0014-sessions-and-access-tokens.md) | Stateless access tokens, rotating refresh sessions, auth declared in the API spec | Accepted |
+| [0015](0015-business-tenancy-and-authorization.md) | Business tenancy: membership-first authorization, CR claimed on submission, no cross-module foreign keys | Accepted |
