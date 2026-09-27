@@ -13,7 +13,8 @@ one or more services, and pay at the shop. Businesses pay a **subscription plan*
 
 **Status**: the current milestone is the first unchecked item in the README roadmap. M1 delivered
 the walking skeleton (config, logging, HTTP server, health checks, migrations) and CI; M1.5 the
-delivery pipeline (Docker image, security scans, GHCR publishing, release-please releases).
+delivery pipeline (Docker image, security scans, GHCR publishing, release-please releases); M2 the
+shared kernel and IAM (phone OTP login, access + rotating refresh tokens, `GET /v1/me`).
 
 ## 2. Where things are
 
@@ -25,7 +26,7 @@ delivery pipeline (Docker image, security scans, GHCR publishing, release-please
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0012) |
+| Why a decision was made | `docs/adr/` (0001–0014) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
@@ -95,6 +96,9 @@ The owner is moving from **Node.js to Go** and wants to learn, not just receive 
 `/v1`, JSON `snake_case`, RFC 3339 UTC timestamps, money as `{amount (halalas), currency}`, cursor
 pagination, RFC 9457 problem+json with stable `code`, `Accept-Language` (`ar` default), business routes
 under `/v1/businesses/{business_id}/…`, `Idempotency-Key` on creates, `version` + `If-Match` on edits.
+Every operation is **protected by default** (global `bearerAuth` in `api/openapi.yaml`); only a deliberate
+`security: []` makes it public. Handlers get the caller from `auth.PrincipalFrom(ctx)`
+(`internal/platform/auth`), never from request fields.
 
 ## 9. Pipeline rules
 
@@ -135,7 +139,9 @@ Go 1.27+ and Docker are required; `make tools` installs the pinned golangci-lint
 Binary roles: `server api` (default), `server migrate`; `worker` arrives in M3. Config is env vars only — see `.env.example`.
 `main.version` is stamped at build time (`-ldflags -X`); releases are cut by merging release-please's Release PR — never tag by hand.
 Database tests skip unless `TEST_DATABASE_URL` is set (in CI a missing URL fails); each test gets its own database (ADR-0012).
-Login locally: `make run`, `POST /v1/auth/otp/request`, read the code from the API log (`SMS_PROVIDER=console`), `POST /v1/auth/otp/verify`.
+Login locally: `make run`, `POST /v1/auth/otp/request`, read the code from the API log (`SMS_PROVIDER=console`), `POST /v1/auth/otp/verify`
+→ `tokens.access_token` opens `GET /v1/me` (`Authorization: Bearer …`). `TOKEN_SIGNING_SECRET` and `OTP_SECRET` have public dev
+values in the Makefile/compose; they are refused when `APP_ENV` is staging or production.
 
 ## 12. Don'ts
 

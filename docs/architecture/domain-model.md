@@ -89,7 +89,7 @@ flowchart LR
 |---|---|---|
 | `User` | id, phone (E.164), name, locale (`ar`/`en`), status, platform role (`none`/`admin`) | phone unique; blocked users cannot log in |
 | `OTPChallenge` | phone, code hash, purpose, attempts, expires at, consumed at | 6 digits, TTL 5 min, max 5 attempts, resend cooldown 60 s, hourly cap per phone and per IP; single use |
-| `Session` (refresh-token family) | id, user id, token hash, family id, device, expires at, revoked at | refresh tokens are single-use (rotated); reuse of an old token revokes the whole family |
+| `Session` (one signed-in device) | id, user id, created / last refreshed at, revoked at + reason (`logout`, `reuse`, `blocked`) | owns a chain of `RefreshToken`s (hash, expires at, used at); each is single-use; presenting a used one revokes the session (ADR-0014) |
 
 Events: `UserRegistered`.
 

@@ -48,15 +48,14 @@ Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `
 | Method | Path | Who |
 |---|---|---|
 | POST | `/v1/auth/otp/request` | public |
-| POST | `/v1/auth/otp/verify` → access + refresh tokens | public |
+| POST | `/v1/auth/otp/verify` → user + access & refresh tokens | public |
 | POST | `/v1/auth/refresh` | public (refresh token) |
 | POST | `/v1/auth/logout` | user |
-| GET / PATCH | `/v1/me` | user |
+| GET / PATCH | `/v1/me` | user (PATCH: owner exercise) |
 | GET | `/v1/me/memberships` → businesses & roles (drives "Business mode" switch) | user |
 | POST / DELETE | `/v1/me/devices` (FCM token) | user — M7 |
 
-**Phone OTP login (M2.2).** Status: request + verify are live; verify returns `{user, is_new_user}`
-and gains the access/refresh tokens in M2.3.
+**Phone OTP login (M2.2).** Request and verify are live; verify returns `{user, is_new_user, tokens}`.
 
 | Rule | Value | Error when broken |
 |---|---|---|
@@ -72,6 +71,21 @@ The per-IP hourly cap from [ADR-0007](../adr/0007-auth-phone-otp-jwt.md) lands w
 provider (M7); until then `SMS_PROVIDER=console` is the only provider and is refused in production.
 An unknown phone and an already-used code get the same `otp_invalid` as a wrong code; the client
 shows one message ("the code is wrong or no longer valid") and offers "send a new code".
+
+**Tokens and sessions (M2.3, [ADR-0014](../adr/0014-sessions-and-access-tokens.md)).** Every operation
+needs `Authorization: Bearer <access_token>` unless the spec marks it `security: []`.
+
+| Token | Lifetime | Rules | Error |
+|---|---|---|---|
+| Access (JWT, Ed25519) | 15 min | Checked without a database; still valid until expiry after logout | 401 `unauthorized` + `WWW-Authenticate` |
+| Refresh (`rt_…`, opaque) | 30 days if unused | Single use: every refresh returns a new one | 401 `refresh_token_invalid` |
+| Refresh, used twice | — | Treated as stolen: the whole session ends, sign in again | 401 `refresh_token_reused` |
+
+Client flow (Flutter):
+1. Keep both tokens in secure storage.
+2. On `401 unauthorized`, refresh **once**, sharing that one refresh call between all waiting requests, then retry.
+3. If refresh fails with `refresh_token_*`, go to the login screen.
+4. `POST /v1/auth/logout` ends the session; drop both tokens locally.
 
 ### Discovery (public) — M6
 

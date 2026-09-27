@@ -137,6 +137,21 @@ Try this: `make run`, then
 `curl -s localhost:8080/v1/auth/otp/request -H 'content-type: application/json' -d '{"phone":"0551234567"}'`,
 read the code from the log, and verify it with `/v1/auth/otp/verify`. Then guess wrong six times and read the errors.
 
+## 2f. What M2 introduces — part 3: tokens and sessions
+
+| Idiom | Where | Node.js equivalent |
+|---|---|---|
+| **Auth declared in the contract**: a global `bearerAuth` security scheme; public operations opt out with `security: []` | `api/openapi.yaml`, `httpx.MountAPI` | a route-level `passport.authenticate()` you must remember to add; here forgetting it fails closed |
+| Values in `context.Context` with an unexported key type, read back with a typed getter | `internal/platform/auth` | `req.user` set by middleware (typed, and impossible to collide with) |
+| JWT with a **pinned algorithm** (`WithValidMethods`) against `alg: none` / key-confusion attacks | `adapters/tokens/access.go` | `jwt.verify(token, key, { algorithms: ['EdDSA'] })` |
+| Ed25519 from the standard library (`crypto/ed25519`) | same | `crypto.generateKeyPairSync('ed25519')` |
+| Update-function repository where **a refusal must still commit** (reuse revokes the session) | `app/sessions.go` `RefreshHandler` | a Prisma transaction that writes, then throws *after* commit |
+| `SELECT … FOR UPDATE OF t, s` locks two joined rows, **and a test that fails without it** | `adapters/postgres` `TestSessionsParallelRefreshesTakeTurns` | same SQL; the test is the part people skip |
+| Forged-token table test: none-alg, HS256-with-public-key, tampered claims, wrong `kid`/`iss`/`aud` | `adapters/tokens/tokens_test.go` | jest cases per attack |
+
+Try this: sign in, then call `GET /v1/me` with the token, refresh twice with the *same* refresh token and
+watch the second call end the session (`refresh_token_reused`).
+
 ## 3. Pointers vs values (the question everyone asks)
 
 - Use **values** for small immutable things: value objects (`Money`, `PhoneNumber`, `Interval`).

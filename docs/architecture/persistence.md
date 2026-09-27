@@ -24,7 +24,7 @@ geo search, job queue and outbox all live there. Fewer moving parts to run on lo
 Each bounded context owns a Postgres **schema** used as a namespace:
 
 ```
-iam.users, iam.otp_challenges, iam.sessions
+iam.users, iam.otp_challenges, iam.otp_phone_guards, iam.sessions, iam.refresh_tokens
 business.businesses, business.branches, business.staff_members, business.invitations
 catalog.categories, catalog.services, catalog.service_offerings
 scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures,

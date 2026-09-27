@@ -36,6 +36,9 @@ it in the PR, and leave the next instance as the "Your turn" exercise.
    `apigen.StrictServerInterface`; map request → command, domain errors → problem+json codes
    (`httpx.APIProblem`); no business logic here. Embed the module's handlers in `apiServer`
    (`cmd/server/main.go`). Example: `internal/iam/adapters/httpapi/handlers.go`.
+   Operations are protected by default: take the caller from `auth.PrincipalFrom(ctx)` and pass its
+   `UserID` into the command. Add `security: []` in the spec only for truly public operations, and
+   say why in the PR (ADR-0014).
 7. **Cross-module needs** — call the other module's **root package** API through an ACL adapter in
    `adapters/acl/` that implements this module's port. Never import its internals.
 8. **Wiring** — `internal/<module>/module.go` (`New(deps)`, routes, event subscriptions) and `cmd/server`.

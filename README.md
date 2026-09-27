@@ -99,7 +99,7 @@ GitHub Actions · GHCR · release-please · Trivy · CodeQL
 - [x] M0 — Planning: domain model, architecture, ADRs, design direction
 - [x] M1 — Walking skeleton + CI: server, config, Postgres/PostGIS, migrations, lint/test/build on every PR
 - [x] M1.5 — CD & releases: scanned, attested Docker images on GHCR, SemVer releases
-- [ ] M2 — Shared kernel + IAM: phone OTP, JWT, refresh rotation
+- [x] M2 — Shared kernel + IAM: phone OTP, JWT, refresh rotation
 - [ ] M3 — Business onboarding: verification, branches, staff, plans
 - [ ] M4 — Catalog + scheduling: services, opening hours, barber schedules
 - [ ] M5 — Booking core: availability engine, booking lifecycle
