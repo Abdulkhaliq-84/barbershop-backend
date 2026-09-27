@@ -18,5 +18,9 @@ var (
 	ErrUnknownStatus     = errors.New("business: unknown status")
 
 	ErrInvalidStateTransition = errors.New("business: not allowed in its current status")
-	ErrVersionConflict        = errors.New("business: changed since you read it")
+	ErrVersionConflict        = errors.New("changed since you read it")
+
+	ErrInvalidCityCode = errors.New("branch: unknown city code")
+	ErrAddressRequired = errors.New("branch: address is required")
+	ErrInvalidTimezone = errors.New("branch: not an IANA time zone")
 )

@@ -33,3 +33,34 @@ UPDATE business.businesses
 SET display_name_ar = @display_name_ar, display_name_en = @display_name_en, legal_name = @legal_name,
     status = @status, version = @version, updated_at = @updated_at
 WHERE id = @id AND version = @expected_version;
+
+-- name: InsertBranch :exec
+INSERT INTO business.branches (
+    id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status,
+    min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm,
+    pending_expiry_minutes, max_active_bookings, version, created_at, updated_at
+) VALUES (
+    @id, @business_id, @name_ar, @name_en, @city_code, @district, @address, @latitude, @longitude, @phone, @timezone, @status,
+    @min_lead_minutes, @horizon_days, @slot_interval_minutes, @buffer_minutes, @cancellation_minutes, @auto_confirm,
+    @pending_expiry_minutes, @max_active_bookings, @version, @created_at, @updated_at
+);
+
+-- name: BranchByID :one
+-- Always by (business_id, id): another business's branch ID finds nothing.
+SELECT * FROM business.branches WHERE business_id = $1 AND id = $2;
+
+-- name: BranchByIDForUpdate :one
+SELECT * FROM business.branches WHERE business_id = $1 AND id = $2 FOR UPDATE;
+
+-- name: BranchesByBusiness :many
+SELECT * FROM business.branches WHERE business_id = $1 ORDER BY id; -- UUIDv7: oldest first
+
+-- name: UpdateBranch :execrows
+UPDATE business.branches
+SET name_ar = @name_ar, name_en = @name_en, city_code = @city_code, district = @district, address = @address,
+    latitude = @latitude, longitude = @longitude, phone = @phone, timezone = @timezone, status = @status,
+    min_lead_minutes = @min_lead_minutes, horizon_days = @horizon_days, slot_interval_minutes = @slot_interval_minutes,
+    buffer_minutes = @buffer_minutes, cancellation_minutes = @cancellation_minutes, auto_confirm = @auto_confirm,
+    pending_expiry_minutes = @pending_expiry_minutes, max_active_bookings = @max_active_bookings,
+    version = @version, updated_at = @updated_at
+WHERE business_id = @business_id AND id = @id AND version = @expected_version;

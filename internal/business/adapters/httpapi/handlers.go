@@ -27,10 +27,12 @@ type UseCases struct {
 	Register    *app.RegisterBusinessHandler
 	Get         *app.GetBusinessHandler
 	Update      *app.UpdateBusinessHandler
+	Branches    *app.BranchHandlers
 	Memberships *app.ListMyMembershipsHandler
 }
 
-// Handlers serves /v1/businesses/* and /v1/me/memberships.
+// Handlers serves /v1/businesses/* (businesses and their branches) and
+// /v1/me/memberships.
 type Handlers struct {
 	uc     UseCases
 	logger *slog.Logger
@@ -162,6 +164,7 @@ func (h *Handlers) ListMyMemberships(ctx context.Context, _ apigen.ListMyMembers
 func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apigen.ProblemResponseHeaders) {
 	status, code, detail := http.StatusInternalServerError, "internal", ""
 	var headers apigen.ProblemResponseHeaders
+	var policyErr *domain.PolicyError // its text is ours, safe to show
 	switch {
 	case errors.Is(err, errNoPrincipal):
 		status, code, detail = http.StatusUnauthorized, "unauthorized", "a valid access token is required"
@@ -176,13 +179,25 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	case errors.Is(err, domain.ErrAlreadyRegistered):
 		status, code, detail = http.StatusConflict, "business_already_registered", "you already registered this CR number; see /v1/me/memberships"
 	case errors.Is(err, domain.ErrVersionConflict):
-		status, code, detail = http.StatusPreconditionFailed, "version_conflict", "the business changed since you read it; reload and try again"
+		status, code, detail = http.StatusPreconditionFailed, "version_conflict", "it changed since you read it; reload and try again"
 	case errors.Is(err, domain.ErrInvalidStateTransition):
 		status, code, detail = http.StatusConflict, "invalid_state_transition", "names can change only while the business is a draft or rejected"
 	case errors.Is(err, domain.ErrInvalidCRNumber):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "cr_number: must be 10 digits"
 	case errors.Is(err, shared.ErrArabicRequired):
-		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "display_name.ar: required"
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "an Arabic name is required"
+	case errors.As(err, &policyErr):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", policyErr.Error()
+	case errors.Is(err, domain.ErrInvalidCityCode):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "city_code: not a city code"
+	case errors.Is(err, domain.ErrAddressRequired):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "address: required"
+	case errors.Is(err, domain.ErrInvalidTimezone):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "timezone: not an IANA time zone such as Asia/Riyadh"
+	case errors.Is(err, shared.ErrInvalidCoordinates):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "location: not a valid latitude/longitude"
+	case errors.Is(err, shared.ErrInvalidPhoneNumber):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "phone: not a Saudi mobile number"
 	case errors.Is(err, domain.ErrLegalNameRequired):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "legal_name: required"
 	case errors.Is(err, domain.ErrTextTooLong):

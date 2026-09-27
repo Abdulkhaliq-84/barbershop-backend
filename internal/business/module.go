@@ -37,6 +37,7 @@ func New(d Deps) *Module {
 			Register:    app.NewRegisterBusinessHandler(store, d.Clock),
 			Get:         app.NewGetBusinessHandler(store, store),
 			Update:      app.NewUpdateBusinessHandler(store, store, d.Clock),
+			Branches:    app.NewBranchHandlers(store.Branches(), store, d.Clock),
 			Memberships: app.NewListMyMembershipsHandler(store),
 		}, d.Logger),
 	}

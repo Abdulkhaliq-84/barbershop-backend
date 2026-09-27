@@ -295,3 +295,112 @@ func TestUpdateBusinessAPI(t *testing.T) {
 		t.Fatalf("after refusals: %v", r.body)
 	}
 }
+
+const branchJSON = `{"name":{"ar":"فرع العليا","en":"Olaya"},"city_code":"riyadh","district":"العليا","address":"شارع العليا العام","location":{"latitude":24.6911,"longitude":46.6851},"phone":"0551234567"}`
+
+// register signs up a user with a business and returns the token and the
+// business path.
+func (a *api) register(t *testing.T, phone, cr string) (token, path string) {
+	t.Helper()
+	token = a.signIn(t, phone)
+	r := a.do(t, http.MethodPost, "/v1/businesses", token, strings.Replace(registration, "١٠١٠ ١٢٣ ٤٥٦", cr, 1))
+	if r.status != http.StatusCreated {
+		t.Fatalf("register: %d %v", r.status, r.body)
+	}
+	return token, "/v1/businesses/" + r.body["id"].(string)
+}
+
+func TestBranchesAPI(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner, biz := a.register(t, "0551234567", "1010000001")
+
+	// Create: draft, Riyadh time, default booking policy.
+	r := a.do(t, http.MethodPost, biz+"/branches", owner, branchJSON)
+	if r.status != http.StatusCreated || r.body["status"] != "draft" || r.body["timezone"] != "Asia/Riyadh" ||
+		r.body["phone"] != "+966551234567" || r.body["version"] != float64(1) {
+		t.Fatalf("create: %d %v", r.status, r.body)
+	}
+	policy, _ := r.body["booking_policy"].(map[string]any)
+	if policy["slot_interval_minutes"] != float64(15) || policy["min_lead_minutes"] != float64(30) || policy["auto_confirm"] != true {
+		t.Errorf("default policy = %v", policy)
+	}
+	branch := biz + "/branches/" + r.body["id"].(string)
+
+	// A second branch with its own policy.
+	own := strings.Replace(branchJSON, `"phone":"0551234567"`, `"booking_policy":{"min_lead_minutes":60,"horizon_days":14,"slot_interval_minutes":30,"buffer_minutes":5,"cancellation_window_minutes":180,"auto_confirm":false,"pending_expiry_minutes":30,"max_active_bookings":1}`, 1)
+	if r := a.do(t, http.MethodPost, biz+"/branches", owner, own); r.status != http.StatusCreated || r.body["phone"] != nil {
+		t.Fatalf("create with policy: %d %v", r.status, r.body)
+	}
+
+	// List and get.
+	r = a.do(t, http.MethodGet, biz+"/branches", owner, "")
+	if data, _ := r.body["data"].([]any); r.status != http.StatusOK || len(data) != 2 {
+		t.Fatalf("list: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodGet, branch, owner, ""); r.status != http.StatusOK || r.body["address"] != "شارع العليا العام" {
+		t.Fatalf("get: %d %v", r.status, r.body)
+	}
+
+	// Edit: move it, clear the phone, change the policy.
+	r = a.do(t, http.MethodPatch, branch, owner, `{"location":{"latitude":24.7136,"longitude":46.6753},"phone":"","booking_policy":{"min_lead_minutes":0,"horizon_days":7,"slot_interval_minutes":10,"buffer_minutes":0,"cancellation_window_minutes":60,"auto_confirm":true,"pending_expiry_minutes":15,"max_active_bookings":3}}`, "If-Match", `"1"`)
+	if r.status != http.StatusOK || r.body["version"] != float64(2) || r.body["phone"] != nil {
+		t.Fatalf("patch: %d %v", r.status, r.body)
+	}
+	if loc, _ := r.body["location"].(map[string]any); loc["latitude"] != 24.7136 {
+		t.Errorf("location = %v", loc)
+	}
+	if r := a.do(t, http.MethodPatch, branch, owner, `{"address":"x"}`, "If-Match", "1"); r.status != http.StatusPreconditionFailed || r.body["code"] != "version_conflict" {
+		t.Errorf("stale version: %d %v", r.status, r.body)
+	}
+
+	// Invalid input.
+	for name, tt := range map[string]struct {
+		body   string
+		status int
+	}{
+		"city in capitals":   {strings.Replace(branchJSON, `"riyadh"`, `"Riyadh"`, 1), http.StatusBadRequest},
+		"no location":        {strings.Replace(branchJSON, `"location":{"latitude":24.6911,"longitude":46.6851},`, "", 1), http.StatusBadRequest},
+		"latitude off globe": {strings.Replace(branchJSON, "24.6911", "124.6911", 1), http.StatusBadRequest},
+		"slot every 7 min":   {strings.Replace(own, `"slot_interval_minutes":30`, `"slot_interval_minutes":7`, 1), http.StatusBadRequest},
+		"unknown time zone":  {strings.Replace(branchJSON, `"phone"`, `"timezone":"Asia/Atlantis","phone"`, 1), http.StatusUnprocessableEntity},
+		"landline phone":     {strings.Replace(branchJSON, "0551234567", "0114567890", 1), http.StatusUnprocessableEntity},
+		"blank address":      {strings.Replace(branchJSON, "شارع العليا العام", "  ", 1), http.StatusUnprocessableEntity},
+		"no location (0, 0)": {strings.Replace(strings.Replace(branchJSON, "24.6911", "0", 1), "46.6851", "0", 1), http.StatusUnprocessableEntity},
+	} {
+		if r := a.do(t, http.MethodPost, biz+"/branches", owner, tt.body); r.status != tt.status || r.body["code"] != "validation_failed" {
+			t.Errorf("%s: %d %v, want %d", name, r.status, r.body, tt.status)
+		}
+	}
+}
+
+// Tenant isolation through the front door: another business's owner can't
+// see, list, add to or edit this business's branches — not even by putting
+// this branch's ID under their own business.
+func TestBranchesAreIsolatedBetweenBusinesses(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner, biz := a.register(t, "0551234567", "1010000001")
+	other, otherBiz := a.register(t, "0559876543", "1010000002")
+	r := a.do(t, http.MethodPost, biz+"/branches", owner, branchJSON)
+	if r.status != http.StatusCreated {
+		t.Fatalf("create: %d %v", r.status, r.body)
+	}
+	id := r.body["id"].(string)
+
+	for name, req := range map[string]struct{ method, path, body string }{
+		"get":                     {http.MethodGet, biz + "/branches/" + id, ""},
+		"list":                    {http.MethodGet, biz + "/branches", ""},
+		"create":                  {http.MethodPost, biz + "/branches", branchJSON},
+		"edit":                    {http.MethodPatch, biz + "/branches/" + id, `{"address":"مختطف"}`},
+		"get under own business":  {http.MethodGet, otherBiz + "/branches/" + id, ""},
+		"edit under own business": {http.MethodPatch, otherBiz + "/branches/" + id, `{"address":"مختطف"}`},
+	} {
+		if r := a.do(t, req.method, req.path, other, req.body, "If-Match", "1"); r.status != http.StatusNotFound || r.body["code"] != "not_found" {
+			t.Errorf("%s: %d %v, want 404", name, r.status, r.body)
+		}
+	}
+	if r := a.do(t, http.MethodGet, biz+"/branches/"+id, owner, ""); r.body["version"] != float64(1) || r.body["address"] != "شارع العليا العام" {
+		t.Fatalf("the branch changed: %v", r.body)
+	}
+}

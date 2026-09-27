@@ -28,3 +28,19 @@ type Staff interface {
 	// when the user doesn't work there (or the business doesn't exist).
 	Membership(ctx context.Context, business shared.BusinessID, user shared.UserID) (*StaffMember, error)
 }
+
+// Branches stores branches. Every method takes the business: a branch is
+// only ever found inside its own business, so a branch ID from another shop
+// is simply "not found".
+type Branches interface {
+	// Add saves a new branch.
+	Add(ctx context.Context, b *Branch) error
+	// ByID returns the branch, or ErrNotFound.
+	ByID(ctx context.Context, business shared.BusinessID, id shared.BranchID) (*Branch, error)
+	// List returns the business's branches, oldest first.
+	List(ctx context.Context, business shared.BusinessID) ([]*Branch, error)
+	// Update locks the branch, checks its version (ErrVersionConflict), calls
+	// fn and saves — in one transaction. ErrNotFound when there is no such
+	// branch in the business.
+	Update(ctx context.Context, business shared.BusinessID, id shared.BranchID, expectedVersion int, fn func(*Branch) error) error
+}

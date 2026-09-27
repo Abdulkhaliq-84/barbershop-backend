@@ -10,6 +10,32 @@ import (
 	"github.com/google/uuid"
 )
 
+type BusinessBranch struct {
+	ID                   uuid.UUID
+	BusinessID           uuid.UUID
+	NameAr               string
+	NameEn               string
+	CityCode             string
+	District             string
+	Address              string
+	Latitude             float64
+	Longitude            float64
+	Phone                *string
+	Timezone             string
+	Status               string
+	MinLeadMinutes       int32
+	HorizonDays          int16
+	SlotIntervalMinutes  int16
+	BufferMinutes        int16
+	CancellationMinutes  int32
+	AutoConfirm          bool
+	PendingExpiryMinutes int16
+	MaxActiveBookings    int16
+	Version              int32
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
 type BusinessBusiness struct {
 	ID            uuid.UUID
 	OwnerUserID   uuid.UUID

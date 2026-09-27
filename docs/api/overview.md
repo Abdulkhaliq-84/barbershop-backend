@@ -114,8 +114,8 @@ Client flow (Flutter):
 | GET / PATCH | `/v1/businesses/{business_id}` — live (M3.1); PATCH edits names while draft/rejected, needs `If-Match: <version>` | owner |
 | POST | `/v1/businesses/{business_id}/verification/documents` (CR upload) | owner |
 | POST | `/v1/businesses/{business_id}/verification/submit` | owner |
-| GET / POST | `/v1/businesses/{business_id}/branches` | owner |
-| GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) | manager |
+| GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
+| GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner until managers get branches (M3.5) | manager |
 | POST | `…/branches/{branch_id}/publish` · `…/unpublish` | owner |
 | PUT | `…/branches/{branch_id}/opening-hours` | manager |
 | GET / POST / DELETE | `…/branches/{branch_id}/closures` | manager |

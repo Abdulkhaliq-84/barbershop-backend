@@ -24,6 +24,8 @@ tags:
     description: The signed-in user
   - name: businesses
     description: Business mode — register and run a barbershop business (tenant)
+  - name: branches
+    description: Business mode — a business's shops, with location and booking policy
 
 # Protected by default: an operation is public only if it says `security: []`.
 security:
@@ -250,15 +252,7 @@ paths:
         `412 version_conflict`: reload, reapply, retry. On success `version`
         goes up by one.
       parameters:
-        - name: If-Match
-          in: header
-          required: true
-          description: The business `version` you last read, e.g. `3` or `"3"`.
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 20
-            example: '"3"'
+        - $ref: "#/components/parameters/IfMatchVersion"
       requestBody:
         required: true
         content:
@@ -272,6 +266,101 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: listBranches
+      tags: [branches]
+      summary: The business's branches
+      description: |
+        Any active staff member of the business may list its branches;
+        everyone else gets `404 not_found`. A business has a handful of
+        branches (its plan caps them), so the list is not paginated.
+      responses:
+        "200":
+          description: The branches, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createBranch
+      tags: [branches]
+      summary: Add a branch (owner)
+      description: |
+        Creates a `draft` branch. Customers can't see it until it is
+        published, which needs an approved business, services and barbers
+        (later milestones). Omitted `timezone` means `Asia/Riyadh`; omitted
+        `booking_policy` means the defaults shown in the `BookingPolicy` schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: getBranch
+      tags: [branches]
+      summary: One branch (any staff of the business)
+      description: |
+        A branch is only found inside its own business: a branch ID from
+        another business gets `404 not_found`, like an ID that doesn't exist.
+      responses:
+        "200":
+          description: The branch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateBranch
+      tags: [branches]
+      summary: Edit a branch (owner)
+      description: |
+        Send only the fields that change. `name`, `location` and
+        `booking_policy` are replaced as a whole; an empty `district` or
+        `phone` clears it. `If-Match` carries the `version` you last read
+        (`412 version_conflict` if the branch changed since).
+
+        Owners only for now: managers will edit the branches they are
+        assigned to once staff invitations exist (M3.5).
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchUpdate"
+      responses:
+        "200":
+          description: The updated branch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -300,6 +389,25 @@ components:
       schema:
         type: string
         format: uuid
+
+    BranchID:
+      name: branch_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    IfMatchVersion:
+      name: If-Match
+      in: header
+      required: true
+      description: The `version` you last read, e.g. `3` or `"3"`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 20
+        example: '"3"'
 
   responses:
     Problem:
@@ -572,3 +680,197 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
+
+    GeoPoint:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          example: 24.6911
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          example: 46.6851
+
+    BookingPolicy:
+      type: object
+      additionalProperties: false
+      description: How a branch takes bookings. Defaults are shown as examples.
+      required: [min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_window_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings]
+      properties:
+        min_lead_minutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+          description: Earliest booking is now + this.
+          example: 30
+        horizon_days:
+          type: integer
+          minimum: 1
+          maximum: 180
+          description: Latest booking is today + this.
+          example: 30
+        slot_interval_minutes:
+          type: integer
+          enum: [5, 10, 15, 20, 30, 60]
+          description: Start times are offered every this many minutes.
+          example: 15
+        buffer_minutes:
+          type: integer
+          minimum: 0
+          maximum: 60
+          description: Cleanup time after each appointment.
+          example: 0
+        cancellation_window_minutes:
+          type: integer
+          minimum: 0
+          maximum: 2880
+          description: Customers may cancel until this long before the start.
+          example: 120
+        auto_confirm:
+          type: boolean
+          description: False means the shop confirms each booking.
+          example: true
+        pending_expiry_minutes:
+          type: integer
+          minimum: 5
+          maximum: 120
+          description: An unconfirmed booking expires after this (only when auto_confirm is false).
+          example: 15
+        max_active_bookings:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Future bookings one customer may hold at this branch.
+          example: 2
+
+    BranchCreate:
+      type: object
+      additionalProperties: false
+      required: [name, city_code, address, location]
+      properties:
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city_code:
+          type: string
+          pattern: "^[a-z][a-z_]{1,39}$"
+          description: A city from the app's list, e.g. `riyadh`, `jeddah`, `al_khobar`.
+          example: riyadh
+        district:
+          type: string
+          maxLength: 80
+          example: العليا
+        address:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: شارع العليا العام
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        phone:
+          type: string
+          maxLength: 64
+          description: Saudi mobile number in any common format.
+          example: "0551234567"
+        timezone:
+          type: string
+          maxLength: 64
+          description: IANA time zone of the branch (default `Asia/Riyadh`).
+          example: Asia/Riyadh
+        booking_policy:
+          $ref: "#/components/schemas/BookingPolicy"
+
+    BranchUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: The fields to change; at least one.
+      properties:
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city_code:
+          type: string
+          pattern: "^[a-z][a-z_]{1,39}$"
+        district:
+          type: string
+          maxLength: 80
+          description: Empty clears it.
+        address:
+          type: string
+          minLength: 1
+          maxLength: 200
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        phone:
+          type: string
+          maxLength: 64
+          description: Empty clears it.
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        booking_policy:
+          $ref: "#/components/schemas/BookingPolicy"
+
+    BranchStatus:
+      type: string
+      enum: [draft, published, unpublished]
+
+    Branch:
+      type: object
+      required: [id, business_id, name, city_code, address, location, timezone, booking_policy, status, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        business_id:
+          type: string
+          format: uuid
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city_code:
+          type: string
+          example: riyadh
+        district:
+          type: string
+          nullable: true
+        address:
+          type: string
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        phone:
+          type: string
+          nullable: true
+          example: "+966551234567"
+        timezone:
+          type: string
+          example: Asia/Riyadh
+        booking_policy:
+          $ref: "#/components/schemas/BookingPolicy"
+        status:
+          $ref: "#/components/schemas/BranchStatus"
+        version:
+          type: integer
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BranchList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Branch"

@@ -16,7 +16,8 @@ the walking skeleton (config, logging, HTTP server, health checks, migrations) a
 delivery pipeline (Docker image, security scans, GHCR publishing, release-please releases); M2 the
 shared kernel and IAM (phone OTP login, access + rotating refresh tokens, `GET /v1/me`). M3 (business
 onboarding) is in progress: M3.1 added the `business` module — register a draft business, owner
-membership, `GET /v1/me/memberships`, and the membership-first `authorize` policy (ADR-0015).
+membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the membership-first
+`authorize` policy (ADR-0015); M3.2 branches (location, city, time zone, booking policy).
 
 ## 2. Where things are
 

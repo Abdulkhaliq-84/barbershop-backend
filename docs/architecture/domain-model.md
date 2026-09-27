@@ -118,6 +118,12 @@ stateDiagram-v2
   Suspended --> Active: admin reactivates
 ```
 
+**Branch (M3.2).** City is a code from the app's list (`riyadh`, `jeddah`, …), not free text, so
+customers can search by it. The location is stored as plain latitude/longitude here; map search runs
+on discovery's PostGIS read model (M6). A branch is always loaded by `(business_id, branch_id)`, so
+another business's branch ID is "not found". Any staff may read branches; only the owner creates or
+edits them until managers are assigned branches (M3.5).
+
 **Booking policy** (value object on `Branch`, defaults in brackets): minimum lead time [30 min],
 booking horizon [30 days], slot interval [15 min], buffer between appointments [0 min], customer
 cancellation window [2 h before start], auto-confirm [yes], pending expiry if not auto-confirm [15 min],

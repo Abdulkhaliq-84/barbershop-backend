@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	_ "time/tzdata" // branch time zones work even on an image without /usr/share/zoneinfo
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -100,7 +101,7 @@ type (
 
 type apiServer struct {
 	*iamAPI      // iam: /v1/auth/*, /v1/me
-	*businessAPI // business: /v1/businesses/*, /v1/me/memberships
+	*businessAPI // business: /v1/businesses/* (incl. branches), /v1/me/memberships
 }
 
 // newHandler builds every module and mounts the API next to the health checks.

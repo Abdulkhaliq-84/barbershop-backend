@@ -12,6 +12,135 @@ import (
 	"github.com/google/uuid"
 )
 
+const branchByID = `-- name: BranchByID :one
+SELECT id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status, min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings, version, created_at, updated_at FROM business.branches WHERE business_id = $1 AND id = $2
+`
+
+type BranchByIDParams struct {
+	BusinessID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Always by (business_id, id): another business's branch ID finds nothing.
+func (q *Queries) BranchByID(ctx context.Context, arg BranchByIDParams) (BusinessBranch, error) {
+	row := q.db.QueryRow(ctx, branchByID, arg.BusinessID, arg.ID)
+	var i BusinessBranch
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.NameAr,
+		&i.NameEn,
+		&i.CityCode,
+		&i.District,
+		&i.Address,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Phone,
+		&i.Timezone,
+		&i.Status,
+		&i.MinLeadMinutes,
+		&i.HorizonDays,
+		&i.SlotIntervalMinutes,
+		&i.BufferMinutes,
+		&i.CancellationMinutes,
+		&i.AutoConfirm,
+		&i.PendingExpiryMinutes,
+		&i.MaxActiveBookings,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const branchByIDForUpdate = `-- name: BranchByIDForUpdate :one
+SELECT id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status, min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings, version, created_at, updated_at FROM business.branches WHERE business_id = $1 AND id = $2 FOR UPDATE
+`
+
+type BranchByIDForUpdateParams struct {
+	BusinessID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) BranchByIDForUpdate(ctx context.Context, arg BranchByIDForUpdateParams) (BusinessBranch, error) {
+	row := q.db.QueryRow(ctx, branchByIDForUpdate, arg.BusinessID, arg.ID)
+	var i BusinessBranch
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.NameAr,
+		&i.NameEn,
+		&i.CityCode,
+		&i.District,
+		&i.Address,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Phone,
+		&i.Timezone,
+		&i.Status,
+		&i.MinLeadMinutes,
+		&i.HorizonDays,
+		&i.SlotIntervalMinutes,
+		&i.BufferMinutes,
+		&i.CancellationMinutes,
+		&i.AutoConfirm,
+		&i.PendingExpiryMinutes,
+		&i.MaxActiveBookings,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const branchesByBusiness = `-- name: BranchesByBusiness :many
+SELECT id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status, min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings, version, created_at, updated_at FROM business.branches WHERE business_id = $1 ORDER BY id
+`
+
+func (q *Queries) BranchesByBusiness(ctx context.Context, businessID uuid.UUID) ([]BusinessBranch, error) {
+	rows, err := q.db.Query(ctx, branchesByBusiness, businessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BusinessBranch{}
+	for rows.Next() {
+		var i BusinessBranch
+		if err := rows.Scan(
+			&i.ID,
+			&i.BusinessID,
+			&i.NameAr,
+			&i.NameEn,
+			&i.CityCode,
+			&i.District,
+			&i.Address,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Phone,
+			&i.Timezone,
+			&i.Status,
+			&i.MinLeadMinutes,
+			&i.HorizonDays,
+			&i.SlotIntervalMinutes,
+			&i.BufferMinutes,
+			&i.CancellationMinutes,
+			&i.AutoConfirm,
+			&i.PendingExpiryMinutes,
+			&i.MaxActiveBookings,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const businessByID = `-- name: BusinessByID :one
 SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at FROM business.businesses WHERE id = $1
 `
@@ -57,6 +186,73 @@ func (q *Queries) BusinessByIDForUpdate(ctx context.Context, id uuid.UUID) (Busi
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const insertBranch = `-- name: InsertBranch :exec
+INSERT INTO business.branches (
+    id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status,
+    min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm,
+    pending_expiry_minutes, max_active_bookings, version, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+    $13, $14, $15, $16, $17, $18,
+    $19, $20, $21, $22, $23
+)
+`
+
+type InsertBranchParams struct {
+	ID                   uuid.UUID
+	BusinessID           uuid.UUID
+	NameAr               string
+	NameEn               string
+	CityCode             string
+	District             string
+	Address              string
+	Latitude             float64
+	Longitude            float64
+	Phone                *string
+	Timezone             string
+	Status               string
+	MinLeadMinutes       int32
+	HorizonDays          int16
+	SlotIntervalMinutes  int16
+	BufferMinutes        int16
+	CancellationMinutes  int32
+	AutoConfirm          bool
+	PendingExpiryMinutes int16
+	MaxActiveBookings    int16
+	Version              int32
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+func (q *Queries) InsertBranch(ctx context.Context, arg InsertBranchParams) error {
+	_, err := q.db.Exec(ctx, insertBranch,
+		arg.ID,
+		arg.BusinessID,
+		arg.NameAr,
+		arg.NameEn,
+		arg.CityCode,
+		arg.District,
+		arg.Address,
+		arg.Latitude,
+		arg.Longitude,
+		arg.Phone,
+		arg.Timezone,
+		arg.Status,
+		arg.MinLeadMinutes,
+		arg.HorizonDays,
+		arg.SlotIntervalMinutes,
+		arg.BufferMinutes,
+		arg.CancellationMinutes,
+		arg.AutoConfirm,
+		arg.PendingExpiryMinutes,
+		arg.MaxActiveBookings,
+		arg.Version,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const insertBusiness = `-- name: InsertBusiness :exec
@@ -187,6 +383,77 @@ func (q *Queries) StaffMembership(ctx context.Context, arg StaffMembershipParams
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const updateBranch = `-- name: UpdateBranch :execrows
+
+UPDATE business.branches
+SET name_ar = $1, name_en = $2, city_code = $3, district = $4, address = $5,
+    latitude = $6, longitude = $7, phone = $8, timezone = $9, status = $10,
+    min_lead_minutes = $11, horizon_days = $12, slot_interval_minutes = $13,
+    buffer_minutes = $14, cancellation_minutes = $15, auto_confirm = $16,
+    pending_expiry_minutes = $17, max_active_bookings = $18,
+    version = $19, updated_at = $20
+WHERE business_id = $21 AND id = $22 AND version = $23
+`
+
+type UpdateBranchParams struct {
+	NameAr               string
+	NameEn               string
+	CityCode             string
+	District             string
+	Address              string
+	Latitude             float64
+	Longitude            float64
+	Phone                *string
+	Timezone             string
+	Status               string
+	MinLeadMinutes       int32
+	HorizonDays          int16
+	SlotIntervalMinutes  int16
+	BufferMinutes        int16
+	CancellationMinutes  int32
+	AutoConfirm          bool
+	PendingExpiryMinutes int16
+	MaxActiveBookings    int16
+	Version              int32
+	UpdatedAt            time.Time
+	BusinessID           uuid.UUID
+	ID                   uuid.UUID
+	ExpectedVersion      int32
+}
+
+// UUIDv7: oldest first
+func (q *Queries) UpdateBranch(ctx context.Context, arg UpdateBranchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateBranch,
+		arg.NameAr,
+		arg.NameEn,
+		arg.CityCode,
+		arg.District,
+		arg.Address,
+		arg.Latitude,
+		arg.Longitude,
+		arg.Phone,
+		arg.Timezone,
+		arg.Status,
+		arg.MinLeadMinutes,
+		arg.HorizonDays,
+		arg.SlotIntervalMinutes,
+		arg.BufferMinutes,
+		arg.CancellationMinutes,
+		arg.AutoConfirm,
+		arg.PendingExpiryMinutes,
+		arg.MaxActiveBookings,
+		arg.Version,
+		arg.UpdatedAt,
+		arg.BusinessID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateBusiness = `-- name: UpdateBusiness :execrows

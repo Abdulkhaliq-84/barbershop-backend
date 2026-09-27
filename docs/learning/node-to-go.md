@@ -166,6 +166,11 @@ watch the second call end the session (`refresh_token_reused`).
 | Module boundaries enforced by the linter (depguard) | `.golangci.yml` | `eslint-plugin-boundaries` |
 | A whole-server test through HTTP only | `cmd/server/api_test.go` | supertest against the real `app` |
 
+| **Optimistic concurrency**: `If-Match: <version>`, a row lock, and `UPDATE … WHERE version = $n` (412 on a stale version) | `adapters/postgres` `Update`, `TestStoreParallelUpdatesOfTheSameVersion` | Mongoose's `versionKey` / `__v` check |
+| A **value object** compared with `==` (`BookingPolicy`, `BranchProfile`): all fields are comparable values | `domain/booking_policy.go` | deep-equal on a frozen object |
+| **Struct conversion** between two types with identical fields (`sqlcgen.InsertBranchParams(row)`), checked by the compiler | `adapters/postgres/branches.go` | a spread `{...row}` that nothing checks |
+| An error type carrying a safe message (`*PolicyError`) matched with `errors.As` | `domain/booking_policy.go` | `class PolicyError extends Error` + `instanceof` |
+
 Try this: register a business, then call `GET /v1/businesses/{id}` with another user's token and
 compare the answer with an ID that doesn't exist. They should be identical.
 
