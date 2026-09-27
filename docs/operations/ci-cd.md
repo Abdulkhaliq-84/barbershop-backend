@@ -65,7 +65,8 @@ flowchart LR
   `feat(booking): any-barber assignment`, `fix(iam): refresh token reuse detection`, `docs:`, `test:`,
   `refactor:`, `ci:`, `chore:`. A breaking change is marked `feat!:` / `BREAKING CHANGE:`. CI checks the title.
 - **SemVer** driven by those commits via release-please: `fix` → patch, `feat` → minor, breaking → major
-  (while in `0.x`, breaking → minor). `v1.0.0` = first real launch.
+  (while in `0.x`, breaking → minor). `v1.0.0` = first real launch. The first release is `v0.1.0`
+  (`initial-version` in `release-please-config.json`: without it release-please starts at `1.0.0`).
 - **Branch ruleset on `main`**: PR required, required status checks green, linear history, no force-push,
   no deletion. (As a solo owner you can't approve your own PR — checks are the gate; reviewers are added when the team grows.)
 
