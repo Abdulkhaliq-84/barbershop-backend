@@ -27,6 +27,23 @@ type IamOtpPhoneGuard struct {
 	LockedUntil time.Time
 }
 
+type IamRefreshToken struct {
+	TokenHash []byte
+	SessionID uuid.UUID
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
+type IamSession struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	CreatedAt       time.Time
+	LastRefreshedAt time.Time
+	RevokedAt       *time.Time
+	RevokeReason    *string
+}
+
 type IamUser struct {
 	ID           uuid.UUID
 	Phone        string

@@ -7,6 +7,7 @@
 package iam
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,24 +16,28 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/otpcode"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/sms"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/tokens"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 )
 
 // Deps are what the module needs from the outside world.
 type Deps struct {
-	Pool      *pgxpool.Pool
-	Clock     clock.Clock
-	Logger    *slog.Logger
-	OTPSecret []byte        // HMAC key for stored codes, ≥ 32 bytes
-	OTPSender app.OTPSender // nil = development console sender
-	OTPCodes  app.CodeGenerator
+	Pool        *pgxpool.Pool
+	Clock       clock.Clock
+	Logger      *slog.Logger
+	OTPSecret   []byte        // HMAC key for stored codes, ≥ 32 bytes
+	TokenSecret []byte        // derives the access-token signing key, ≥ 32 bytes
+	OTPSender   app.OTPSender // nil = development console sender
+	OTPCodes    app.CodeGenerator
 }
 
 // Module is the wired iam module.
 type Module struct {
-	http *httpapi.Handlers
+	http   *httpapi.Handlers
+	signer *tokens.Signer
 }
 
 // New wires repositories, use cases and HTTP handlers — manual dependency
@@ -51,18 +56,44 @@ func New(d Deps) (*Module, error) {
 		codes = d.OTPCodes
 	}
 
-	policy := domain.DefaultOTPPolicy()
+	signer, err := tokens.NewSigner(d.TokenSecret, d.Clock)
+	if err != nil {
+		return nil, err
+	}
+
+	otpPolicy := domain.DefaultOTPPolicy()
 	challenges := postgres.NewOTPChallenges(d.Pool)
 	users := postgres.NewUsers(d.Pool)
+	sessions := postgres.NewSessions(d.Pool)
+	issuer := app.NewSessionIssuer(sessions, signer, tokens.RefreshSecrets{}, d.Clock, domain.DefaultTokenPolicy())
 
 	return &Module{
-		http: httpapi.NewHandlers(
-			app.NewRequestOTPHandler(challenges, codes, hasher, sender, d.Clock, policy),
-			app.NewVerifyOTPHandler(challenges, users, hasher, d.Clock, policy),
-			d.Logger,
-		),
+		signer: signer,
+		http: httpapi.NewHandlers(httpapi.UseCases{
+			RequestOTP: app.NewRequestOTPHandler(challenges, codes, hasher, sender, d.Clock, otpPolicy),
+			VerifyOTP:  app.NewVerifyOTPHandler(challenges, users, hasher, issuer, d.Clock, otpPolicy),
+			Refresh:    app.NewRefreshHandler(issuer, users),
+			Logout:     app.NewLogoutHandler(sessions, d.Clock),
+			GetMe:      app.NewGetMeHandler(users),
+		}, d.Logger),
 	}, nil
 }
 
 // HTTP returns the handlers for the iam API operations.
 func (m *Module) HTTP() *httpapi.Handlers { return m.http }
+
+// Authenticate verifies an access token and says who presented it. It is
+// the auth.Authenticator for the whole API: no database call, so it adds
+// microseconds per request. (Logout and blocking take effect when the
+// access token expires; ADR-0014.)
+func (m *Module) Authenticate(_ context.Context, token string) (auth.Principal, error) {
+	claims, err := m.signer.Verify(token)
+	if err != nil {
+		return auth.Principal{}, err
+	}
+	return auth.Principal{
+		UserID:       claims.UserID,
+		SessionID:    claims.SessionID.UUID(),
+		PlatformRole: string(claims.PlatformRole),
+	}, nil
+}

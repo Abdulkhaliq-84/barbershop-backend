@@ -62,6 +62,17 @@ type Auth struct {
 	// SMSProvider delivers codes. Only "console" (development: prints the
 	// code to the log) exists until a real provider arrives in M7.
 	SMSProvider string `env:"SMS_PROVIDER" envDefault:"console"`
+	// TokenSecret derives the Ed25519 key that signs access tokens (≥ 32
+	// bytes). Whoever knows it can sign in as anyone: treat it like a password.
+	TokenSecret string `env:"TOKEN_SIGNING_SECRET,required,notEmpty"`
+}
+
+// devSecrets are the local-development values published in the Makefile,
+// compose.yaml and .env.example. Anyone can read them, so they are refused
+// outside development and test.
+var devSecrets = map[string]string{
+	"OTP_SECRET":           "local-development-otp-secret-not-for-real-use",
+	"TOKEN_SIGNING_SECRET": "local-development-token-signing-secret-not-for-real-use",
 }
 
 // Log configures structured logging.
@@ -112,6 +123,16 @@ func (c Config) validate() error {
 	}
 	if len(c.Auth.OTPSecret) < 32 {
 		errs = append(errs, errors.New("OTP_SECRET must be at least 32 bytes"))
+	}
+	if len(c.Auth.TokenSecret) < 32 {
+		errs = append(errs, errors.New("TOKEN_SIGNING_SECRET must be at least 32 bytes"))
+	}
+	if c.Env == EnvStaging || c.Env == EnvProduction {
+		for key, value := range map[string]string{"OTP_SECRET": c.Auth.OTPSecret, "TOKEN_SIGNING_SECRET": c.Auth.TokenSecret} {
+			if value == devSecrets[key] {
+				errs = append(errs, fmt.Errorf("%s is the public development value; set a real secret", key))
+			}
+		}
 	}
 	if c.Auth.SMSProvider != "console" {
 		errs = append(errs, errors.New("SMS_PROVIDER must be console (the only provider so far)"))

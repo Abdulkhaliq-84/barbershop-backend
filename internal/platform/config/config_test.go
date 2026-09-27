@@ -10,14 +10,15 @@ import (
 )
 
 const (
-	dbURL     = "DATABASE_URL=postgres://u:p@localhost:5432/db?sslmode=disable"
-	otpSecret = "OTP_SECRET=test-only-secret-0123456789abcdef-xyz"
+	dbURL       = "DATABASE_URL=postgres://u:p@localhost:5432/db?sslmode=disable"
+	otpSecret   = "OTP_SECRET=test-only-secret-0123456789abcdef-xyz"
+	tokenSecret = "TOKEN_SIGNING_SECRET=test-only-token-secret-0123456789abcdef"
 )
 
 func TestLoadDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=development"})
+	cfg, err := config.Load([]string{dbURL, otpSecret, tokenSecret, "APP_ENV=development"})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -44,7 +45,7 @@ func TestLoadOverrides(t *testing.T) {
 
 	cfg, err := config.Load([]string{
 		dbURL,
-		otpSecret,
+		otpSecret, tokenSecret,
 		"APP_ENV=staging",
 		"HTTP_ADDR=:9000",
 		"HTTP_SHUTDOWN_TIMEOUT=45s",
@@ -73,17 +74,21 @@ func TestLoadErrors(t *testing.T) {
 		environ []string
 		wantErr string // substring the error must contain
 	}{
-		{"missing database url", []string{otpSecret}, "DATABASE_URL"},
-		{"empty database url", []string{"DATABASE_URL=", otpSecret}, "DATABASE_URL"},
-		{"missing otp secret", []string{dbURL}, "OTP_SECRET"},
-		{"short otp secret", []string{dbURL, "OTP_SECRET=too-short"}, "OTP_SECRET"},
-		{"unknown sms provider", []string{dbURL, otpSecret, "SMS_PROVIDER=pigeon"}, "SMS_PROVIDER"},
-		{"console sms in production", []string{dbURL, otpSecret, "APP_ENV=production"}, "not allowed in production"},
-		{"unknown environment", []string{dbURL, otpSecret, "APP_ENV=qa"}, "APP_ENV"},
-		{"unknown log format", []string{dbURL, otpSecret, "LOG_FORMAT=xml"}, "LOG_FORMAT"},
-		{"bad log level", []string{dbURL, otpSecret, "LOG_LEVEL=loud"}, "LOG_LEVEL"},
-		{"bad duration", []string{dbURL, otpSecret, "HTTP_READ_TIMEOUT=soon"}, "HTTP_READ_TIMEOUT"},
-		{"zero pool size", []string{dbURL, otpSecret, "DATABASE_MAX_CONNS=0"}, "DATABASE_MAX_CONNS"},
+		{"missing database url", []string{otpSecret, tokenSecret}, "DATABASE_URL"},
+		{"empty database url", []string{"DATABASE_URL=", otpSecret, tokenSecret}, "DATABASE_URL"},
+		{"missing otp secret", []string{dbURL, tokenSecret}, "OTP_SECRET"},
+		{"short otp secret", []string{dbURL, "OTP_SECRET=too-short", tokenSecret}, "OTP_SECRET"},
+		{"missing token secret", []string{dbURL, otpSecret}, "TOKEN_SIGNING_SECRET"},
+		{"short token secret", []string{dbURL, otpSecret, "TOKEN_SIGNING_SECRET=too-short"}, "TOKEN_SIGNING_SECRET"},
+		{"dev token secret in staging", []string{dbURL, otpSecret, "APP_ENV=staging", "TOKEN_SIGNING_SECRET=local-development-token-signing-secret-not-for-real-use"}, "public development value"},
+		{"dev otp secret in staging", []string{dbURL, tokenSecret, "APP_ENV=staging", "OTP_SECRET=local-development-otp-secret-not-for-real-use"}, "OTP_SECRET is the public development value"},
+		{"unknown sms provider", []string{dbURL, otpSecret, tokenSecret, "SMS_PROVIDER=pigeon"}, "SMS_PROVIDER"},
+		{"console sms in production", []string{dbURL, otpSecret, tokenSecret, "APP_ENV=production"}, "not allowed in production"},
+		{"unknown environment", []string{dbURL, otpSecret, tokenSecret, "APP_ENV=qa"}, "APP_ENV"},
+		{"unknown log format", []string{dbURL, otpSecret, tokenSecret, "LOG_FORMAT=xml"}, "LOG_FORMAT"},
+		{"bad log level", []string{dbURL, otpSecret, tokenSecret, "LOG_LEVEL=loud"}, "LOG_LEVEL"},
+		{"bad duration", []string{dbURL, otpSecret, tokenSecret, "HTTP_READ_TIMEOUT=soon"}, "HTTP_READ_TIMEOUT"},
+		{"zero pool size", []string{dbURL, otpSecret, tokenSecret, "DATABASE_MAX_CONNS=0"}, "DATABASE_MAX_CONNS"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,7 +108,7 @@ func TestLoadErrors(t *testing.T) {
 func TestLoadReportsAllProblemsAtOnce(t *testing.T) {
 	t.Parallel()
 
-	_, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=qa", "LOG_FORMAT=xml"})
+	_, err := config.Load([]string{dbURL, otpSecret, tokenSecret, "APP_ENV=qa", "LOG_FORMAT=xml"})
 	if err == nil {
 		t.Fatal("Load() error = nil, want error")
 	}
@@ -117,7 +122,7 @@ func TestLoadReportsAllProblemsAtOnce(t *testing.T) {
 func TestRequiredEnvironment(t *testing.T) {
 	t.Parallel()
 	for _, extra := range [][]string{nil, {"APP_ENV="}} {
-		_, err := config.Load(append([]string{dbURL, otpSecret}, extra...))
+		_, err := config.Load(append([]string{dbURL, otpSecret, tokenSecret}, extra...))
 		if err == nil || !strings.Contains(err.Error(), "APP_ENV") {
 			t.Fatalf("expected APP_ENV error, got %v", err)
 		}
@@ -130,7 +135,7 @@ func TestAllTimeoutsMustBePositive(t *testing.T) {
 		for _, value := range []string{"0", "0s", "-1s", "invalid-sensitive-value", "999999999999999999999h"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				t.Parallel()
-				_, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=test", key + "=" + value})
+				_, err := config.Load([]string{dbURL, otpSecret, tokenSecret, "APP_ENV=test", key + "=" + value})
 				if err == nil || !strings.Contains(err.Error(), key) {
 					t.Fatalf("expected %s error, got %v", key, err)
 				}
@@ -145,7 +150,7 @@ func TestAllTimeoutsMustBePositive(t *testing.T) {
 func TestConfigurationErrorsDoNotEchoInput(t *testing.T) {
 	t.Parallel()
 	for _, key := range []string{"APP_ENV", "LOG_FORMAT", "LOG_LEVEL", "SMS_PROVIDER", "DATABASE_MAX_CONNS"} {
-		_, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=test", key + "=+966551234567-private"})
+		_, err := config.Load([]string{dbURL, otpSecret, tokenSecret, "APP_ENV=test", key + "=+966551234567-private"})
 		if err == nil || strings.Contains(err.Error(), "+966551234567-private") {
 			t.Fatalf("unsafe error for %s: %v", key, err)
 		}

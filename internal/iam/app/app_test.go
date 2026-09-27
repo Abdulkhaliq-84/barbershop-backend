@@ -86,6 +86,28 @@ func (f *fakeUsers) Register(_ context.Context, u *domain.User) (*domain.User, b
 	return u, true, nil
 }
 
+func (f *fakeUsers) ByID(_ context.Context, id shared.UserID) (*domain.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, u := range f.byPhone {
+		if u.ID() == id {
+			return u, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+// block replaces the stored user with a blocked copy.
+func (f *fakeUsers) block(id shared.UserID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for phone, u := range f.byPhone {
+		if u.ID() == id {
+			f.byPhone[phone] = domain.RehydrateUser(u.ID(), u.Phone(), u.Name(), u.Locale(), domain.UserBlocked, u.PlatformRole(), u.CreatedAt())
+		}
+	}
+}
+
 type fixedCode struct{ code string }
 
 func (f fixedCode) NewCode() (domain.OTPCode, error) { return domain.ParseOTPCode(f.code) }
@@ -111,8 +133,12 @@ type fixture struct {
 	challenges *fakeChallenges
 	users      *fakeUsers
 	sender     *captureSender
+	sessions   *fakeSessions
 	request    *app.RequestOTPHandler
 	verify     *app.VerifyOTPHandler
+	refresh    *app.RefreshHandler
+	logout     *app.LogoutHandler
+	getMe      *app.GetMeHandler
 }
 
 func newFixture() *fixture {
@@ -121,10 +147,15 @@ func newFixture() *fixture {
 		challenges: &fakeChallenges{},
 		users:      &fakeUsers{byPhone: map[shared.PhoneNumber]*domain.User{}},
 		sender:     &captureSender{},
+		sessions:   newFakeSessions(),
 	}
 	policy := domain.DefaultOTPPolicy()
+	issuer := app.NewSessionIssuer(f.sessions, fakeAccess{}, &fakeSecrets{}, f.clock, domain.DefaultTokenPolicy())
 	f.request = app.NewRequestOTPHandler(f.challenges, fixedCode{"482193"}, plainHasher{}, f.sender, f.clock, policy)
-	f.verify = app.NewVerifyOTPHandler(f.challenges, f.users, plainHasher{}, f.clock, policy)
+	f.verify = app.NewVerifyOTPHandler(f.challenges, f.users, plainHasher{}, issuer, f.clock, policy)
+	f.refresh = app.NewRefreshHandler(issuer, f.users)
+	f.logout = app.NewLogoutHandler(f.sessions, f.clock)
+	f.getMe = app.NewGetMeHandler(f.users)
 	return f
 }
 

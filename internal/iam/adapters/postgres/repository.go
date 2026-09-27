@@ -33,6 +33,7 @@ func NewOTPChallenges(pool *pgxpool.Pool) *OTPChallenges {
 var (
 	_ domain.OTPChallenges = (*OTPChallenges)(nil)
 	_ domain.Users         = (*Users)(nil)
+	_ domain.Sessions      = (*Sessions)(nil)
 )
 
 // Add inserts a new challenge.
@@ -182,6 +183,18 @@ func (r *Users) Register(ctx context.Context, u *domain.User) (*domain.User, boo
 	return stored, created, err
 }
 
+// ByID returns the user with id, or domain.ErrNotFound.
+func (r *Users) ByID(ctx context.Context, id shared.UserID) (*domain.User, error) {
+	row, err := sqlcgen.New(r.pool).UserByID(ctx, id.UUID())
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load user: %w", err)
+	}
+	return toUser(row)
+}
+
 func toUser(row sqlcgen.IamUser) (*domain.User, error) {
 	phone, err := shared.NewPhoneNumber(row.Phone)
 	if err != nil {
@@ -193,7 +206,8 @@ func toUser(row sqlcgen.IamUser) (*domain.User, error) {
 	}
 	return domain.RehydrateUser(
 		shared.IDFromUUID[shared.UserTag](row.ID), phone, name,
-		shared.ParseLanguage(row.Locale), domain.UserStatus(row.Status), row.CreatedAt,
+		shared.ParseLanguage(row.Locale), domain.UserStatus(row.Status),
+		domain.PlatformRole(row.PlatformRole), row.CreatedAt,
 	), nil
 }
 

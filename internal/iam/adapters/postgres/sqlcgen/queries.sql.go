@@ -60,6 +60,56 @@ func (q *Queries) InsertOTPChallenge(ctx context.Context, arg InsertOTPChallenge
 	return err
 }
 
+const insertRefreshToken = `-- name: InsertRefreshToken :exec
+INSERT INTO iam.refresh_tokens (token_hash, session_id, created_at, expires_at, used_at)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertRefreshTokenParams struct {
+	TokenHash []byte
+	SessionID uuid.UUID
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
+func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error {
+	_, err := q.db.Exec(ctx, insertRefreshToken,
+		arg.TokenHash,
+		arg.SessionID,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+		arg.UsedAt,
+	)
+	return err
+}
+
+const insertSession = `-- name: InsertSession :exec
+INSERT INTO iam.sessions (id, user_id, created_at, last_refreshed_at, revoked_at, revoke_reason)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertSessionParams struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	CreatedAt       time.Time
+	LastRefreshedAt time.Time
+	RevokedAt       *time.Time
+	RevokeReason    *string
+}
+
+func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
+	_, err := q.db.Exec(ctx, insertSession,
+		arg.ID,
+		arg.UserID,
+		arg.CreatedAt,
+		arg.LastRefreshedAt,
+		arg.RevokedAt,
+		arg.RevokeReason,
+	)
+	return err
+}
+
 const insertUserIfNew = `-- name: InsertUserIfNew :one
 INSERT INTO iam.users (id, phone, locale, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $4)
@@ -165,6 +215,65 @@ func (q *Queries) LockOTPPhone(ctx context.Context, dollar_1 string) error {
 	return err
 }
 
+const markRefreshTokenUsed = `-- name: MarkRefreshTokenUsed :exec
+UPDATE iam.refresh_tokens
+SET used_at = $2
+WHERE token_hash = $1
+`
+
+type MarkRefreshTokenUsedParams struct {
+	TokenHash []byte
+	UsedAt    *time.Time
+}
+
+func (q *Queries) MarkRefreshTokenUsed(ctx context.Context, arg MarkRefreshTokenUsedParams) error {
+	_, err := q.db.Exec(ctx, markRefreshTokenUsed, arg.TokenHash, arg.UsedAt)
+	return err
+}
+
+const refreshTokenForUpdate = `-- name: RefreshTokenForUpdate :one
+SELECT t.token_hash, t.session_id, t.created_at, t.expires_at, t.used_at,
+       s.user_id, s.created_at AS session_created_at, s.last_refreshed_at,
+       s.revoked_at, s.revoke_reason
+FROM iam.refresh_tokens t
+JOIN iam.sessions s ON s.id = t.session_id
+WHERE t.token_hash = $1
+FOR UPDATE OF t, s
+`
+
+type RefreshTokenForUpdateRow struct {
+	TokenHash        []byte
+	SessionID        uuid.UUID
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	UsedAt           *time.Time
+	UserID           uuid.UUID
+	SessionCreatedAt time.Time
+	LastRefreshedAt  time.Time
+	RevokedAt        *time.Time
+	RevokeReason     *string
+}
+
+// Locks the presented token and its session until the transaction ends, so
+// two refreshes of one session (or a refresh and a logout) take turns.
+func (q *Queries) RefreshTokenForUpdate(ctx context.Context, tokenHash []byte) (RefreshTokenForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, refreshTokenForUpdate, tokenHash)
+	var i RefreshTokenForUpdateRow
+	err := row.Scan(
+		&i.TokenHash,
+		&i.SessionID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.UserID,
+		&i.SessionCreatedAt,
+		&i.LastRefreshedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
 const saveOTPGuard = `-- name: SaveOTPGuard :exec
 INSERT INTO iam.otp_phone_guards (phone, failures, window_start, locked_until)
 VALUES ($1, $2, $3, $4)
@@ -189,6 +298,27 @@ func (q *Queries) SaveOTPGuard(ctx context.Context, arg SaveOTPGuardParams) erro
 	return err
 }
 
+const sessionForUpdate = `-- name: SessionForUpdate :one
+SELECT id, user_id, created_at, last_refreshed_at, revoked_at, revoke_reason
+FROM iam.sessions
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) SessionForUpdate(ctx context.Context, id uuid.UUID) (IamSession, error) {
+	row := q.db.QueryRow(ctx, sessionForUpdate, id)
+	var i IamSession
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.LastRefreshedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
 const updateOTPChallenge = `-- name: UpdateOTPChallenge :exec
 UPDATE iam.otp_challenges
 SET attempts = $2, consumed_at = $3
@@ -204,6 +334,51 @@ type UpdateOTPChallengeParams struct {
 func (q *Queries) UpdateOTPChallenge(ctx context.Context, arg UpdateOTPChallengeParams) error {
 	_, err := q.db.Exec(ctx, updateOTPChallenge, arg.ID, arg.Attempts, arg.ConsumedAt)
 	return err
+}
+
+const updateSession = `-- name: UpdateSession :exec
+UPDATE iam.sessions
+SET last_refreshed_at = $2, revoked_at = $3, revoke_reason = $4
+WHERE id = $1
+`
+
+type UpdateSessionParams struct {
+	ID              uuid.UUID
+	LastRefreshedAt time.Time
+	RevokedAt       *time.Time
+	RevokeReason    *string
+}
+
+func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) error {
+	_, err := q.db.Exec(ctx, updateSession,
+		arg.ID,
+		arg.LastRefreshedAt,
+		arg.RevokedAt,
+		arg.RevokeReason,
+	)
+	return err
+}
+
+const userByID = `-- name: UserByID :one
+SELECT id, phone, name, locale, status, platform_role, created_at, updated_at
+FROM iam.users
+WHERE id = $1
+`
+
+func (q *Queries) UserByID(ctx context.Context, id uuid.UUID) (IamUser, error) {
+	row := q.db.QueryRow(ctx, userByID, id)
+	var i IamUser
+	err := row.Scan(
+		&i.ID,
+		&i.Phone,
+		&i.Name,
+		&i.Locale,
+		&i.Status,
+		&i.PlatformRole,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const userByPhone = `-- name: UserByPhone :one

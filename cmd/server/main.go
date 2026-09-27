@@ -89,23 +89,24 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 // promotes each module's methods, so together they satisfy the generated
 // apigen.StrictServerInterface. New modules add a line here.
 type apiServer struct {
-	*httpapi.Handlers // iam: /v1/auth/*
+	*httpapi.Handlers // iam: /v1/auth/*, /v1/me
 }
 
 // newHandler builds every module and mounts the API next to the health checks.
 func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, error) {
 	iamModule, err := iam.New(iam.Deps{
-		Pool:      pool,
-		Clock:     clock.System{},
-		Logger:    logger,
-		OTPSecret: []byte(cfg.Auth.OTPSecret),
+		Pool:        pool,
+		Clock:       clock.System{},
+		Logger:      logger,
+		OTPSecret:   []byte(cfg.Auth.OTPSecret),
+		TokenSecret: []byte(cfg.Auth.TokenSecret),
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	if err := httpx.MountAPI(router, apiServer{iamModule.HTTP()}, logger); err != nil {
+	if err := httpx.MountAPI(router, apiServer{iamModule.HTTP()}, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
 	return router, nil
