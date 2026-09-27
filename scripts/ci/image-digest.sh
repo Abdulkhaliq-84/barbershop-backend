@@ -4,7 +4,8 @@
 set -euo pipefail
 err=$(mktemp)
 trap 'rm -f "$err"' EXIT
-if digest=$(docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}' 2>"$err"); then
+if manifest=$(docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>"$err"); then
+  digest=$(jq -er '.digest' <<< "$manifest")
   [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Invalid registry digest' >&2; exit 1; }
   printf '%s\n' "$digest"
 elif grep -Eq '(manifest unknown|: not found)$' "$err"; then

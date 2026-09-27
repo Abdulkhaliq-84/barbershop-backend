@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory() as work:
     different = 'sha256:' + 'b' * 64
     sha = 'c' * 40
     stub = '''#!/usr/bin/env python3
-import os,sys
+import os,sys,json
 from pathlib import Path
 name=Path(sys.argv[0]).name
 a=sys.argv[1:]
@@ -24,9 +24,11 @@ if name=='docker':
   if os.environ.get('ERROR'):
    print(os.environ['ERROR'],file=sys.stderr);sys.exit(1)
   tag=a[3]
-  value=os.environ['DIGEST'] if ':sha-' in tag else os.environ.get('EXISTING','')
+  value=os.environ.get('SOURCE',os.environ['DIGEST']) if ':sha-' in tag else os.environ.get('EXISTING','')
   if Path(os.environ['STATE']).exists():value=os.environ['DIGEST']
-  if value:print(value)
+  if value:
+   assert a[4:]==['--format','{{json .Manifest}}']
+   print(json.dumps({'digest':value}))
   else: print('ERROR: '+tag+': not found',file=sys.stderr);sys.exit(1)
  else:
   with open(os.environ['CALLS'],'a') as f:f.write(' '.join(a)+'\\n')
@@ -63,6 +65,7 @@ elif name=='gh':
     calls=run(EXISTING=digest)
     assert ':v1.2.3' not in calls and ':latest' in calls
     assert run(EXISTING=different,ok=False)==''
+    assert run(SOURCE=different,ok=False)==''
     assert run(COMMIT='e'*40,ok=False)==''
     assert run(TAG='v1.2.3;echo injected',ok=False)==''
     assert run(TAG='v01.2.3',ok=False)==''
