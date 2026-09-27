@@ -51,6 +51,26 @@ func (s *store) ByID(_ context.Context, id shared.BusinessID) (*domain.Business,
 	return nil, domain.ErrNotFound
 }
 
+// Update works on a copy and keeps it only if fn succeeds, like a
+// rolled-back transaction.
+func (s *store) Update(_ context.Context, id shared.BusinessID, expectedVersion int, fn func(*domain.Business) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.businesses[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	if b.Version() != expectedVersion {
+		return domain.ErrVersionConflict
+	}
+	c := domain.RehydrateBusiness(b.ID(), b.OwnerID(), b.DisplayName(), b.LegalName(), b.CRNumber(), b.Status(), b.Version(), b.CreatedAt(), b.UpdatedAt())
+	if err := fn(c); err != nil {
+		return err
+	}
+	s.businesses[id] = c
+	return nil
+}
+
 func (s *store) Membership(_ context.Context, business shared.BusinessID, user shared.UserID) (*domain.StaffMember, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,15 +107,20 @@ type fixture struct {
 	store    *store
 	register *app.RegisterBusinessHandler
 	get      *app.GetBusinessHandler
+	update   *app.UpdateBusinessHandler
+	clock    *clock.Fake
 	list     *app.ListMyMembershipsHandler
 }
 
 func newFixture() *fixture {
 	s := newStore()
+	clk := clock.NewFake(t0)
 	return &fixture{
 		store:    s,
-		register: app.NewRegisterBusinessHandler(s, clock.NewFake(t0)),
+		clock:    clk,
+		register: app.NewRegisterBusinessHandler(s, clk),
 		get:      app.NewGetBusinessHandler(s, s),
+		update:   app.NewUpdateBusinessHandler(s, s, clk),
 		list:     app.NewListMyMembershipsHandler(s),
 	}
 }
@@ -211,5 +236,75 @@ func TestListMyMembershipsForCustomer(t *testing.T) {
 	views, err := f.list.Handle(t.Context(), shared.NewID[shared.UserTag]())
 	if err != nil || len(views) != 0 {
 		t.Fatalf("a customer's memberships = %+v, %v; want none", views, err)
+	}
+}
+
+func TestUpdateBusiness(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newFixture()
+	owner := shared.NewID[shared.UserTag]()
+	b, err := f.register.Handle(ctx, registerCmd(owner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(time.Hour)
+
+	// Only the legal name: the display name stays.
+	legal := "مؤسسة الفخامة"
+	got, err := f.update.Handle(ctx, app.UpdateBusiness{Actor: owner, BusinessID: b.ID(), ExpectedVersion: 1, LegalName: &legal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LegalName() != legal || got.DisplayName() != b.DisplayName() || got.Version() != 2 || !got.UpdatedAt().Equal(t0.Add(time.Hour)) {
+		t.Errorf("after update: %+v", got)
+	}
+
+	// The old version is refused: someone changed the business since.
+	name := &app.DisplayName{Ar: "صالون الفخامة"}
+	if _, err := f.update.Handle(ctx, app.UpdateBusiness{Actor: owner, BusinessID: b.ID(), ExpectedVersion: 1, DisplayName: name}); !errors.Is(err, domain.ErrVersionConflict) {
+		t.Fatalf("stale version: error = %v, want ErrVersionConflict", err)
+	}
+	// With the current one it works; an omitted English name is cleared.
+	got, err = f.update.Handle(ctx, app.UpdateBusiness{Actor: owner, BusinessID: b.ID(), ExpectedVersion: 2, DisplayName: name})
+	if err != nil || got.DisplayName().Ar() != "صالون الفخامة" || got.DisplayName().En() != "" || got.Version() != 3 {
+		t.Fatalf("rename = %+v, %v", got, err)
+	}
+	// Invalid input saves nothing.
+	blank := " "
+	if _, err := f.update.Handle(ctx, app.UpdateBusiness{Actor: owner, BusinessID: b.ID(), ExpectedVersion: 3, LegalName: &blank}); !errors.Is(err, domain.ErrLegalNameRequired) {
+		t.Fatalf("blank legal name: error = %v", err)
+	}
+	if again, _ := f.store.ByID(ctx, b.ID()); again.Version() != 3 || again.LegalName() != legal {
+		t.Fatalf("a refused update was saved: %+v", again)
+	}
+}
+
+func TestUpdateBusinessAuthorizesFirst(t *testing.T) {
+	t.Parallel()
+	f := newFixture()
+	owner := shared.NewID[shared.UserTag]()
+	b, err := f.register.Handle(t.Context(), registerCmd(owner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := shared.NewID[shared.UserTag]()
+	f.store.addStaff(b.ID(), manager, domain.RoleManager, true)
+	legal := "مؤسسة أخرى"
+
+	for name, tt := range map[string]struct {
+		actor shared.UserID
+		want  error
+	}{
+		"stranger": {shared.NewID[shared.UserTag](), domain.ErrNotFound},
+		"manager":  {manager, domain.ErrForbidden},
+	} {
+		_, err := f.update.Handle(t.Context(), app.UpdateBusiness{Actor: tt.actor, BusinessID: b.ID(), ExpectedVersion: 1, LegalName: &legal})
+		if !errors.Is(err, tt.want) {
+			t.Errorf("%s: error = %v, want %v", name, err, tt.want)
+		}
+	}
+	if again, _ := f.store.ByID(t.Context(), b.ID()); again.Version() != 1 {
+		t.Fatal("a refused caller changed the business")
 	}
 }

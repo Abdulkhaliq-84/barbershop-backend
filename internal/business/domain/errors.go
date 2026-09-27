@@ -16,4 +16,7 @@ var (
 	ErrOwnerRequired     = errors.New("business: an owner is required")
 	ErrUnknownRole       = errors.New("staff: unknown role")
 	ErrUnknownStatus     = errors.New("business: unknown status")
+
+	ErrInvalidStateTransition = errors.New("business: not allowed in its current status")
+	ErrVersionConflict        = errors.New("business: changed since you read it")
 )

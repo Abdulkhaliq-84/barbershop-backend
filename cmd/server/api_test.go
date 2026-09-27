@@ -86,7 +86,7 @@ type response struct {
 	body    map[string]any
 }
 
-func (a *api) do(t *testing.T, method, path, token, body string) response {
+func (a *api) do(t *testing.T, method, path, token, body string, headers ...string) response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, a.url+path, strings.NewReader(body))
 	if err != nil {
@@ -97,6 +97,9 @@ func (a *api) do(t *testing.T, method, path, token, body string) response {
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -228,5 +231,67 @@ func TestBusinessAPIRejects(t *testing.T) {
 	}
 	if data := memberships(t, a.do(t, http.MethodGet, "/v1/me/memberships", token, "")); len(data) != 0 {
 		t.Errorf("a refused registration left a membership: %v", data)
+	}
+}
+
+func TestUpdateBusinessAPI(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner := a.signIn(t, "0551234567")
+	r := a.do(t, http.MethodPost, "/v1/businesses", owner, registration)
+	if r.status != http.StatusCreated {
+		t.Fatalf("register: %d %v", r.status, r.body)
+	}
+	path := "/v1/businesses/" + r.body["id"].(string)
+	patch := func(token, body string, headers ...string) response {
+		t.Helper()
+		return a.do(t, http.MethodPatch, path, token, body, headers...)
+	}
+
+	// The owner renames, sending the version they read (ETag form).
+	r = patch(owner, `{"legal_name":"مؤسسة الفخامة"}`, "If-Match", `"1"`)
+	if r.status != http.StatusOK || r.body["legal_name"] != "مؤسسة الفخامة" || r.body["version"] != float64(2) {
+		t.Fatalf("rename: %d %v", r.status, r.body)
+	}
+	if name, _ := r.body["display_name"].(map[string]any); name["en"] != "Elegance Barbers" {
+		t.Errorf("display_name changed: %v", r.body["display_name"])
+	}
+
+	// Version 1 is stale now: a second phone's edit is refused, not merged.
+	if r := patch(owner, `{"display_name":{"ar":"صالون الفخامة"}}`, "If-Match", "1"); r.status != http.StatusPreconditionFailed || r.body["code"] != "version_conflict" {
+		t.Fatalf("stale version: %d %v", r.status, r.body)
+	}
+	// Replacing display_name without "en" clears the English name.
+	r = patch(owner, `{"display_name":{"ar":"صالون الفخامة"}}`, "If-Match", "2")
+	if name, _ := r.body["display_name"].(map[string]any); r.status != http.StatusOK || name["ar"] != "صالون الفخامة" || name["en"] != nil {
+		t.Fatalf("display name: %d %v", r.status, r.body)
+	}
+
+	// A stranger gets 404, like for a business that doesn't exist.
+	stranger := a.signIn(t, "0559876543")
+	if r := patch(stranger, `{"legal_name":"مختطف"}`, "If-Match", "3"); r.status != http.StatusNotFound || r.body["code"] != "not_found" {
+		t.Errorf("stranger: %d %v", r.status, r.body)
+	}
+
+	tests := []struct {
+		name, body string
+		headers    []string
+		status     int
+	}{
+		{"no If-Match", `{"legal_name":"x"}`, nil, http.StatusBadRequest},
+		{"If-Match not a number", `{"legal_name":"x"}`, []string{"If-Match", "*"}, http.StatusBadRequest},
+		{"empty body", `{}`, []string{"If-Match", "3"}, http.StatusBadRequest},
+		{"unknown field", `{"status":"active"}`, []string{"If-Match", "3"}, http.StatusBadRequest},
+		{"blank legal name", `{"legal_name":"  "}`, []string{"If-Match", "3"}, http.StatusUnprocessableEntity},
+	}
+	for _, tt := range tests {
+		if r := patch(owner, tt.body, tt.headers...); r.status != tt.status || r.body["code"] != "validation_failed" {
+			t.Errorf("%s: %d %v, want %d validation_failed", tt.name, r.status, r.body, tt.status)
+		}
+	}
+
+	// Nothing refused was saved.
+	if r := a.do(t, http.MethodGet, path, owner, ""); r.body["version"] != float64(3) || r.body["legal_name"] != "مؤسسة الفخامة" {
+		t.Fatalf("after refusals: %v", r.body)
 	}
 }

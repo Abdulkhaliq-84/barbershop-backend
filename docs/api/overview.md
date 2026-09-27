@@ -39,7 +39,7 @@ Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `
 `not_found`, `conflict`, `rate_limited`, `internal`, `otp_invalid`, `otp_expired`, `otp_too_many_attempts`,
 `otp_cooldown`, `user_blocked`, `refresh_token_reused`, `business_already_registered`, `business_not_active`, `plan_limit_reached`, `slot_unavailable`,
 `outside_booking_window`, `outside_cancellation_window`, `too_many_active_bookings`,
-`invalid_state_transition`.
+`invalid_state_transition`, `version_conflict` (412: the resource changed since you read it).
 
 ## 2. Endpoint inventory
 
@@ -111,7 +111,7 @@ Client flow (Flutter):
 | Method | Path | Min role |
 |---|---|---|
 | POST | `/v1/businesses` (register → Draft) — live (M3.1) | user |
-| GET / PATCH | `/v1/businesses/{business_id}` — GET live (M3.1); PATCH is the owner's exercise | owner |
+| GET / PATCH | `/v1/businesses/{business_id}` — live (M3.1); PATCH edits names while draft/rejected, needs `If-Match: <version>` | owner |
 | POST | `/v1/businesses/{business_id}/verification/documents` (CR upload) | owner |
 | POST | `/v1/businesses/{business_id}/verification/submit` | owner |
 | GET / POST | `/v1/businesses/{business_id}/branches` | owner |

@@ -21,3 +21,15 @@ FROM business.staff_members s
 JOIN business.businesses b ON b.id = s.business_id
 WHERE s.user_id = $1 AND s.active
 ORDER BY b.id DESC; -- UUIDv7: newest first
+
+-- name: BusinessByIDForUpdate :one
+-- Locks the row until the transaction ends: a second editor waits here.
+SELECT * FROM business.businesses WHERE id = $1 FOR UPDATE;
+
+-- name: UpdateBusiness :execrows
+-- The version check is repeated in the WHERE clause as a second guard:
+-- it matches no row if the version moved since the caller read it.
+UPDATE business.businesses
+SET display_name_ar = @display_name_ar, display_name_en = @display_name_en, legal_name = @legal_name,
+    status = @status, version = @version, updated_at = @updated_at
+WHERE id = @id AND version = @expected_version;

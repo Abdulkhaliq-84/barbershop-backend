@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
@@ -24,6 +26,7 @@ import (
 type UseCases struct {
 	Register    *app.RegisterBusinessHandler
 	Get         *app.GetBusinessHandler
+	Update      *app.UpdateBusinessHandler
 	Memberships *app.ListMyMembershipsHandler
 }
 
@@ -82,6 +85,51 @@ func (h *Handlers) GetBusiness(ctx context.Context, req apigen.GetBusinessReques
 	return apigen.GetBusiness200JSONResponse(toAPIBusiness(b)), nil
 }
 
+// UpdateBusiness handles PATCH /v1/businesses/{business_id}.
+func (h *Handlers) UpdateBusiness(ctx context.Context, req apigen.UpdateBusinessRequestObject) (apigen.UpdateBusinessResponseObject, error) {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		problem, headers := h.problem(ctx, errNoPrincipal)
+		return apigen.UpdateBusinessdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	version, err := parseIfMatch(req.Params.IfMatch)
+	if err != nil {
+		problem, headers := h.problem(ctx, err)
+		return apigen.UpdateBusinessdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	cmd := app.UpdateBusiness{
+		Actor:           p.UserID,
+		BusinessID:      shared.IDFromUUID[shared.BusinessTag](req.BusinessId),
+		ExpectedVersion: version,
+		LegalName:       req.Body.LegalName,
+	}
+	if n := req.Body.DisplayName; n != nil {
+		cmd.DisplayName = &app.DisplayName{Ar: n.Ar, En: deref(n.En)}
+	}
+	b, err := h.uc.Update.Handle(ctx, cmd)
+	if err != nil {
+		problem, headers := h.problem(ctx, err)
+		return apigen.UpdateBusinessdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	return apigen.UpdateBusiness200JSONResponse(toAPIBusiness(b)), nil
+}
+
+// errBadIfMatch reports an If-Match header that isn't a version number.
+var errBadIfMatch = errors.New("if-match: not a version")
+
+// parseIfMatch reads a version from If-Match, bare (3) or as an ETag ("3").
+func parseIfMatch(v string) (int, error) {
+	v = strings.TrimSpace(v)
+	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+		v = v[1 : len(v)-1]
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 0, errBadIfMatch
+	}
+	return n, nil
+}
+
 // ListMyMemberships handles GET /v1/me/memberships.
 func (h *Handlers) ListMyMemberships(ctx context.Context, _ apigen.ListMyMembershipsRequestObject) (apigen.ListMyMembershipsResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
@@ -119,12 +167,18 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnauthorized, "unauthorized", "a valid access token is required"
 		challenge := httpx.BearerChallenge
 		headers.WWWAuthenticate = &challenge
+	case errors.Is(err, errBadIfMatch):
+		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the business version you last read"
 	case errors.Is(err, domain.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, domain.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, domain.ErrAlreadyRegistered):
 		status, code, detail = http.StatusConflict, "business_already_registered", "you already registered this CR number; see /v1/me/memberships"
+	case errors.Is(err, domain.ErrVersionConflict):
+		status, code, detail = http.StatusPreconditionFailed, "version_conflict", "the business changed since you read it; reload and try again"
+	case errors.Is(err, domain.ErrInvalidStateTransition):
+		status, code, detail = http.StatusConflict, "invalid_state_transition", "names can change only while the business is a draft or rejected"
 	case errors.Is(err, domain.ErrInvalidCRNumber):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "cr_number: must be 10 digits"
 	case errors.Is(err, shared.ErrArabicRequired):

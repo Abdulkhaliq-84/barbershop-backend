@@ -97,6 +97,57 @@ func (s *Store) ByID(ctx context.Context, id shared.BusinessID) (*domain.Busines
 	return toBusiness(row)
 }
 
+// Update applies fn to the business under a row lock, if its version is
+// still expectedVersion (optimistic concurrency: two owners editing from two
+// phones can't silently overwrite each other).
+func (s *Store) Update(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*domain.Business) error) error {
+	expected, err := toInt32(expectedVersion)
+	if err != nil {
+		return domain.ErrVersionConflict // no business ever has that version
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		row, err := q.BusinessByIDForUpdate(ctx, id.UUID())
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock business: %w", err)
+		}
+		if row.Version != expected {
+			return domain.ErrVersionConflict
+		}
+		b, err := toBusiness(row)
+		if err != nil {
+			return err
+		}
+		if err := fn(b); err != nil {
+			return err
+		}
+		version, err := toInt32(b.Version())
+		if err != nil {
+			return err
+		}
+		n, err := q.UpdateBusiness(ctx, sqlcgen.UpdateBusinessParams{
+			DisplayNameAr:   b.DisplayName().Ar(),
+			DisplayNameEn:   b.DisplayName().En(),
+			LegalName:       b.LegalName(),
+			Status:          string(b.Status()),
+			Version:         version,
+			UpdatedAt:       b.UpdatedAt(),
+			ID:              b.ID().UUID(),
+			ExpectedVersion: expected,
+		})
+		if err != nil {
+			return fmt.Errorf("update business: %w", err)
+		}
+		if n == 0 {
+			return domain.ErrVersionConflict
+		}
+		return nil
+	})
+}
+
 // Membership returns user's staff record in business.
 func (s *Store) Membership(ctx context.Context, business shared.BusinessID, user shared.UserID) (*domain.StaffMember, error) {
 	u := user.UUID()

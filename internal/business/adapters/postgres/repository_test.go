@@ -221,3 +221,92 @@ func TestSchemaConstraints(t *testing.T) {
 	_, err = pool.Exec(ctx, `UPDATE business.businesses SET cr_number = '12345' WHERE id = $1`, b.ID().UUID())
 	wantViolation("short cr number", "businesses_cr_number_check", err)
 }
+
+// rename renames b's legal name to legal, expecting version.
+func rename(t *testing.T, store *postgres.Store, id shared.BusinessID, version int, legal string) error {
+	t.Helper()
+	return store.Update(t.Context(), id, version, func(b *domain.Business) error {
+		return b.Rename(b.DisplayName(), legal, t0.Add(time.Hour))
+	})
+}
+
+func TestStoreUpdate(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migratedDB(t)
+	store := postgres.NewStore(pool)
+	b, m := newBusiness(t, shared.NewID[shared.UserTag](), "1010123456")
+	if err := store.Register(ctx, b, m); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rename(t, store, b.ID(), 1, "مؤسسة الفخامة"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, _ := store.ByID(ctx, b.ID())
+	if got.LegalName() != "مؤسسة الفخامة" || got.Version() != 2 || !got.UpdatedAt().Equal(t0.Add(time.Hour)) || !got.CreatedAt().Equal(t0) {
+		t.Fatalf("after update: %+v", got)
+	}
+
+	// A stale version, an unknown business, a refused rename: nothing saved.
+	if err := rename(t, store, b.ID(), 1, "x"); !errors.Is(err, domain.ErrVersionConflict) {
+		t.Errorf("stale version: %v", err)
+	}
+	if err := rename(t, store, shared.NewID[shared.BusinessTag](), 1, "x"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("unknown business: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE business.businesses SET status = 'pending_review' WHERE id = $1`, b.ID().UUID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := rename(t, store, b.ID(), 2, "x"); !errors.Is(err, domain.ErrInvalidStateTransition) {
+		t.Errorf("submitted business: %v", err)
+	}
+	if got, _ := store.ByID(ctx, b.ID()); got.Version() != 2 || got.LegalName() != "مؤسسة الفخامة" {
+		t.Fatalf("a refused update was saved: %+v", got)
+	}
+}
+
+// Two owners' phones save edits made on the same version at the same
+// moment. Exactly one wins; the other gets ErrVersionConflict instead of
+// silently overwriting the first (a "lost update").
+func TestStoreParallelUpdatesOfTheSameVersion(t *testing.T) {
+	t.Parallel()
+	pool := migratedDB(t)
+	store := postgres.NewStore(pool)
+	b, m := newBusiness(t, shared.NewID[shared.UserTag](), "1010123456")
+	if err := store.Register(t.Context(), b, m); err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		wg               sync.WaitGroup
+		start            = make(chan struct{})
+		saved, conflicts atomic.Int32
+	)
+	for i := range 2 {
+		wg.Go(func() {
+			<-start
+			err := store.Update(t.Context(), b.ID(), 1, func(b *domain.Business) error {
+				time.Sleep(20 * time.Millisecond) // hold the row a moment, so the calls overlap
+				return b.Rename(b.DisplayName(), []string{"مؤسسة أ", "مؤسسة ب"}[i], t0)
+			})
+			switch {
+			case err == nil:
+				saved.Add(1)
+			case errors.Is(err, domain.ErrVersionConflict):
+				conflicts.Add(1)
+			default:
+				t.Errorf("Update: %v", err)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	if saved.Load() != 1 || conflicts.Load() != 1 {
+		t.Fatalf("saved=%d conflicts=%d, want 1 and 1", saved.Load(), conflicts.Load())
+	}
+	if got, _ := store.ByID(t.Context(), b.ID()); got.Version() != 2 {
+		t.Fatalf("version = %d, want 2", got.Version())
+	}
+}

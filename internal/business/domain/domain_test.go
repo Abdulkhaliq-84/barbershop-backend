@@ -162,3 +162,49 @@ func TestParse(t *testing.T) {
 		t.Errorf("ParseStatus(deleted) error = %v", err)
 	}
 }
+
+func TestBusinessRename(t *testing.T) {
+	t.Parallel()
+	later := t0.Add(time.Hour)
+	newName, _ := shared.NewLocalizedText("صالون الفخامة", "")
+
+	tests := []struct {
+		name   string
+		status domain.Status
+		legal  string
+		text   shared.LocalizedText
+		want   error
+	}{
+		{"draft", domain.StatusDraft, " مؤسسة الفخامة ", newName, nil},
+		{"rejected: fix and resubmit", domain.StatusRejected, "مؤسسة الفخامة", newName, nil},
+		{"pending review", domain.StatusPendingReview, "مؤسسة الفخامة", newName, domain.ErrInvalidStateTransition},
+		{"active", domain.StatusActive, "مؤسسة الفخامة", newName, domain.ErrInvalidStateTransition},
+		{"suspended", domain.StatusSuspended, "مؤسسة الفخامة", newName, domain.ErrInvalidStateTransition},
+		{"blank legal name", domain.StatusDraft, "  ", newName, domain.ErrLegalNameRequired},
+		{"legal name too long", domain.StatusDraft, strings.Repeat("ب", 201), newName, domain.ErrTextTooLong},
+		{"no display name", domain.StatusDraft, "مؤسسة الفخامة", shared.LocalizedText{}, shared.ErrArabicRequired},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := registration(t)
+			cr := r.CRNumber
+			b := domain.RehydrateBusiness(shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), r.DisplayName, "مؤسسة الأناقة", cr, tt.status, 3, t0, t0)
+
+			err := b.Rename(tt.text, tt.legal, later)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("error = %v, want %v", err, tt.want)
+			}
+			if tt.want != nil {
+				// A refused rename changes nothing, not even the version.
+				if b.Version() != 3 || b.LegalName() != "مؤسسة الأناقة" || b.DisplayName() != r.DisplayName || !b.UpdatedAt().Equal(t0) {
+					t.Errorf("refused rename changed the business: %+v", b)
+				}
+				return
+			}
+			if b.Version() != 4 || b.LegalName() != "مؤسسة الفخامة" || b.DisplayName() != newName || !b.UpdatedAt().Equal(later) || !b.CreatedAt().Equal(t0) {
+				t.Errorf("after rename: %+v", b)
+			}
+		})
+	}
+}

@@ -15,6 +15,11 @@ type Businesses interface {
 	Register(ctx context.Context, b *Business, owner *StaffMember) error
 	// ByID returns the business with id, or ErrNotFound.
 	ByID(ctx context.Context, id shared.BusinessID) (*Business, error)
+	// Update locks the business, checks that its version is still
+	// expectedVersion (ErrVersionConflict if not), calls fn and saves the
+	// result — all in one transaction. If fn returns an error nothing is
+	// saved. Returns ErrNotFound when there is no such business.
+	Update(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*Business) error) error
 }
 
 // Staff stores staff members.

@@ -232,6 +232,48 @@ paths:
                 $ref: "#/components/schemas/Business"
         default:
           $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateBusiness
+      tags: [businesses]
+      summary: Edit a business's names (owner, while draft or rejected)
+      description: |
+        Owner only, with the same `404` / `403` rules as `GET`. Send only the
+        fields that change; `display_name` is replaced as a whole (an omitted
+        `en` clears the English name).
+
+        Names can change only while the business is `draft` or `rejected`
+        (`409 invalid_state_transition` otherwise): after submission the
+        reviewer checks them against the CR document.
+
+        `If-Match` carries the `version` you last read. If someone changed the
+        business since, nothing is saved and you get
+        `412 version_conflict`: reload, reapply, retry. On success `version`
+        goes up by one.
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: The business `version` you last read, e.g. `3` or `"3"`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 20
+            example: '"3"'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessUpdate"
+      responses:
+        "200":
+          description: The updated business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
 
 components:
   securitySchemes:
@@ -298,7 +340,8 @@ components:
             `not_ready`, `rate_limited`, `otp_cooldown`, `otp_invalid`,
             `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`,
             `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`,
-            `forbidden`, `business_already_registered`.
+            `forbidden`, `business_already_registered`, `invalid_state_transition`,
+            `version_conflict`.
           example: otp_cooldown
         detail:
           type: string
@@ -445,6 +488,19 @@ components:
           maxLength: 20
           description: 10-digit Commercial Registration number (Western or Arabic-Indic digits; spaces allowed).
           example: "1010123456"
+
+    BusinessUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: The fields to change; at least one.
+      properties:
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 200
 
     BusinessStatus:
       type: string

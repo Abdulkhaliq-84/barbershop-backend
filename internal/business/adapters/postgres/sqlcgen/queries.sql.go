@@ -34,6 +34,31 @@ func (q *Queries) BusinessByID(ctx context.Context, id uuid.UUID) (BusinessBusin
 	return i, err
 }
 
+const businessByIDForUpdate = `-- name: BusinessByIDForUpdate :one
+
+SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at FROM business.businesses WHERE id = $1 FOR UPDATE
+`
+
+// UUIDv7: newest first
+// Locks the row until the transaction ends: a second editor waits here.
+func (q *Queries) BusinessByIDForUpdate(ctx context.Context, id uuid.UUID) (BusinessBusiness, error) {
+	row := q.db.QueryRow(ctx, businessByIDForUpdate, id)
+	var i BusinessBusiness
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.DisplayNameAr,
+		&i.DisplayNameEn,
+		&i.LegalName,
+		&i.CrNumber,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertBusiness = `-- name: InsertBusiness :exec
 
 INSERT INTO business.businesses (id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at)
@@ -162,4 +187,41 @@ func (q *Queries) StaffMembership(ctx context.Context, arg StaffMembershipParams
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const updateBusiness = `-- name: UpdateBusiness :execrows
+UPDATE business.businesses
+SET display_name_ar = $1, display_name_en = $2, legal_name = $3,
+    status = $4, version = $5, updated_at = $6
+WHERE id = $7 AND version = $8
+`
+
+type UpdateBusinessParams struct {
+	DisplayNameAr   string
+	DisplayNameEn   string
+	LegalName       string
+	Status          string
+	Version         int32
+	UpdatedAt       time.Time
+	ID              uuid.UUID
+	ExpectedVersion int32
+}
+
+// The version check is repeated in the WHERE clause as a second guard:
+// it matches no row if the version moved since the caller read it.
+func (q *Queries) UpdateBusiness(ctx context.Context, arg UpdateBusinessParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateBusiness,
+		arg.DisplayNameAr,
+		arg.DisplayNameEn,
+		arg.LegalName,
+		arg.Status,
+		arg.Version,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

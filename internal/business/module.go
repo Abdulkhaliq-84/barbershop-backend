@@ -36,6 +36,7 @@ func New(d Deps) *Module {
 		http: httpapi.NewHandlers(httpapi.UseCases{
 			Register:    app.NewRegisterBusinessHandler(store, d.Clock),
 			Get:         app.NewGetBusinessHandler(store, store),
+			Update:      app.NewUpdateBusinessHandler(store, store, d.Clock),
 			Memberships: app.NewListMyMembershipsHandler(store),
 		}, d.Logger),
 	}

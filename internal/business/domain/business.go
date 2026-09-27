@@ -75,23 +75,12 @@ func RegisterBusiness(id shared.BusinessID, ownerStaff shared.StaffID, owner sha
 	if r.CRNumber == (CRNumber{}) {
 		return nil, nil, ErrInvalidCRNumber
 	}
-	if r.DisplayName.Ar() == "" {
-		return nil, nil, shared.ErrArabicRequired
-	}
-	if utf8.RuneCountInString(r.DisplayName.Ar()) > MaxDisplayNameLen || utf8.RuneCountInString(r.DisplayName.En()) > MaxDisplayNameLen {
-		return nil, nil, ErrTextTooLong
-	}
-	legal := strings.TrimSpace(r.LegalName)
-	if legal == "" {
-		return nil, nil, ErrLegalNameRequired
-	}
-	if utf8.RuneCountInString(legal) > MaxLegalNameLen {
-		return nil, nil, ErrTextTooLong
+	legal, err := validateNames(r.DisplayName, r.LegalName)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// PostgreSQL keeps microseconds. Dropping the rest now means the time in
-	// the 201 response is the same one every later read returns.
-	now = now.UTC().Truncate(time.Microsecond)
+	now = dbTime(now)
 	b := &Business{
 		id: id, owner: owner, displayName: r.DisplayName, legalName: legal, cr: r.CRNumber,
 		status: StatusDraft, version: 1, createdAt: now, updatedAt: now,
@@ -99,6 +88,47 @@ func RegisterBusiness(id shared.BusinessID, ownerStaff shared.StaffID, owner sha
 	m := &StaffMember{id: ownerStaff, business: id, user: owner, role: RoleOwner, active: true, createdAt: now}
 	return b, m, nil
 }
+
+// Rename changes the display and legal names. Names can change only before
+// the platform checks them against the CR document (draft) or after it sent
+// them back (rejected). Every successful change bumps the version, which is
+// how a second editor holding an older copy is stopped (optimistic
+// concurrency, checked by the repository).
+func (b *Business) Rename(displayName shared.LocalizedText, legalName string, now time.Time) error {
+	if b.status != StatusDraft && b.status != StatusRejected {
+		return ErrInvalidStateTransition
+	}
+	legal, err := validateNames(displayName, legalName)
+	if err != nil {
+		return err
+	}
+	b.displayName, b.legalName = displayName, legal
+	b.version++
+	b.updatedAt = dbTime(now)
+	return nil
+}
+
+// validateNames checks both names and returns the trimmed legal name.
+func validateNames(displayName shared.LocalizedText, legalName string) (string, error) {
+	if displayName.Ar() == "" {
+		return "", shared.ErrArabicRequired
+	}
+	if utf8.RuneCountInString(displayName.Ar()) > MaxDisplayNameLen || utf8.RuneCountInString(displayName.En()) > MaxDisplayNameLen {
+		return "", ErrTextTooLong
+	}
+	legal := strings.TrimSpace(legalName)
+	if legal == "" {
+		return "", ErrLegalNameRequired
+	}
+	if utf8.RuneCountInString(legal) > MaxLegalNameLen {
+		return "", ErrTextTooLong
+	}
+	return legal, nil
+}
+
+// dbTime keeps an instant at PostgreSQL's precision (microseconds), in UTC,
+// so the time in a response is the same one every later read returns.
+func dbTime(t time.Time) time.Time { return t.UTC().Truncate(time.Microsecond) }
 
 // RehydrateBusiness rebuilds a business loaded from storage.
 func RehydrateBusiness(id shared.BusinessID, owner shared.UserID, displayName shared.LocalizedText, legalName string, cr CRNumber, status Status, version int, createdAt, updatedAt time.Time) *Business {
