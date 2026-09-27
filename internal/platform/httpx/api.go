@@ -75,7 +75,15 @@ func MountAPI(r chi.Router, server apigen.StrictServerInterface, logger *slog.Lo
 
 	r.Group(func(r chi.Router) {
 		r.Use(limitBody(maxBodyBytes), bearerAuth(authenticate), validator)
-		apigen.HandlerWithOptions(handler, apigen.ChiServerOptions{BaseRouter: r})
+		apigen.HandlerWithOptions(handler, apigen.ChiServerOptions{
+			BaseRouter: r,
+			// A path or header parameter the router can't parse (e.g. a
+			// business_id that isn't a UUID). The default answers in plain
+			// text and echoes the input; answer like every other error.
+			ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+				WriteProblem(w, r, Problem{Status: http.StatusBadRequest, Code: "validation_failed", Detail: validationDetail(err)})
+			},
+		})
 	})
 	return nil
 }
