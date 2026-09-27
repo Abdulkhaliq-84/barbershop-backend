@@ -2,7 +2,6 @@ package shared
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -48,7 +47,7 @@ func NewID[T any]() ID[T] {
 func ParseID[T any](s string) (ID[T], error) {
 	u, err := uuid.Parse(s)
 	if err != nil || u == uuid.Nil {
-		return ID[T]{}, fmt.Errorf("%w: %q", ErrInvalidID, s)
+		return ID[T]{}, ErrInvalidID
 	}
 	return ID[T]{value: u}, nil
 }

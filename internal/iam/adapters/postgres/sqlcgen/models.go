@@ -20,6 +20,13 @@ type IamOtpChallenge struct {
 	ConsumedAt *time.Time
 }
 
+type IamOtpPhoneGuard struct {
+	Phone       string
+	Failures    int16
+	WindowStart time.Time
+	LockedUntil time.Time
+}
+
 type IamUser struct {
 	ID           uuid.UUID
 	Phone        string

@@ -2,7 +2,6 @@ package shared
 
 import (
 	"errors"
-	"fmt"
 	"math"
 )
 
@@ -19,7 +18,7 @@ type GeoPoint struct {
 // NewGeoPoint validates latitude (-90..90) and longitude (-180..180).
 func NewGeoPoint(lat, lng float64) (GeoPoint, error) {
 	if !isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
-		return GeoPoint{}, fmt.Errorf("%w: (%v, %v)", ErrInvalidCoordinates, lat, lng)
+		return GeoPoint{}, ErrInvalidCoordinates
 	}
 	return GeoPoint{lat: lat, lng: lng}, nil
 }

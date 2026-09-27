@@ -11,6 +11,7 @@ import (
 
 // Domain errors. The HTTP adapter maps each one to a stable API error code.
 var (
+	ErrOTPLocked          = errors.New("otp: phone temporarily locked")
 	ErrNotFound           = errors.New("not found")
 	ErrInvalidOTPCode     = errors.New("otp: code must be 6 digits")
 	ErrOTPInvalid         = errors.New("otp: wrong or unknown code")

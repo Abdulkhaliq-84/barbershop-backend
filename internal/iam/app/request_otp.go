@@ -45,38 +45,52 @@ func (h *RequestOTPHandler) Handle(ctx context.Context, cmd RequestOTP) (OTPRequ
 	if err != nil {
 		return OTPRequested{}, err
 	}
-	now := h.clock.Now()
-
-	latest, err := h.challenges.Latest(ctx, phone)
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		// first code for this number
-	case err != nil:
-		return OTPRequested{}, fmt.Errorf("request otp: load latest: %w", err)
-	default:
-		if wait := latest.CreatedAt().Add(h.policy.ResendCooldown).Sub(now); wait > 0 {
-			return OTPRequested{}, &domain.RetryLaterError{Reason: domain.ErrOTPCooldown, After: wait}
+	var code domain.OTPCode
+	err = h.challenges.WithPhoneLock(ctx, phone, func(store domain.OTPStore) error {
+		now := h.clock.Now() // Read after waiting for the database lock.
+		guard, err := store.LoadGuard(ctx, phone)
+		if err != nil {
+			return err
 		}
-	}
+		if err := guard.Check(now); err != nil {
+			return err
+		}
 
-	sent, err := h.challenges.CountSince(ctx, phone, now.Add(-time.Hour))
-	if err != nil {
-		return OTPRequested{}, fmt.Errorf("request otp: count: %w", err)
-	}
-	if sent >= h.policy.MaxPerHour {
-		return OTPRequested{}, &domain.RetryLaterError{Reason: domain.ErrOTPRateLimited, After: time.Hour}
-	}
+		latest, err := store.Latest(ctx, phone)
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			// first code for this number
+		case err != nil:
+			return fmt.Errorf("request otp: load latest: %w", err)
+		default:
+			if wait := latest.CreatedAt().Add(h.policy.ResendCooldown).Sub(now); wait > 0 {
+				return &domain.RetryLaterError{Reason: domain.ErrOTPCooldown, After: wait}
+			}
+		}
 
-	code, err := h.codes.NewCode()
+		sent, err := store.CountSince(ctx, phone, now.Add(-time.Hour))
+		if err != nil {
+			return fmt.Errorf("request otp: count: %w", err)
+		}
+		if sent >= h.policy.MaxPerHour {
+			return &domain.RetryLaterError{Reason: domain.ErrOTPRateLimited, After: time.Hour}
+		}
+
+		code, err = h.codes.NewCode()
+		if err != nil {
+			return fmt.Errorf("request otp: generate code: %w", err)
+		}
+		challenge, err := domain.NewOTPChallenge(shared.NewID[domain.OTPChallengeTag](), phone, h.hasher.Hash(code), now, h.policy.TTL)
+		if err != nil {
+			return fmt.Errorf("request otp: %w", err)
+		}
+		if err := store.Add(ctx, challenge); err != nil {
+			return fmt.Errorf("request otp: save: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return OTPRequested{}, fmt.Errorf("request otp: generate code: %w", err)
-	}
-	challenge, err := domain.NewOTPChallenge(shared.NewID[domain.OTPChallengeTag](), phone, h.hasher.Hash(code), now, h.policy.TTL)
-	if err != nil {
-		return OTPRequested{}, fmt.Errorf("request otp: %w", err)
-	}
-	if err := h.challenges.Add(ctx, challenge); err != nil {
-		return OTPRequested{}, fmt.Errorf("request otp: save: %w", err)
+		return OTPRequested{}, err
 	}
 	if err := h.sender.SendOTP(ctx, phone, code); err != nil {
 		return OTPRequested{}, fmt.Errorf("request otp: send: %w", err)

@@ -21,11 +21,12 @@ import (
 // OTPChallenges implements domain.OTPChallenges.
 type OTPChallenges struct {
 	pool *pgxpool.Pool
+	db   sqlcgen.DBTX
 }
 
 // NewOTPChallenges returns a repository backed by pool.
 func NewOTPChallenges(pool *pgxpool.Pool) *OTPChallenges {
-	return &OTPChallenges{pool: pool}
+	return &OTPChallenges{pool: pool, db: pool}
 }
 
 // Compile-time checks that the adapters satisfy the domain ports.
@@ -40,7 +41,7 @@ func (r *OTPChallenges) Add(ctx context.Context, c *domain.OTPChallenge) error {
 	if err != nil {
 		return err
 	}
-	return sqlcgen.New(r.pool).InsertOTPChallenge(ctx, sqlcgen.InsertOTPChallengeParams{
+	return sqlcgen.New(r.db).InsertOTPChallenge(ctx, sqlcgen.InsertOTPChallengeParams{
 		ID:         c.ID().UUID(),
 		Phone:      c.Phone().String(),
 		CodeHash:   c.CodeHash(),
@@ -53,7 +54,7 @@ func (r *OTPChallenges) Add(ctx context.Context, c *domain.OTPChallenge) error {
 
 // Latest returns the most recent challenge for phone.
 func (r *OTPChallenges) Latest(ctx context.Context, phone shared.PhoneNumber) (*domain.OTPChallenge, error) {
-	row, err := sqlcgen.New(r.pool).LatestOTPChallenge(ctx, phone.String())
+	row, err := sqlcgen.New(r.db).LatestOTPChallenge(ctx, phone.String())
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -65,7 +66,7 @@ func (r *OTPChallenges) Latest(ctx context.Context, phone shared.PhoneNumber) (*
 
 // CountSince counts challenges for phone created at or after since.
 func (r *OTPChallenges) CountSince(ctx context.Context, phone shared.PhoneNumber, since time.Time) (int, error) {
-	n, err := sqlcgen.New(r.pool).CountOTPChallengesSince(ctx, sqlcgen.CountOTPChallengesSinceParams{Phone: phone.String(), CreatedAt: since})
+	n, err := sqlcgen.New(r.db).CountOTPChallengesSince(ctx, sqlcgen.CountOTPChallengesSinceParams{Phone: phone.String(), CreatedAt: since})
 	if err != nil {
 		return 0, fmt.Errorf("count otp challenges: %w", err)
 	}
@@ -76,8 +77,7 @@ func (r *OTPChallenges) CountSince(ctx context.Context, phone shared.PhoneNumber
 // and saves it — all in one transaction. pgx.BeginFunc commits when the
 // function returns nil and rolls back on an error or panic.
 func (r *OTPChallenges) UpdateLatest(ctx context.Context, phone shared.PhoneNumber, fn func(*domain.OTPChallenge) error) error {
-	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
+	update := func(q *sqlcgen.Queries) error {
 		row, err := q.LatestOTPChallengeForUpdate(ctx, phone.String())
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
@@ -97,7 +97,42 @@ func (r *OTPChallenges) UpdateLatest(ctx context.Context, phone shared.PhoneNumb
 			return err
 		}
 		return q.UpdateOTPChallenge(ctx, sqlcgen.UpdateOTPChallengeParams{ID: c.ID().UUID(), Attempts: attempts, ConsumedAt: c.ConsumedAt()})
+	}
+	if r.pool == nil {
+		return update(sqlcgen.New(r.db))
+	}
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error { return update(sqlcgen.New(tx)) })
+}
+
+// WithPhoneLock binds every callback query to the same transaction/connection.
+func (r *OTPChallenges) WithPhoneLock(ctx context.Context, phone shared.PhoneNumber, fn func(domain.OTPStore) error) error {
+	return pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		if err := sqlcgen.New(tx).LockOTPPhone(ctx, phone.String()); err != nil {
+			return fmt.Errorf("lock otp phone: %w", err)
+		}
+		return fn(&OTPChallenges{db: tx})
 	})
+}
+
+// LoadGuard returns empty security state for a phone not seen before.
+func (r *OTPChallenges) LoadGuard(ctx context.Context, phone shared.PhoneNumber) (*domain.OTPGuard, error) {
+	row, err := sqlcgen.New(r.db).LoadOTPGuard(ctx, phone.String())
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &domain.OTPGuard{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load otp guard: %w", err)
+	}
+	return domain.RehydrateOTPGuard(int(row.Failures), row.WindowStart, row.LockedUntil), nil
+}
+
+// SaveGuard persists failures in the same transaction as verification.
+func (r *OTPChallenges) SaveGuard(ctx context.Context, phone shared.PhoneNumber, g *domain.OTPGuard) error {
+	failures, err := toInt16(g.Failures())
+	if err != nil {
+		return err
+	}
+	return sqlcgen.New(r.db).SaveOTPGuard(ctx, sqlcgen.SaveOTPGuardParams{Phone: phone.String(), Failures: failures, WindowStart: g.WindowStart(), LockedUntil: g.LockedUntil()})
 }
 
 func toOTPChallenge(row sqlcgen.IamOtpChallenge) (*domain.OTPChallenge, error) {

@@ -17,7 +17,7 @@ const (
 func TestLoadDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := config.Load([]string{dbURL, otpSecret})
+	cfg, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=development"})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -25,8 +25,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Env != config.EnvDevelopment {
 		t.Errorf("Env = %q, want %q", cfg.Env, config.EnvDevelopment)
 	}
-	if cfg.HTTP.Addr != ":8080" {
-		t.Errorf("HTTP.Addr = %q, want :8080", cfg.HTTP.Addr)
+	if cfg.HTTP.Addr != "127.0.0.1:8080" {
+		t.Errorf("HTTP.Addr = %q, want 127.0.0.1:8080", cfg.HTTP.Addr)
 	}
 	if cfg.HTTP.ReadHeaderTimeout != 5*time.Second {
 		t.Errorf("HTTP.ReadHeaderTimeout = %v, want 5s", cfg.HTTP.ReadHeaderTimeout)
@@ -89,7 +89,7 @@ func TestLoadErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := config.Load(tt.environ)
+			_, err := config.Load(append([]string{"APP_ENV=development"}, tt.environ...))
 			if err == nil {
 				t.Fatalf("Load() error = nil, want error containing %q", tt.wantErr)
 			}
@@ -110,6 +110,44 @@ func TestLoadReportsAllProblemsAtOnce(t *testing.T) {
 	for _, want := range []string{"APP_ENV", "LOG_FORMAT"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %s", err, want)
+		}
+	}
+}
+
+func TestRequiredEnvironment(t *testing.T) {
+	t.Parallel()
+	for _, extra := range [][]string{nil, {"APP_ENV="}} {
+		_, err := config.Load(append([]string{dbURL, otpSecret}, extra...))
+		if err == nil || !strings.Contains(err.Error(), "APP_ENV") {
+			t.Fatalf("expected APP_ENV error, got %v", err)
+		}
+	}
+}
+
+func TestAllTimeoutsMustBePositive(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT"} {
+		for _, value := range []string{"0", "0s", "-1s", "invalid-sensitive-value", "999999999999999999999h"} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				t.Parallel()
+				_, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=test", key + "=" + value})
+				if err == nil || !strings.Contains(err.Error(), key) {
+					t.Fatalf("expected %s error, got %v", key, err)
+				}
+				if strings.Contains(err.Error(), value) {
+					t.Fatalf("raw input leaked: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestConfigurationErrorsDoNotEchoInput(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"APP_ENV", "LOG_FORMAT", "LOG_LEVEL", "SMS_PROVIDER", "DATABASE_MAX_CONNS"} {
+		_, err := config.Load([]string{dbURL, otpSecret, "APP_ENV=test", key + "=+966551234567-private"})
+		if err == nil || strings.Contains(err.Error(), "+966551234567-private") {
+			t.Fatalf("unsafe error for %s: %v", key, err)
 		}
 	}
 }

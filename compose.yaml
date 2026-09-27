@@ -32,6 +32,8 @@ services:
     image: ${BARBERSHOP_IMAGE:-ghcr.io/abdulkhaliq-84/barbershop-backend:latest}
     command: ["migrate"]
     environment: &app-env
+      APP_ENV: development
+      HTTP_ADDR: :8080 # container interface; host port remains loopback-only
       DATABASE_URL: postgres://barbershop:barbershop@db:5432/barbershop?sslmode=disable
       # Local development only: codes are printed to the log (docker compose logs api).
       OTP_SECRET: local-development-otp-secret-not-for-real-use

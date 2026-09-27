@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -57,7 +58,7 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 		role = args[0]
 	}
 	if role != "api" && role != "migrate" {
-		return fmt.Errorf("unknown command %q (want: api, migrate)", role)
+		return errors.New("unknown command (want: api, migrate)")
 	}
 
 	cfg, err := config.Load(environ)

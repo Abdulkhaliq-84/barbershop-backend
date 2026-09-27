@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -49,7 +50,7 @@ func (h *Health) Ready(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := h.db.Ping(ctx); err != nil {
-		h.logger.WarnContext(ctx, "readiness check failed", slog.String("check", "database"), slog.Any("error", err))
+		h.logger.WarnContext(ctx, "readiness check failed", slog.String("check", "database"), slog.String("error_type", fmt.Sprintf("%T", err)))
 		WriteProblem(w, r, Problem{
 			Status: http.StatusServiceUnavailable,
 			Code:   "not_ready",

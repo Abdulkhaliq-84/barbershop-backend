@@ -7,6 +7,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -72,6 +73,8 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, *int
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "phone: not a Saudi mobile number"
 	case errors.Is(err, domain.ErrInvalidOTPCode):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "code: must be 6 digits"
+	case errors.Is(err, domain.ErrOTPLocked):
+		status, code, detail = http.StatusTooManyRequests, "otp_locked", "wait before trying again"
 	case errors.Is(err, domain.ErrOTPCooldown):
 		status, code = http.StatusTooManyRequests, "otp_cooldown"
 	case errors.Is(err, domain.ErrOTPRateLimited):
@@ -85,7 +88,7 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, *int
 	case errors.Is(err, domain.ErrUserBlocked):
 		status, code = http.StatusForbidden, "user_blocked"
 	default:
-		h.logger.ErrorContext(ctx, "iam request failed", slog.Any("error", err))
+		h.logger.ErrorContext(ctx, "iam request failed", slog.String("error_type", fmt.Sprintf("%T", err)))
 	}
 
 	var retryAfter *int

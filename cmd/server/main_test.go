@@ -17,7 +17,7 @@ func TestRunRejectsBadInput(t *testing.T) {
 		environ []string
 		wantErr string
 	}{
-		{"unknown command", []string{"deploy"}, nil, `unknown command "deploy"`},
+		{"unknown command", []string{"deploy"}, nil, `unknown command`},
 		{"missing config", []string{"api"}, nil, "DATABASE_URL"},
 	}
 	for _, tt := range tests {

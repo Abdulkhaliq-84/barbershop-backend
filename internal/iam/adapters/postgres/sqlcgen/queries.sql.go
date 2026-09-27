@@ -137,6 +137,58 @@ func (q *Queries) LatestOTPChallengeForUpdate(ctx context.Context, phone string)
 	return i, err
 }
 
+const loadOTPGuard = `-- name: LoadOTPGuard :one
+SELECT failures, window_start, locked_until FROM iam.otp_phone_guards WHERE phone = $1
+`
+
+type LoadOTPGuardRow struct {
+	Failures    int16
+	WindowStart time.Time
+	LockedUntil time.Time
+}
+
+func (q *Queries) LoadOTPGuard(ctx context.Context, phone string) (LoadOTPGuardRow, error) {
+	row := q.db.QueryRow(ctx, loadOTPGuard, phone)
+	var i LoadOTPGuardRow
+	err := row.Scan(&i.Failures, &i.WindowStart, &i.LockedUntil)
+	return i, err
+}
+
+const lockOTPPhone = `-- name: LockOTPPhone :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 482193))
+`
+
+// Transaction lock also covers phones with no rows yet. Hash collisions only
+// serialize unrelated phones; they cannot bypass a limit. Seed namespaces IAM.
+func (q *Queries) LockOTPPhone(ctx context.Context, dollar_1 string) error {
+	_, err := q.db.Exec(ctx, lockOTPPhone, dollar_1)
+	return err
+}
+
+const saveOTPGuard = `-- name: SaveOTPGuard :exec
+INSERT INTO iam.otp_phone_guards (phone, failures, window_start, locked_until)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (phone) DO UPDATE SET failures = EXCLUDED.failures,
+ window_start = EXCLUDED.window_start, locked_until = EXCLUDED.locked_until
+`
+
+type SaveOTPGuardParams struct {
+	Phone       string
+	Failures    int16
+	WindowStart time.Time
+	LockedUntil time.Time
+}
+
+func (q *Queries) SaveOTPGuard(ctx context.Context, arg SaveOTPGuardParams) error {
+	_, err := q.db.Exec(ctx, saveOTPGuard,
+		arg.Phone,
+		arg.Failures,
+		arg.WindowStart,
+		arg.LockedUntil,
+	)
+	return err
+}
+
 const updateOTPChallenge = `-- name: UpdateOTPChallenge :exec
 UPDATE iam.otp_challenges
 SET attempts = $2, consumed_at = $3

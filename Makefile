@@ -16,6 +16,7 @@ GENERATE_GO := GOTOOLCHAIN=go$(shell go list -m -f '{{.GoVersion}}')
 # Local database from compose.yaml. Override on the command line if yours differs.
 DATABASE_URL      ?= postgres://barbershop:barbershop@localhost:5432/barbershop?sslmode=disable
 TEST_DATABASE_URL ?= postgres://barbershop:barbershop@localhost:5432/barbershop_test?sslmode=disable
+export APP_ENV ?= development
 export DATABASE_URL
 export LOG_FORMAT ?= text
 # Login codes are printed to the log (SMS_PROVIDER=console). The secret below is
@@ -130,6 +131,7 @@ app-down: ## Stop the Compose app and database
 check: ## Everything CI checks: generated code, tidy, lint, all tests, build
 	$(MAKE) generate
 	go mod tidy -diff
+	bash scripts/ci/security_test.sh
 	$(MAKE) lint test-all build
 
 .PHONY: clean

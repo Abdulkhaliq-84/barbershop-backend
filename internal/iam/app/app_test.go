@@ -18,8 +18,10 @@ import (
 // need no database; the postgres adapter has its own integration tests.
 
 type fakeChallenges struct {
-	mu   sync.Mutex
-	list []*domain.OTPChallenge
+	lock   sync.Mutex
+	guards map[shared.PhoneNumber]*domain.OTPGuard
+	mu     sync.Mutex
+	list   []*domain.OTPChallenge
 }
 
 func (f *fakeChallenges) Add(_ context.Context, c *domain.OTPChallenge) error {
@@ -210,5 +212,66 @@ func TestVerifyOTP(t *testing.T) {
 	again, err := f.verify.Handle(ctx, app.VerifyOTP{Phone: "0551234567", Code: "482193"})
 	if err != nil || again.IsNewUser || again.User.ID() != login.User.ID() {
 		t.Fatalf("second login = %+v, %v; want the same, existing user", again, err)
+	}
+}
+
+func (f *fakeChallenges) WithPhoneLock(_ context.Context, _ shared.PhoneNumber, fn func(domain.OTPStore) error) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	return fn(f)
+}
+
+func (f *fakeChallenges) LoadGuard(_ context.Context, phone shared.PhoneNumber) (*domain.OTPGuard, error) {
+	if f.guards == nil {
+		f.guards = make(map[shared.PhoneNumber]*domain.OTPGuard)
+	}
+	if f.guards[phone] == nil {
+		f.guards[phone] = &domain.OTPGuard{}
+	}
+	return f.guards[phone], nil
+}
+
+func (f *fakeChallenges) SaveGuard(_ context.Context, phone shared.PhoneNumber, guard *domain.OTPGuard) error {
+	f.guards[phone] = guard
+	return nil
+}
+
+func TestPhoneLockoutSurvivesResend(t *testing.T) {
+	t.Parallel()
+	f := newFixture()
+	ctx := t.Context()
+	for round := range 2 {
+		if _, err := f.request.Handle(ctx, app.RequestOTP{Phone: "0551234567"}); err != nil {
+			t.Fatal(err)
+		}
+		for i := range 5 {
+			_, err := f.verify.Handle(ctx, app.VerifyOTP{Phone: "+966551234567", Code: "000000"})
+			if round == 1 && i == 4 && !errors.Is(err, domain.ErrOTPLocked) {
+				t.Fatalf("tenth failure: %v", err)
+			}
+		}
+		f.clock.Advance(time.Minute)
+	}
+	for _, code := range []string{"482193", "000000"} {
+		if _, err := f.verify.Handle(ctx, app.VerifyOTP{Phone: "0551234567", Code: code}); !errors.Is(err, domain.ErrOTPLocked) {
+			t.Fatalf("locked verify: %v", err)
+		}
+	}
+	if _, err := f.request.Handle(ctx, app.RequestOTP{Phone: "0551234567"}); !errors.Is(err, domain.ErrOTPLocked) {
+		t.Fatalf("locked resend: %v", err)
+	}
+	if _, err := f.request.Handle(ctx, app.RequestOTP{Phone: "0559876543"}); err != nil {
+		t.Fatalf("other phone: %v", err)
+	}
+	f.clock.Advance(15 * time.Minute)
+	if _, err := f.request.Handle(ctx, app.RequestOTP{Phone: "0551234567"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verify.Handle(ctx, app.VerifyOTP{Phone: "0551234567", Code: "482193"}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := shared.NewPhoneNumber("0551234567")
+	if f.challenges.guards[p].Failures() != 0 {
+		t.Fatal("success must reset failures")
 	}
 }

@@ -2,14 +2,10 @@ package httpx
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/go-chi/chi/v5"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 
@@ -41,7 +37,7 @@ func MountAPI(r chi.Router, server apigen.StrictServerInterface, logger *slog.Lo
 			WriteProblem(w, r, Problem{Status: http.StatusBadRequest, Code: "validation_failed", Detail: "request body is not valid JSON"})
 		},
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-			logger.ErrorContext(r.Context(), "api handler failed", slog.Any("error", err))
+			logger.ErrorContext(r.Context(), "api handler failed", slog.String("error_type", fmt.Sprintf("%T", err)))
 			WriteProblem(w, r, Problem{Status: http.StatusInternalServerError, Code: "internal"})
 		},
 	})
@@ -71,20 +67,9 @@ func APIProblem(ctx context.Context, status int, code, detail string) apigen.Pro
 	return p
 }
 
-// validationDetail explains what is wrong without echoing the submitted value
-// (it may be a phone number): "phone: maximum string length is 64".
-func validationDetail(err error) string {
-	var schemaErr *openapi3.SchemaError
-	if errors.As(err, &schemaErr) {
-		if path := strings.Join(schemaErr.JSONPointer(), "."); path != "" {
-			return path + ": " + schemaErr.Reason
-		}
-		return schemaErr.Reason
-	}
-	var reqErr *openapi3filter.RequestError
-	if errors.As(err, &reqErr) && reqErr.Reason != "" {
-		return reqErr.Reason
-	}
+// validationDetail never exposes schema reasons or JSON paths: both can contain
+// user-supplied property names and values.
+func validationDetail(_ error) string {
 	return "request does not match the API specification"
 }
 

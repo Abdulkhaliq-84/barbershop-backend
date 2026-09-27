@@ -156,3 +156,13 @@ sequenceDiagram
     Note over DB: River worker delivers AppointmentBooked → notification (push to barber)
   end
 ```
+
+### OTP security limits
+
+OTP requests and verification serialize per normalized phone. Ten failed
+verifications across codes in 15 minutes lock both endpoints for 15 minutes:
+`429 otp_locked` with `Retry-After`. Successful verification clears failures;
+requesting another code does not. Existing per-code/cooldown/hourly limits remain.
+Validation errors never repeat submitted values or unknown JSON property names.
+Request IDs are now server-generated, including when a caller supplies a header,
+so error responses and logs cannot echo personal data through correlation IDs.

@@ -6,10 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"runtime/debug"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
@@ -20,22 +20,15 @@ import (
 // RequestIDHeader carries the request ID in and out.
 const RequestIDHeader = "X-Request-Id"
 
-// A client-supplied ID is only trusted if it looks like an ID, so nobody can
-// inject newlines or megabytes into our logs.
-var validRequestID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-
 type ctxKey int
 
 const requestIDKey ctxKey = iota
 
-// RequestID reuses a well-formed incoming X-Request-Id or generates one, puts
-// it in the request context and echoes it on the response.
+// RequestID creates a server-owned correlation ID. Client input may contain
+// personal data even when syntactically valid, so it is never copied to errors/logs.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.Header.Get(RequestIDHeader)
-		if !validRequestID.MatchString(id) {
-			id = rand.Text() // 26 random base32 characters (crypto/rand, Go 1.24+)
-		}
+		id := rand.Text()
 		w.Header().Set(RequestIDHeader, id)
 		ctx := context.WithValue(r.Context(), requestIDKey, id)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -65,8 +58,8 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				level = slog.LevelError
 			}
 			logger.LogAttrs(r.Context(), level, "http request",
-				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
+				slog.String("method", logMethod(r.Method)),
+				slog.String("path", routePattern(r)),
 				slog.Int("status", status),
 				slog.Int("bytes", ww.BytesWritten()),
 				slog.Duration("took", time.Since(start)),
@@ -93,7 +86,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 					panic(rec)
 				}
 				logger.LogAttrs(r.Context(), slog.LevelError, "panic recovered",
-					slog.Any("panic", rec),
+
 					slog.String("stack", string(debug.Stack())),
 					slog.String("request_id", RequestIDFrom(r.Context())),
 				)
@@ -101,5 +94,21 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 			}()
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func routePattern(r *http.Request) string {
+	if route := chi.RouteContext(r.Context()); route != nil && route.RoutePattern() != "" {
+		return route.RoutePattern()
+	}
+	return "unmatched"
+}
+
+func logMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions, http.MethodConnect, http.MethodTrace:
+		return method
+	default:
+		return "OTHER"
 	}
 }

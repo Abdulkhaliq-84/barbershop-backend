@@ -43,3 +43,17 @@ RETURNING id;
 SELECT id, phone, name, locale, status, platform_role, created_at, updated_at
 FROM iam.users
 WHERE phone = $1;
+
+-- name: LockOTPPhone :exec
+-- Transaction lock also covers phones with no rows yet. Hash collisions only
+-- serialize unrelated phones; they cannot bypass a limit. Seed namespaces IAM.
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 482193));
+
+-- name: LoadOTPGuard :one
+SELECT failures, window_start, locked_until FROM iam.otp_phone_guards WHERE phone = $1;
+
+-- name: SaveOTPGuard :exec
+INSERT INTO iam.otp_phone_guards (phone, failures, window_start, locked_until)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (phone) DO UPDATE SET failures = EXCLUDED.failures,
+ window_start = EXCLUDED.window_start, locked_until = EXCLUDED.locked_until;

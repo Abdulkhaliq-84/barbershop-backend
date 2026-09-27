@@ -125,7 +125,7 @@ Go 1.27+ and Docker are required; `make tools` installs the pinned golangci-lint
 | `make db-up` / `make db-down` / `make db-reset` | Start / stop / wipe local PostGIS (`compose.yaml`) |
 | `make migrate` | Apply migrations (`server migrate`) |
 | `make migration name=<module>_<what>` | Create the next numbered goose file in `migrations/` |
-| `make dev` / `make run` | API with live reload / once, on `:8080` |
+| `make dev` / `make run` | API with live reload / once, on `127.0.0.1:8080` |
 | `make generate` | Regenerate `internal/apigen` (oapi-codegen, from `api/openapi.yaml`) and `*/sqlcgen` (sqlc, from `migrations/` + `queries.sql`); commit the output — CI fails on drift |
 | `make fmt` · `make lint` | Format · lint (incl. depguard architecture rules) |
 | `make test` · `make test-all` | Unit tests · all tests incl. database (`TEST_DATABASE_URL`) |

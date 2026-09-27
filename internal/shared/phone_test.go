@@ -2,6 +2,7 @@ package shared_test
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -119,4 +120,15 @@ func FuzzNewPhoneNumber(f *testing.F) {
 			t.Fatalf("round trip of %q failed: %v, %v", p, again, err)
 		}
 	})
+}
+
+func TestPhoneFormattingMasksErrors(t *testing.T) {
+	t.Parallel()
+	p, _ := shared.NewPhoneNumber("0551234567")
+	for _, format := range []string{"%s", "%v", "%+v", "%#v", "%q"} {
+		got := fmt.Sprintf(format, p)
+		if strings.Contains(got, p.String()) || !strings.Contains(got, p.Masked()) {
+			t.Errorf("unsafe formatting: %s", got)
+		}
+	}
 }
