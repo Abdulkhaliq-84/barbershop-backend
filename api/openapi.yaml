@@ -22,6 +22,8 @@ tags:
     description: Phone number + one-time code login, tokens and sessions
   - name: me
     description: The signed-in user
+  - name: businesses
+    description: Business mode — register and run a barbershop business (tenant)
 
 # Protected by default: an operation is public only if it says `security: []`.
 security:
@@ -156,6 +158,81 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/me/memberships:
+    get:
+      operationId: listMyMemberships
+      tags: [me]
+      summary: The businesses the signed-in user works in, and their role
+      description: |
+        Drives the app's "Business mode" switch: an empty list means the user
+        is only a customer. Every business a user registers appears here with
+        the role `owner`. A user belongs to a handful of businesses at most,
+        so the list is not paginated.
+      responses:
+        "200":
+          description: The memberships, newest business first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses:
+    post:
+      operationId: registerBusiness
+      tags: [businesses]
+      summary: Register a business (starts as a draft)
+      description: |
+        Creates a business in `draft` status with the caller as its owner.
+        A draft is private to its staff; customers see nothing until the
+        platform approves it (submission and review arrive later in M3).
+
+        The CR number (Saudi Commercial Registration, 10 digits) is checked
+        for format only. It is claimed — made unique across the platform —
+        when the business is submitted for review, so nobody can block a
+        real shop by registering its number as a draft (ADR-0015). Registering
+        the same CR number twice as the same owner is refused with
+        `409 business_already_registered`, which also makes a retried request
+        safe: list `/v1/me/memberships` to find the business.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessRegistration"
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: getBusiness
+      tags: [businesses]
+      summary: A business, for its owner
+      description: |
+        Owner only. Callers who are not staff of the business get
+        `404 not_found` — the same answer as for a business that doesn't
+        exist, so IDs can't be probed. Staff without the owner role get
+        `403 forbidden`.
+      responses:
+        "200":
+          description: The business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -173,6 +250,14 @@ components:
       schema:
         type: string
         example: ar-SA
+
+    BusinessID:
+      name: business_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     Problem:
@@ -212,7 +297,8 @@ components:
             `validation_failed`, `not_found`, `method_not_allowed`, `internal`,
             `not_ready`, `rate_limited`, `otp_cooldown`, `otp_invalid`,
             `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`,
-            `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`.
+            `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`,
+            `forbidden`, `business_already_registered`.
           example: otp_cooldown
         detail:
           type: string
@@ -323,3 +409,110 @@ components:
         created_at:
           type: string
           format: date-time
+
+    LocalizedText:
+      type: object
+      additionalProperties: false
+      required: [ar]
+      description: Text in Arabic (required) and English (optional).
+      properties:
+        ar:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: صالون الأناقة
+        en:
+          type: string
+          maxLength: 100
+          example: Elegance Barbers
+
+    BusinessRegistration:
+      type: object
+      additionalProperties: false
+      required: [display_name, legal_name, cr_number]
+      properties:
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The name on the Commercial Registration.
+          example: مؤسسة الأناقة للحلاقة
+        cr_number:
+          type: string
+          minLength: 10
+          maxLength: 20
+          description: 10-digit Commercial Registration number (Western or Arabic-Indic digits; spaces allowed).
+          example: "1010123456"
+
+    BusinessStatus:
+      type: string
+      enum: [draft, pending_review, active, rejected, suspended]
+      description: |
+        `draft` → `pending_review` (submitted) → `active` (approved) or
+        `rejected` (fix and resubmit); `active` ↔ `suspended` by the platform.
+
+    StaffRole:
+      type: string
+      enum: [owner, manager, barber]
+
+    Business:
+      type: object
+      required: [id, display_name, legal_name, cr_number, status, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        legal_name:
+          type: string
+        cr_number:
+          type: string
+          example: "1010123456"
+        status:
+          $ref: "#/components/schemas/BusinessStatus"
+        version:
+          type: integer
+          description: Increases on every change; send it as `If-Match` when editing.
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BusinessSummary:
+      type: object
+      required: [id, display_name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        status:
+          $ref: "#/components/schemas/BusinessStatus"
+
+    Membership:
+      type: object
+      required: [business, staff_id, role]
+      properties:
+        business:
+          $ref: "#/components/schemas/BusinessSummary"
+        staff_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/StaffRole"
+
+    MembershipList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Membership"

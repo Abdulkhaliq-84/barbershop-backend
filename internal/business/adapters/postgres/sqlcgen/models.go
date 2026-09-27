@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type BusinessBusiness struct {
@@ -27,7 +26,7 @@ type BusinessBusiness struct {
 type BusinessStaffMember struct {
 	ID         uuid.UUID
 	BusinessID uuid.UUID
-	UserID     pgtype.UUID
+	UserID     *uuid.UUID
 	Role       string
 	Active     bool
 	CreatedAt  time.Time

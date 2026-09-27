@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/domain"
@@ -44,7 +45,16 @@ func (i *inbox) last(phone string) string {
 	return i.codes[phone]
 }
 
-type apiServer struct{ *httpapi.Handlers }
+// apiServer serves the iam operations. The API has operations from other
+// modules too; notServed fills them in so the type satisfies the generated
+// interface. Its methods sit one embedding level deeper than iam's, so iam's
+// always win, and calling one of them (a bug in this test) panics loudly.
+type apiServer struct {
+	*httpapi.Handlers
+	notServed
+}
+
+type notServed struct{ apigen.StrictServerInterface }
 
 type env struct {
 	server *httptest.Server
@@ -69,7 +79,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	if err := httpx.MountAPI(router, apiServer{mod.HTTP()}, logger, mod.Authenticate); err != nil {
+	if err := httpx.MountAPI(router, apiServer{Handlers: mod.HTTP()}, logger, mod.Authenticate); err != nil {
 		t.Fatal(err)
 	}
 	e.server = httptest.NewServer(router)

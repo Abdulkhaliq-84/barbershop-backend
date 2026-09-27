@@ -20,8 +20,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business"
+	businesshttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
-	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
+	iamhttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/config"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
@@ -88,8 +90,17 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 // apiServer is the whole API: one embedded handler set per module. Embedding
 // promotes each module's methods, so together they satisfy the generated
 // apigen.StrictServerInterface. New modules add a line here.
+//
+// Every module calls its type Handlers, and an embedded field is named after
+// its type, so two of them would clash; the aliases give each a distinct name.
+type (
+	iamAPI      = iamhttp.Handlers
+	businessAPI = businesshttp.Handlers
+)
+
 type apiServer struct {
-	*httpapi.Handlers // iam: /v1/auth/*, /v1/me
+	*iamAPI      // iam: /v1/auth/*, /v1/me
+	*businessAPI // business: /v1/businesses/*, /v1/me/memberships
 }
 
 // newHandler builds every module and mounts the API next to the health checks.
@@ -105,8 +116,11 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 		return nil, err
 	}
 
+	businessModule := business.New(business.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
+
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	if err := httpx.MountAPI(router, apiServer{iamModule.HTTP()}, logger, iamModule.Authenticate); err != nil {
+	api := apiServer{iamModule.HTTP(), businessModule.HTTP()}
+	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
 	return router, nil
