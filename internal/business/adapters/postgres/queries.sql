@@ -112,11 +112,19 @@ LIMIT @page_size;
 -- name: CountBranchesIn :one
 SELECT count(*) FROM business.branches WHERE business_id = @business_id AND id = ANY(@ids::uuid[]);
 
--- name: LockBusinessForInvite :one
--- Takes turns between invitations of one business, so two at once for the
--- same phone can't both be pending. NO KEY UPDATE doesn't block rows that
--- merely reference the business (branches, documents).
+-- name: LockBusiness :one
+-- Takes turns between additions to one business (invitations, branches), so
+-- two at once can't both pass a count check. NO KEY UPDATE doesn't block
+-- rows that merely reference the business (their foreign-key checks).
 SELECT id FROM business.businesses WHERE id = $1 FOR NO KEY UPDATE;
+
+-- name: CountStaffSeats :one
+-- Seats in use: active managers and barbers, plus invitations that can
+-- still be accepted. The owner doesn't take a seat.
+SELECT ((SELECT count(*) FROM business.staff_members s
+          WHERE s.business_id = @business_id AND s.role <> 'owner' AND s.active)
+      + (SELECT count(*) FROM business.invitations i
+          WHERE i.business_id = @business_id AND i.status = 'pending' AND i.expires_at > @now::timestamptz))::int AS seats;
 
 -- name: RevokePendingInvitations :exec
 UPDATE business.invitations SET status = 'revoked'

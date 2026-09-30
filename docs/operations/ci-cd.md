@@ -85,7 +85,8 @@ Jobs that don't depend on each other run in parallel; Go module and build caches
 
 ## 5. The artifact
 
-- **One binary, several roles**: `server api`, `server migrate` (goose; River's migrations join in M3), `server worker` (M3).
+- **One binary, several roles**: `server api`, `server migrate` (goose, then River's own migrations),
+  `server worker` (delivers outbox events; ADR-0019). Deploy `api` and `worker` as two processes of one image.
 - **Dockerfile**: multi-stage — `golang` builder on `$BUILDPLATFORM` cross-compiling with `GOOS/GOARCH`
   (`CGO_ENABLED=0`, `-trimpath`, `-ldflags "-s -w -X main.version=…"`) → `gcr.io/distroless/static-debian13`
   **nonroot** runtime. ~6 MB to download, no shell, no package manager to exploit. Base images pinned by digest.

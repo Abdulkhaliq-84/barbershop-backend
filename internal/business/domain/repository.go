@@ -39,8 +39,10 @@ type Staff interface {
 type Invitations interface {
 	// Invite saves inv and revokes any other pending invitation for the same
 	// phone in the business (inviting again = resending). Returns
-	// ErrUnknownBranch if a branch isn't the business's.
-	Invite(ctx context.Context, inv *Invitation) error
+	// ErrUnknownBranch if a branch isn't the business's. allow gets the seats
+	// in use — active managers and barbers plus open invitations, not
+	// counting the one being replaced — under a lock on the business.
+	Invite(ctx context.Context, inv *Invitation, allow func(seats int) error) error
 	// Pending returns the business's pending invitations, newest first.
 	Pending(ctx context.Context, business shared.BusinessID) ([]*Invitation, error)
 	// Update locks the invitation inside business, calls fn and saves it.
@@ -57,8 +59,10 @@ type Invitations interface {
 // only ever found inside its own business, so a branch ID from another shop
 // is simply "not found".
 type Branches interface {
-	// Add saves a new branch.
-	Add(ctx context.Context, b *Branch) error
+	// Add saves a new branch if allow accepts the number of branches the
+	// business already has, counted under a lock on the business so two
+	// adds can't both take the last place.
+	Add(ctx context.Context, b *Branch, allow func(existing int) error) error
 	// ByID returns the branch, or ErrNotFound.
 	ByID(ctx context.Context, business shared.BusinessID, id shared.BranchID) (*Branch, error)
 	// List returns the business's branches, oldest first.

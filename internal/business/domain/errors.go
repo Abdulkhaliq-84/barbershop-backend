@@ -44,4 +44,6 @@ var (
 	ErrInvitationInvalid   = errors.New("staff: invitation invalid, expired or already used")
 	ErrAlreadyStaff        = errors.New("staff: already works at this business")
 	ErrInvitationClosed    = errors.New("staff: invitation already accepted or revoked")
+	ErrBranchLimitReached  = errors.New("business: the plan's branch limit is reached")
+	ErrStaffLimitReached   = errors.New("staff: the plan's staff limit is reached")
 )

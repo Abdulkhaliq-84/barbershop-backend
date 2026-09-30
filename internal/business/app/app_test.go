@@ -147,7 +147,26 @@ func (s *store) addStaff(business shared.BusinessID, user shared.UserID, role do
 	s.staff = append(s.staff, domain.RehydrateStaffMember(shared.NewID[shared.StaffTag](), business, user, role, active, t0, "", branches))
 }
 
+// plans is a fixed app.Plans.
+type plans struct {
+	mu       sync.Mutex
+	standing app.PlanStanding
+}
+
+func (p *plans) Standing(context.Context, shared.BusinessID) (app.PlanStanding, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.standing, nil
+}
+
+func (p *plans) set(l domain.Limits) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.standing.Limits = l
+}
+
 type fixture struct {
+	plans    *plans
 	store    *store
 	register *app.RegisterBusinessHandler
 	get      *app.GetBusinessHandler
@@ -160,6 +179,7 @@ func newFixture() *fixture {
 	s := newStore()
 	clk := clock.NewFake(t0)
 	return &fixture{
+		plans:    &plans{standing: app.PlanStanding{Plan: "pro", Status: "setup", Limits: domain.Limits{MaxBranches: 5, MaxStaff: 30}}},
 		store:    s,
 		clock:    clk,
 		register: app.NewRegisterBusinessHandler(s, clk),

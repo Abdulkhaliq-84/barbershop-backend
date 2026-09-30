@@ -58,6 +58,7 @@ func (b *Business) Approve(reviewer shared.UserID, now time.Time) error {
 	b.status = StatusActive
 	b.review.ReviewedAt, b.review.ReviewedBy, b.review.RejectionReason = &at, reviewer, ""
 	b.touch(at)
+	b.events = append(b.events, BusinessApproved{Business: b.id, Owner: b.owner, At: at})
 	return nil
 }
 

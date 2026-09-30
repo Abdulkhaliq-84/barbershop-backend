@@ -185,6 +185,12 @@ watch the second call end the session (`refresh_token_reused`).
 | **Postgres arrays** (`uuid[]`) and `array_agg(...) FILTER (WHERE ...)` mapped to `[]uuid.UUID` by sqlc | `queries.sql` `StaffByBusiness` | `pg` returning arrays; no ORM join table needed to *read* |
 | **Composite foreign keys** `(business_id, branch_id)` so the database refuses cross-tenant rows | `migrations/00010` | a check you would otherwise write in every service |
 
+| A **transactional outbox**: the event is a row written in the same transaction as the change | `internal/platform/outbox`, `business/adapters/postgres` `publish` | BullMQ `queue.add` *after* `COMMIT` — which loses the job if the process dies in between |
+| **Generics in a library API**: `river.Job[deliveryArgs]`, `river.WorkerDefaults[T]` | `outbox.deliveryWorker` | a typed `Worker<Payload>` in BullMQ with TypeScript |
+| A **type switch** mapping domain events to their JSON contract | `publish` in `business/adapters/postgres` | `switch (event.constructor)` |
+| **Composition root**: `main` subscribes one module to another's events, so neither imports the other | `cmd/server/main.go` `subscribe` | wiring event listeners in `index.ts` |
+| Proving "same transaction" with Postgres's `xmin` | `adapters/postgres/events_test.go` | — (hard to see from an ORM) |
+
 Try this: register a business, then call `GET /v1/businesses/{id}` with another user's token and
 compare the answer with an ID that doesn't exist. They should be identical.
 

@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -15,10 +17,20 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 var t0 = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+
+// discardEvents is an outbox that keeps nothing: most store tests don't look
+// at events (events_test.go uses the real one).
+type discardEvents struct{}
+
+func (discardEvents) PublishTx(context.Context, pgx.Tx, ...outbox.Event) error { return nil }
+
+// allowAll is a plan without limits.
+func allowAll(int) error { return nil }
 
 func migratedDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -48,7 +60,7 @@ func newBusiness(t *testing.T, owner shared.UserID, cr string) (*domain.Business
 func TestStoreRegisterAndLoad(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	owner := shared.NewID[shared.UserTag]()
 	b, m := newBusiness(t, owner, "1010123456")
 
@@ -94,7 +106,7 @@ func TestStoreRegisterAndLoad(t *testing.T) {
 func TestStoreForUserListsNewestFirst(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	owner := shared.NewID[shared.UserTag]()
 	older, m1 := newBusiness(t, owner, "1010000001")
 	newer, m2 := newBusiness(t, owner, "1010000002")
@@ -118,7 +130,7 @@ func TestStoreForUserListsNewestFirst(t *testing.T) {
 func TestStoreParallelRegistrationsOfTheSameNumber(t *testing.T) {
 	t.Parallel()
 	pool := migratedDB(t)
-	store := postgres.NewStore(pool)
+	store := postgres.NewStore(pool, discardEvents{})
 	owner := shared.NewID[shared.UserTag]()
 
 	const callers = 8
@@ -158,7 +170,7 @@ func TestStoreParallelRegistrationsOfTheSameNumber(t *testing.T) {
 func TestStoreRegisterIsAtomic(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	first, owner := newBusiness(t, shared.NewID[shared.UserTag](), "1010000001")
 	if err := store.Register(ctx, first, owner); err != nil {
 		t.Fatal(err)
@@ -180,7 +192,7 @@ func TestSchemaConstraints(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	pool := migratedDB(t)
-	store := postgres.NewStore(pool)
+	store := postgres.NewStore(pool, discardEvents{})
 	a, ownerA := newBusiness(t, shared.NewID[shared.UserTag](), "1010123456")
 	b, ownerB := newBusiness(t, shared.NewID[shared.UserTag](), "1010123456")
 	for _, r := range []struct {
@@ -240,7 +252,7 @@ func TestStoreUpdate(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	pool := migratedDB(t)
-	store := postgres.NewStore(pool)
+	store := postgres.NewStore(pool, discardEvents{})
 	b, m := newBusiness(t, shared.NewID[shared.UserTag](), "1010123456")
 	if err := store.Register(ctx, b, m); err != nil {
 		t.Fatal(err)
@@ -278,7 +290,7 @@ func TestStoreUpdate(t *testing.T) {
 func TestStoreParallelUpdatesOfTheSameVersion(t *testing.T) {
 	t.Parallel()
 	pool := migratedDB(t)
-	store := postgres.NewStore(pool)
+	store := postgres.NewStore(pool, discardEvents{})
 	b, m := newBusiness(t, shared.NewID[shared.UserTag](), "1010123456")
 	if err := store.Register(t.Context(), b, m); err != nil {
 		t.Fatal(err)

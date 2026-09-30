@@ -26,15 +26,39 @@ type BranchStore struct {
 func (s *Store) Branches() *BranchStore { return &BranchStore{store: s} }
 
 // Add inserts a new branch.
-func (r *BranchStore) Add(ctx context.Context, b *domain.Branch) error {
+func (r *BranchStore) Add(ctx context.Context, b *domain.Branch, allow func(existing int) error) error {
 	row, err := toBranchRow(b)
 	if err != nil {
 		return err
 	}
-	// InsertBranchParams has exactly the table's columns, in order, so the
-	// row converts directly (a Go struct conversion, checked at compile time).
-	if err := sqlcgen.New(r.store.pool).InsertBranch(ctx, sqlcgen.InsertBranchParams(row)); err != nil {
-		return fmt.Errorf("insert branch: %w", err)
+	return pgx.BeginFunc(ctx, r.store.pool, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		if err := lockBusiness(ctx, q, b.BusinessID()); err != nil {
+			return err
+		}
+		n, err := q.CountBranches(ctx, b.BusinessID().UUID())
+		if err != nil {
+			return fmt.Errorf("count branches: %w", err)
+		}
+		if err := allow(int(n)); err != nil {
+			return err
+		}
+		// InsertBranchParams has exactly the table's columns, in order, so the
+		// row converts directly (a Go struct conversion, checked at compile time).
+		if err := q.InsertBranch(ctx, sqlcgen.InsertBranchParams(row)); err != nil {
+			return fmt.Errorf("insert branch: %w", err)
+		}
+		return nil
+	})
+}
+
+// lockBusiness takes the business's "adding rows" lock (see LockBusiness).
+func lockBusiness(ctx context.Context, q *sqlcgen.Queries, business shared.BusinessID) error {
+	if _, err := q.LockBusiness(ctx, business.UUID()); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return fmt.Errorf("lock business: %w", err)
 	}
 	return nil
 }

@@ -51,7 +51,7 @@ Postgres or HTTP exist — that's what makes it easy to test and to reason about
 ```
 barbershop-backend/
 ├── cmd/
-│   └── server/main.go            # wires config, db, modules; runs `api` or `worker` (flag)
+│   └── server/main.go            # wires config, db, modules, event subscriptions; runs `api`, `worker` or `migrate`
 ├── api/
 │   └── openapi.yaml              # HTTP contract — source of truth (Flutter client is generated from it)
 ├── internal/
@@ -61,8 +61,7 @@ barbershop-backend/
 │   │   ├── database/             # pgx pool, tx helpers
 │   │   ├── httpx/                # router, middleware (request id, logging, recover, auth, rate limit), problem+json
 │   │   ├── auth/                 # JWT verification, Principal in context
-│   │   ├── events/               # event envelope, outbox publisher, dispatcher (River)
-│   │   ├── jobs/                 # River client & worker registration
+│   │   ├── outbox/               # event envelope, publish-in-transaction, delivery worker (River)
 │   │   ├── clock/                # Clock interface (real + fake for tests)
 │   │   └── i18n/                 # locale from Accept-Language, message catalogs
 │   ├── shared/                   # shared kernel — tiny, stable value objects only

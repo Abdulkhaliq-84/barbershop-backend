@@ -11,11 +11,13 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/migrations"
 )
 
-// Migrate applies every pending migration embedded in the binary.
-// A Postgres advisory lock makes it safe when several instances start at the
+// Migrate applies every pending migration embedded in the binary, then
+// River's own migrations (the outbox's job tables, in the river schema).
+// Postgres advisory locks make it safe when several instances start at the
 // same time: one migrates, the others wait and then find nothing to do.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
 	// goose speaks database/sql; OpenDBFromPool adapts our pgx pool to it.
@@ -41,7 +43,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error
 			slog.Duration("took", r.Duration),
 		)
 	}
-	return nil
+	return outbox.Migrate(ctx, pool, logger)
 }
 
 // newProvider configures goose with the embedded migrations and a session

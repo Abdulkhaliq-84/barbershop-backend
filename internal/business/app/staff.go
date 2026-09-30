@@ -50,7 +50,7 @@ type InvitationQuery struct {
 
 // StaffHandlers are the staff use cases. Who may do what:
 //
-//	invite, list/revoke invitations   owner
+//	invite, list/revoke invitations   owner (inviting within the plan's staff limit)
 //	list staff                        owner and managers
 //	accept                            the invited person, signed in with the invited phone
 type StaffHandlers struct {
@@ -58,14 +58,30 @@ type StaffHandlers struct {
 	staff       domain.Staff
 	invitations domain.Invitations
 	users       UserDirectory
+	plans       Plans
 	tokens      InvitationTokens
 	sender      InvitationSender
 	clock       clock.Clock
 }
 
+// StaffDeps are the staff use cases' dependencies.
+type StaffDeps struct {
+	Businesses  domain.Businesses
+	Staff       domain.Staff
+	Invitations domain.Invitations
+	Users       UserDirectory
+	Plans       Plans
+	Tokens      InvitationTokens
+	Sender      InvitationSender
+	Clock       clock.Clock
+}
+
 // NewStaffHandlers wires the staff use cases.
-func NewStaffHandlers(businesses domain.Businesses, staff domain.Staff, invitations domain.Invitations, users UserDirectory, tokens InvitationTokens, sender InvitationSender, clk clock.Clock) *StaffHandlers {
-	return &StaffHandlers{businesses: businesses, staff: staff, invitations: invitations, users: users, tokens: tokens, sender: sender, clock: clk}
+func NewStaffHandlers(d StaffDeps) *StaffHandlers {
+	return &StaffHandlers{
+		businesses: d.Businesses, staff: d.Staff, invitations: d.Invitations, users: d.Users,
+		plans: d.Plans, tokens: d.Tokens, sender: d.Sender, clock: d.Clock,
+	}
 }
 
 // Invite saves an invitation and texts its link to the invitee. Inviting the
@@ -98,7 +114,11 @@ func (h *StaffHandlers) Invite(ctx context.Context, cmd InviteStaff) (*domain.In
 	if err != nil {
 		return nil, fmt.Errorf("invite: %w", err)
 	}
-	if err := h.invitations.Invite(ctx, inv); err != nil {
+	plan, err := h.plans.Standing(ctx, cmd.BusinessID)
+	if err != nil {
+		return nil, fmt.Errorf("invite: %w", err)
+	}
+	if err := h.invitations.Invite(ctx, inv, plan.Limits.AllowStaff); err != nil {
 		return nil, fmt.Errorf("invite: %w", err)
 	}
 	// Sent after saving: an SMS for an invitation that failed to save would

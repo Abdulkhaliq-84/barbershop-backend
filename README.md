@@ -22,6 +22,7 @@ make tools     # install pinned golangci-lint and air
 make db-up     # PostgreSQL 18 + PostGIS in Docker
 make migrate   # apply migrations
 make dev       # API on http://localhost:8080 with live reload
+make worker    # background worker (in another terminal): delivers events, e.g. starts trials
 
 curl localhost:8080/healthz   # {"status":"ok"}
 curl localhost:8080/readyz    # {"status":"ok","checks":{"database":"ok"}}

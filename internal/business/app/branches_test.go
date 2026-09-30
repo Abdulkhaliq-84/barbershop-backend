@@ -20,10 +20,19 @@ type branchStore struct {
 	calls    int // any call, to prove authorization runs first
 }
 
-func (s *branchStore) Add(_ context.Context, b *domain.Branch) error {
+func (s *branchStore) Add(_ context.Context, b *domain.Branch, allow func(int) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
+	existing := 0
+	for _, other := range s.branches {
+		if other.BusinessID() == b.BusinessID() {
+			existing++
+		}
+	}
+	if err := allow(existing); err != nil {
+		return err
+	}
 	s.branches = append(s.branches, b)
 	return nil
 }
@@ -97,7 +106,7 @@ func newBranchFixture(t *testing.T) *branchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &branchFixture{fixture: f, branchStore: bs, branches: app.NewBranchHandlers(bs, f.store, f.clock), owner: owner, business: b.ID()}
+	return &branchFixture{fixture: f, branchStore: bs, branches: app.NewBranchHandlers(bs, f.store, f.plans, f.clock), owner: owner, business: b.ID()}
 }
 
 func createCmd(actor shared.UserID, business shared.BusinessID) app.CreateBranch {

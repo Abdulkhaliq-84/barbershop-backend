@@ -140,7 +140,7 @@ func TestRequiredEnvironment(t *testing.T) {
 
 func TestAllTimeoutsMustBePositive(t *testing.T) {
 	t.Parallel()
-	for _, key := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT"} {
+	for _, key := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "WORKER_SHUTDOWN_TIMEOUT"} {
 		for _, value := range []string{"0", "0s", "-1s", "invalid-sensitive-value", "999999999999999999999h"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				t.Parallel()

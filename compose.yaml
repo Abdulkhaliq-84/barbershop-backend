@@ -58,6 +58,19 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Delivers domain events between modules (outbox jobs on River), e.g.
+  # starts a business's trial when it is approved.
+  worker:
+    profiles: [app]
+    image: ${BARBERSHOP_IMAGE:-ghcr.io/abdulkhaliq-84/barbershop-backend:latest}
+    command: ["worker"]
+    environment: *app-env
+    volumes:
+      - media-data:/var/lib/barbershop/media # same modules as the api, same folders
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   db-data:
   media-data:

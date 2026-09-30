@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -79,12 +81,24 @@ func newAPI(t *testing.T) *api {
 		},
 		Media: config.Media{Dir: t.TempDir(), SigningSecret: "test-only-media-secret-0123456789abcdef"},
 	}
-	handler, err := newHandler(cfg, pool, logger)
+	app, err := newApplication(cfg, pool, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(handler)
+	srv := httptest.NewServer(app.handler)
 	t.Cleanup(srv.Close)
+
+	// The worker role runs next to the API, as in production (two processes
+	// there, one here): events published by requests get delivered.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- app.bus.Run(ctx, 5*time.Second) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("worker: %v", err)
+		}
+	})
 	return &api{url: srv.URL, logs: logs, pool: pool}
 }
 

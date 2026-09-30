@@ -22,7 +22,7 @@ func allow(*domain.Business, int) error { return nil }
 func TestDocumentStoreAttachAndList(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	docs := store.Documents()
 	mine, theirs := registered(t, store, "1010000001"), registered(t, store, "1010000002")
 
@@ -72,7 +72,7 @@ func TestDocumentStoreAttachAndList(t *testing.T) {
 func TestDocumentStoreParallelAttachesRespectTheLimit(t *testing.T) {
 	t.Parallel()
 	pool := migratedDB(t)
-	store := postgres.NewStore(pool)
+	store := postgres.NewStore(pool, discardEvents{})
 	docs := store.Documents()
 	business := registered(t, store, "1010123456")
 

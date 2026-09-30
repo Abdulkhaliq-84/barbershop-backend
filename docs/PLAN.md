@@ -141,7 +141,7 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 5. M3.5 — staff invitations (SMS deep link) and accepting them; managers edit their own branches
    ([ADR-0018](adr/0018-staff-invitations.md)).
 6. M3.6 — River outbox + `worker` role with its first consumer; `billing`: plans, trial subscription
-   on `BusinessApproved`, entitlements (branch / barber limits).
+   on `BusinessApproved`, entitlements (branch / staff limits) ([ADR-0019](adr/0019-outbox-delivery-and-billing-trial.md)).
 
 ### Design track (in parallel, in Figma)
 

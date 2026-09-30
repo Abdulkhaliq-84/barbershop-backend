@@ -30,10 +30,10 @@ type staffSetup struct {
 func newStaffSetup(t *testing.T) staffSetup {
 	t.Helper()
 	pool := migratedDB(t)
-	s := staffSetup{pool: pool, store: postgres.NewStore(pool)}
+	s := staffSetup{pool: pool, store: postgres.NewStore(pool, discardEvents{})}
 	s.business, s.owner, s.a = s.addBusiness(t, "1010123456")
 	br := newBranch(t, s.business, false)
-	if err := s.store.Branches().Add(t.Context(), br); err != nil {
+	if err := s.store.Branches().Add(t.Context(), br, allowAll); err != nil {
 		t.Fatal(err)
 	}
 	s.b = br.ID()
@@ -48,7 +48,7 @@ func (s staffSetup) addBusiness(t *testing.T, cr string) (shared.BusinessID, sha
 		t.Fatal(err)
 	}
 	br := newBranch(t, biz.ID(), false)
-	if err := s.store.Branches().Add(t.Context(), br); err != nil {
+	if err := s.store.Branches().Add(t.Context(), br, allowAll); err != nil {
 		t.Fatal(err)
 	}
 	return biz.ID(), biz.OwnerID(), br.ID()
@@ -87,7 +87,7 @@ func TestInvitationStoreRoundTrip(t *testing.T) {
 	s := newStaffSetup(t)
 	invs := s.store.Invitations()
 	inv := s.invitation(t, "0551234567", "inv_one", s.a, s.b)
-	if err := invs.Invite(ctx, inv); err != nil {
+	if err := invs.Invite(ctx, inv, allowAll); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := invs.Pending(ctx, s.business)
@@ -139,16 +139,16 @@ func TestInvitationStoreScopingAndResend(t *testing.T) {
 	invs := s.store.Invitations()
 
 	// A branch of another business is refused.
-	if err := invs.Invite(ctx, s.invitation(t, "0551234567", "inv_x", s.a, otherBranch)); !errors.Is(err, domain.ErrUnknownBranch) {
+	if err := invs.Invite(ctx, s.invitation(t, "0551234567", "inv_x", s.a, otherBranch), allowAll); !errors.Is(err, domain.ErrUnknownBranch) {
 		t.Fatalf("foreign branch: error = %v", err)
 	}
 	first := s.invitation(t, "0551234567", "inv_first", s.a)
-	if err := invs.Invite(ctx, first); err != nil {
+	if err := invs.Invite(ctx, first, allowAll); err != nil {
 		t.Fatal(err)
 	}
 	// Invite the same phone again: the first is revoked.
 	second := s.invitation(t, "+966551234567", "inv_second", s.b)
-	if err := invs.Invite(ctx, second); err != nil {
+	if err := invs.Invite(ctx, second, allowAll); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := invs.Pending(ctx, s.business)
@@ -173,7 +173,7 @@ func TestInvitationStoreScopingAndResend(t *testing.T) {
 func TestInvitationStoreAlreadyStaff(t *testing.T) {
 	t.Parallel()
 	s := newStaffSetup(t)
-	if err := s.store.Invitations().Invite(t.Context(), s.invitation(t, "0551234567", "inv_owner", s.a)); err != nil {
+	if err := s.store.Invitations().Invite(t.Context(), s.invitation(t, "0551234567", "inv_owner", s.a), allowAll); err != nil {
 		t.Fatal(err)
 	}
 	if err := accept(t, s.store, "inv_owner", s.owner); !errors.Is(err, domain.ErrAlreadyStaff) {
@@ -194,7 +194,7 @@ func TestInvitationStoreParallelInvites(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			inv := s.invitation(t, "0551234567", "inv_"+strconv.Itoa(i), s.a)
-			if err := s.store.Invitations().Invite(t.Context(), inv); err != nil {
+			if err := s.store.Invitations().Invite(t.Context(), inv, allowAll); err != nil {
 				t.Errorf("Invite: %v", err)
 			}
 		})
@@ -209,7 +209,7 @@ func TestInvitationStoreParallelInvites(t *testing.T) {
 func TestInvitationStoreParallelAccepts(t *testing.T) {
 	t.Parallel()
 	s := newStaffSetup(t)
-	if err := s.store.Invitations().Invite(t.Context(), s.invitation(t, "0551234567", "inv_tap", s.a)); err != nil {
+	if err := s.store.Invitations().Invite(t.Context(), s.invitation(t, "0551234567", "inv_tap", s.a), allowAll); err != nil {
 		t.Fatal(err)
 	}
 	user := shared.NewID[shared.UserTag]()

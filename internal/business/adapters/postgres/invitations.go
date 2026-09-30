@@ -27,18 +27,15 @@ func (s *Store) Invitations() *InvitationStore { return &InvitationStore{store: 
 // Invite checks the branches belong to the business, revokes any other
 // pending invitation for the phone, and saves inv — one transaction, under
 // a lock on the business so parallel invites take turns.
-func (r *InvitationStore) Invite(ctx context.Context, inv *domain.Invitation) error {
+func (r *InvitationStore) Invite(ctx context.Context, inv *domain.Invitation, allow func(seats int) error) error {
 	ids := make([]uuid.UUID, 0, len(inv.Branches()))
 	for _, b := range inv.Branches() {
 		ids = append(ids, b.UUID())
 	}
 	return pgx.BeginFunc(ctx, r.store.pool, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		if _, err := q.LockBusinessForInvite(ctx, inv.BusinessID().UUID()); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return domain.ErrNotFound
-			}
-			return fmt.Errorf("lock business: %w", err)
+		if err := lockBusiness(ctx, q, inv.BusinessID()); err != nil {
+			return err
 		}
 		n, err := q.CountBranchesIn(ctx, sqlcgen.CountBranchesInParams{BusinessID: inv.BusinessID().UUID(), Ids: ids})
 		if err != nil {
@@ -49,6 +46,13 @@ func (r *InvitationStore) Invite(ctx context.Context, inv *domain.Invitation) er
 		}
 		if err := q.RevokePendingInvitations(ctx, sqlcgen.RevokePendingInvitationsParams{BusinessID: inv.BusinessID().UUID(), Phone: inv.Phone().String()}); err != nil {
 			return fmt.Errorf("revoke older invitation: %w", err)
+		}
+		seats, err := q.CountStaffSeats(ctx, sqlcgen.CountStaffSeatsParams{BusinessID: inv.BusinessID().UUID(), Now: inv.CreatedAt()})
+		if err != nil {
+			return fmt.Errorf("count seats: %w", err)
+		}
+		if err := allow(int(seats)); err != nil {
+			return err
 		}
 		if err := q.InsertInvitation(ctx, sqlcgen.InsertInvitationParams{
 			ID:          inv.ID().UUID(),
