@@ -130,3 +130,23 @@ safe to expose in URLs, and creatable before insert (useful for idempotency and 
 - Every migration runs in CI against a fresh PostGIS container; destructive changes follow
   expand → migrate → contract across releases.
 - River ships its own migrations; we run them via its migrator at the same step.
+
+## 8. Connections and timeouts
+
+- One pool per process, `DATABASE_MAX_CONNS` connections (at least 2). In the worker, River keeps
+  4 for itself (LISTEN, fetching, completing, leader duties); jobs run on the rest, at most 10 at a
+  time.
+- The api and worker roles set three limits on every connection, which Postgres enforces
+  whatever the Go code does:
+
+  | Setting | Default | Stops |
+  |---|---|---|
+  | `statement_timeout` | 10 s | a slow query holding a connection |
+  | `lock_timeout` | 5 s | a wait for a row or advisory lock (`FOR UPDATE`, `pg_advisory_xact_lock`) |
+  | `idle_in_transaction_session_timeout` | 30 s | a transaction left open; its locks go with the session |
+
+  The request's context isn't enough on its own: net/http cancels it when the client goes away,
+  not when the server's write timeout passes. No transaction may span a file transfer or another
+  network call.
+- `server migrate` runs without these limits: a migration may rewrite a table or wait for traffic
+  to let go of one.

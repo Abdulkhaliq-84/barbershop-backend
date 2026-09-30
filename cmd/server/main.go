@@ -80,7 +80,13 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	logger := logging.New(stdout, cfg.Log, cfg.Env)
 	logger.InfoContext(ctx, "starting", slog.String("role", role), slog.String("version", version))
 
-	pool, err := database.Open(ctx, cfg.Database)
+	dbCfg := cfg.Database
+	if role == "migrate" {
+		// Migrations may rewrite a table or wait for traffic to let go of
+		// one: no statement or lock limits, and they run one at a time.
+		dbCfg.StatementTimeout, dbCfg.LockTimeout, dbCfg.IdleInTxTimeout = 0, 0, 0
+	}
+	pool, err := database.Open(ctx, dbCfg)
 	if err != nil {
 		return err
 	}

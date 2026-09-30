@@ -60,8 +60,17 @@ type Database struct {
 	// URL is a libpq connection string, e.g.
 	// postgres://user:pass@localhost:5432/barbershop?sslmode=disable.
 	// It contains a password: never log it.
-	URL      string `env:"DATABASE_URL,required,notEmpty"`
-	MaxConns int32  `env:"DATABASE_MAX_CONNS" envDefault:"10"`
+	URL string `env:"DATABASE_URL,required,notEmpty"`
+	// MaxConns must be at least 2 (River's migration holds one while it
+	// works on another); in the worker, River keeps a few for itself and
+	// runs jobs on the rest.
+	MaxConns int32 `env:"DATABASE_MAX_CONNS" envDefault:"10"`
+	// The api and worker roles set these on every connection, so a slow
+	// query, a lock wait or a forgotten transaction can't hold a pooled
+	// connection for ever. Migrations run without them.
+	StatementTimeout time.Duration `env:"DATABASE_STATEMENT_TIMEOUT"                   envDefault:"10s"`
+	LockTimeout      time.Duration `env:"DATABASE_LOCK_TIMEOUT"                        envDefault:"5s"`
+	IdleInTxTimeout  time.Duration `env:"DATABASE_IDLE_IN_TRANSACTION_SESSION_TIMEOUT" envDefault:"30s"`
 }
 
 // Auth configures login.
@@ -129,19 +138,26 @@ func (c Config) validate() error {
 	if !slices.Contains([]string{"json", "text"}, c.Log.Format) {
 		errs = append(errs, errors.New("LOG_FORMAT must be json or text"))
 	}
-	if c.Database.MaxConns < 1 {
-		errs = append(errs, errors.New("DATABASE_MAX_CONNS must be at least 1"))
+	if c.Database.MaxConns < 2 {
+		errs = append(errs, errors.New("DATABASE_MAX_CONNS must be at least 2"))
 	}
-	for key, value := range map[string]time.Duration{
-		"HTTP_READ_HEADER_TIMEOUT": c.HTTP.ReadHeaderTimeout,
-		"HTTP_READ_TIMEOUT":        c.HTTP.ReadTimeout,
-		"HTTP_WRITE_TIMEOUT":       c.HTTP.WriteTimeout,
-		"HTTP_IDLE_TIMEOUT":        c.HTTP.IdleTimeout,
-		"HTTP_SHUTDOWN_TIMEOUT":    c.HTTP.ShutdownTimeout,
-		"WORKER_SHUTDOWN_TIMEOUT":  c.Worker.StopTimeout,
+	// Slices, not maps, so the errors come out in the same order every time.
+	for _, t := range []struct {
+		key   string
+		value time.Duration
+	}{
+		{"HTTP_READ_HEADER_TIMEOUT", c.HTTP.ReadHeaderTimeout},
+		{"HTTP_READ_TIMEOUT", c.HTTP.ReadTimeout},
+		{"HTTP_WRITE_TIMEOUT", c.HTTP.WriteTimeout},
+		{"HTTP_IDLE_TIMEOUT", c.HTTP.IdleTimeout},
+		{"HTTP_SHUTDOWN_TIMEOUT", c.HTTP.ShutdownTimeout},
+		{"WORKER_SHUTDOWN_TIMEOUT", c.Worker.StopTimeout},
+		{"DATABASE_STATEMENT_TIMEOUT", c.Database.StatementTimeout},
+		{"DATABASE_LOCK_TIMEOUT", c.Database.LockTimeout},
+		{"DATABASE_IDLE_IN_TRANSACTION_SESSION_TIMEOUT", c.Database.IdleInTxTimeout},
 	} {
-		if value <= 0 {
-			errs = append(errs, fmt.Errorf("%s must be positive", key))
+		if t.value <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be positive", t.key))
 		}
 	}
 	if len(c.Auth.OTPSecret) < 32 {
@@ -157,13 +173,13 @@ func (c Config) validate() error {
 		if !filepath.IsAbs(c.Media.Dir) {
 			errs = append(errs, errors.New("MEDIA_DIR must be an absolute path outside development"))
 		}
-		for key, value := range map[string]string{
-			"OTP_SECRET":           c.Auth.OTPSecret,
-			"TOKEN_SIGNING_SECRET": c.Auth.TokenSecret,
-			"MEDIA_SIGNING_SECRET": c.Media.SigningSecret,
+		for _, s := range []struct{ key, value string }{
+			{"OTP_SECRET", c.Auth.OTPSecret},
+			{"TOKEN_SIGNING_SECRET", c.Auth.TokenSecret},
+			{"MEDIA_SIGNING_SECRET", c.Media.SigningSecret},
 		} {
-			if value == devSecrets[key] {
-				errs = append(errs, fmt.Errorf("%s is the public development value; set a real secret", key))
+			if s.value == devSecrets[s.key] {
+				errs = append(errs, fmt.Errorf("%s is the public development value; set a real secret", s.key))
 			}
 		}
 	}

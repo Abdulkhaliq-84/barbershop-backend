@@ -76,13 +76,24 @@ func New(pool *pgxpool.Pool, logger *slog.Logger) (*Bus, error) {
 		Schema:  Schema,
 		Logger:  logger,
 		Workers: workers,
-		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 10}},
+		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: maxWorkers(pool)}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("outbox: %w", err)
 	}
 	b.client = client
 	return b, nil
+}
+
+// riverConns is how many pool connections River keeps for itself while it
+// works: the LISTEN connection, fetching, completing, and leader duties.
+const riverConns = 4
+
+// maxWorkers is how many handlers run at once: what the pool has left after
+// River's own connections, so a busy worker never waits for a connection
+// while holding a job. A handler uses one connection at a time.
+func maxWorkers(pool *pgxpool.Pool) int {
+	return max(1, min(10, int(pool.Config().MaxConns)-riverConns))
 }
 
 // Subscribe registers handler under a unique, stable name (it is stored in
