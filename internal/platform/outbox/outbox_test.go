@@ -55,6 +55,16 @@ func (r *recorder) count(name string) int {
 	return len(r.got[name])
 }
 
+// waitFor waits up to 15 s for ch to close.
+func waitFor(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
 // eventually waits up to 15 s for cond.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -316,7 +326,7 @@ func TestRunFinishesRunningHandlersOnStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- bus.Run(ctx, 5*time.Second) }()
-	<-started
+	waitFor(t, started, "the handler to start")
 	cancel() // SIGTERM while the handler runs
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)
@@ -353,7 +363,7 @@ func TestRunCancelsHandlersAfterTheTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- bus.Run(ctx, 200*time.Millisecond) }()
-	<-started
+	waitFor(t, started, "the handler to start")
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)

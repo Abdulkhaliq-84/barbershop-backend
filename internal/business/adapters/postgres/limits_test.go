@@ -12,6 +12,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -19,9 +20,16 @@ import (
 // the count is read under the business lock.
 func TestBranchLimitUnderParallelAdds(t *testing.T) {
 	t.Parallel()
-	store := postgres.NewStore(migratedDB(t), discardEvents{})
+	pool := migratedDB(t)
+	store := postgres.NewStore(pool, discardEvents{})
 	business := registered(t, store, "1010123456")
 	limits := domain.Limits{MaxBranches: 1, MaxStaff: 1}
+	queued := dbtest.OthersQueued(t, pool, 3)
+	// Built here: t.Fatal must run on the test's own goroutine.
+	branches := make([]*domain.Branch, 4)
+	for i := range branches {
+		branches[i] = newBranch(t, business, false)
+	}
 
 	var (
 		wg             sync.WaitGroup
@@ -29,12 +37,12 @@ func TestBranchLimitUnderParallelAdds(t *testing.T) {
 		added, refused atomic.Int32
 		seen           sync.Map
 	)
-	for range 4 {
+	for _, br := range branches {
 		wg.Go(func() {
 			<-start
-			err := store.Branches().Add(t.Context(), newBranch(t, business, false), func(existing int) error {
+			err := store.Branches().Add(t.Context(), br, func(existing int) error {
 				seen.Store(existing, true)
-				time.Sleep(20 * time.Millisecond) // overlap the transactions
+				queued() // the other adds wait to count
 				return limits.AllowBranch(existing)
 			})
 			switch {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -77,6 +78,7 @@ func TestDocumentStoreParallelAttachesRespectTheLimit(t *testing.T) {
 	business := registered(t, store, "1010123456")
 
 	const callers = 8 // dbtest pools hold 8 connections
+	queued := dbtest.OthersQueued(t, pool, callers-1)
 	var (
 		wg              sync.WaitGroup
 		start           = make(chan struct{})
@@ -86,7 +88,7 @@ func TestDocumentStoreParallelAttachesRespectTheLimit(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			err := docs.Attach(t.Context(), newDoc(business, t0), func(b *domain.Business, n int) error {
-				time.Sleep(20 * time.Millisecond) // widen the window an unlocked count would race through
+				queued() // everyone else waits to count
 				return b.CanAttachDocument(n)
 			})
 			switch {

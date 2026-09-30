@@ -113,12 +113,23 @@ func TestParallelFirstSaves(t *testing.T) {
 		wg               sync.WaitGroup
 		start            = make(chan struct{})
 		saved, conflicts atomic.Int32
+		reading          sync.WaitGroup // all four have seen "no hours yet" before anyone saves
+		allRead          = make(chan struct{})
 	)
+	reading.Add(4)
+	go func() { reading.Wait(); close(allRead) }()
 	for range 4 {
 		wg.Go(func() {
 			<-start
 			err := repo.Update(t.Context(), business, branch, 0, func(c *domain.BranchCalendar) error {
-				time.Sleep(20 * time.Millisecond) // overlap the transactions
+				// No row, nothing to lock: the four collide only when they
+				// insert. Make sure they all get that far together.
+				reading.Done()
+				select {
+				case <-allRead:
+				case <-time.After(10 * time.Second):
+					t.Error("the four first saves never overlapped")
+				}
 				c.SetOpeningHours(week, t0)
 				return nil
 			})

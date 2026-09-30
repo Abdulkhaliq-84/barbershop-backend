@@ -15,6 +15,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -221,6 +222,7 @@ func TestInvitationStoreParallelAccepts(t *testing.T) {
 		t.Fatal(err)
 	}
 	user := shared.NewID[shared.UserTag]()
+	queued := dbtest.OthersQueued(t, s.pool, 1)
 	var (
 		wg              sync.WaitGroup
 		start           = make(chan struct{})
@@ -230,7 +232,7 @@ func TestInvitationStoreParallelAccepts(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			err := s.store.Invitations().Accept(t.Context(), hashOf("inv_tap"), func(inv *domain.Invitation) (*domain.StaffMember, error) {
-				time.Sleep(20 * time.Millisecond) // overlap the two transactions
+				queued() // the other tap waits for this invitation
 				return inv.Accept(shared.NewID[shared.StaffTag](), user, t0.Add(time.Hour))
 			})
 			switch {

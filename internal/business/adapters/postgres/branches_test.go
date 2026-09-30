@@ -9,6 +9,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -148,7 +149,9 @@ func TestBranchStoreUpdate(t *testing.T) {
 // is told to reload instead of overwriting.
 func TestBranchStoreParallelUpdatesOfTheSameVersion(t *testing.T) {
 	t.Parallel()
-	store := postgres.NewStore(migratedDB(t), discardEvents{})
+	pool := migratedDB(t)
+	store := postgres.NewStore(pool, discardEvents{})
+	queued := dbtest.OthersQueued(t, pool, 1)
 	branches := store.Branches()
 	business := registered(t, store, "1010123456")
 	b := newBranch(t, business, true)
@@ -165,7 +168,7 @@ func TestBranchStoreParallelUpdatesOfTheSameVersion(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			err := branches.Update(t.Context(), business, b.ID(), 1, func(br *domain.Branch) error {
-				time.Sleep(20 * time.Millisecond) // overlap the two transactions
+				queued() // the other update waits for this branch
 				p := br.Profile()
 				p.Address = []string{"العنوان أ", "العنوان ب"}[i]
 				return br.Edit(p, br.Policy(), t0)
