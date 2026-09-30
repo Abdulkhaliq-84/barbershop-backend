@@ -1,0 +1,203 @@
+// Package app holds catalog's use cases. Each starts by asking business
+// whether the caller may work on the branch (Access), then loads, changes
+// and saves through the domain's repository port. It knows nothing about
+// HTTP or SQL.
+package app
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
+)
+
+// Role is how much a caller must be allowed to do at a branch.
+type Role string
+
+// Roles, as business defines them.
+const (
+	RoleManager Role = "manager" // the owner, or a manager of the branch
+	RoleBarber  Role = "barber"  // anyone working at the branch
+)
+
+// Access asks business whether actor may work on branch (through
+// adapters/acl). It returns domain.ErrNotFound for strangers and for a
+// branch that isn't the business's, domain.ErrForbidden for staff without
+// the role or not working at the branch.
+type Access interface {
+	Branch(ctx context.Context, actor shared.UserID, business shared.BusinessID, branch shared.BranchID, need Role) error
+}
+
+// BranchRef names a branch, on behalf of Actor.
+type BranchRef struct {
+	Actor      shared.UserID
+	BusinessID shared.BusinessID
+	BranchID   shared.BranchID
+}
+
+// Money is a price as the client sent it: an amount in halalas.
+type Money struct {
+	Amount   int64
+	Currency string
+}
+
+// Name is text in Arabic (required) and English.
+type Name struct {
+	Ar, En string
+}
+
+// CreateService is the command to add a service to a branch.
+type CreateService struct {
+	BranchRef
+	Category    string
+	Name        Name
+	Description domain.Description
+	Duration    time.Duration
+	Price       Money
+	SortOrder   int
+}
+
+// UpdateService changes a service. Nil fields stay as they are.
+type UpdateService struct {
+	BranchRef
+	ServiceID       domain.ServiceID
+	ExpectedVersion int
+	Category        *string
+	Name            *Name
+	Description     *domain.Description
+	Duration        *time.Duration
+	Price           *Money
+	SortOrder       *int
+	Active          *bool
+}
+
+// ServiceHandlers are the service use cases. Who may do what:
+//
+//	list           anyone working at the branch (and the owner)
+//	create, edit   the owner, or a manager of the branch
+type ServiceHandlers struct {
+	services domain.Services
+	access   Access
+	clock    clock.Clock
+}
+
+// NewServiceHandlers wires the use cases.
+func NewServiceHandlers(services domain.Services, access Access, clk clock.Clock) *ServiceHandlers {
+	return &ServiceHandlers{services: services, access: access, clock: clk}
+}
+
+// Categories returns the service categories (public reference data).
+func (h *ServiceHandlers) Categories() []domain.Category { return domain.Categories() }
+
+// Create adds an active service to the branch.
+func (h *ServiceHandlers) Create(ctx context.Context, cmd CreateService) (*domain.Service, error) {
+	if err := h.access.Branch(ctx, cmd.Actor, cmd.BusinessID, cmd.BranchID, RoleManager); err != nil {
+		return nil, err
+	}
+	d, err := details(cmd.Category, cmd.Name, cmd.Description, cmd.Duration, cmd.Price, cmd.SortOrder)
+	if err != nil {
+		return nil, err
+	}
+	s, err := domain.NewService(shared.NewID[domain.ServiceTag](), cmd.BusinessID, cmd.BranchID, d, h.clock.Now())
+	if err != nil {
+		return nil, err
+	}
+	if err := h.services.Add(ctx, s); err != nil {
+		return nil, fmt.Errorf("create service: %w", err)
+	}
+	return s, nil
+}
+
+// List returns the branch's services, inactive ones included (staff see
+// what they turned off).
+func (h *ServiceHandlers) List(ctx context.Context, ref BranchRef) ([]*domain.Service, error) {
+	if err := h.access.Branch(ctx, ref.Actor, ref.BusinessID, ref.BranchID, RoleBarber); err != nil {
+		return nil, err
+	}
+	services, err := h.services.List(ctx, ref.BusinessID, ref.BranchID)
+	if err != nil {
+		return nil, fmt.Errorf("list services: %w", err)
+	}
+	return services, nil
+}
+
+// Update edits a service under the version check.
+func (h *ServiceHandlers) Update(ctx context.Context, cmd UpdateService) (*domain.Service, error) {
+	if err := h.access.Branch(ctx, cmd.Actor, cmd.BusinessID, cmd.BranchID, RoleManager); err != nil {
+		return nil, err
+	}
+	var updated *domain.Service
+	err := h.services.Update(ctx, cmd.BusinessID, cmd.BranchID, cmd.ServiceID, cmd.ExpectedVersion, func(s *domain.Service) error {
+		d, active, err := cmd.apply(s)
+		if err != nil {
+			return err
+		}
+		if err := s.Edit(d, active, h.clock.Now()); err != nil {
+			return err
+		}
+		updated = s
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("update service: %w", err)
+	}
+	return updated, nil
+}
+
+// apply lays the command's fields over the service's current ones.
+func (cmd UpdateService) apply(s *domain.Service) (domain.ServiceDetails, bool, error) {
+	d, active := s.Details(), s.IsActive()
+	var err error
+	if cmd.Category != nil {
+		d.Category = domain.CategoryCode(*cmd.Category)
+	}
+	if cmd.Name != nil {
+		if d.Name, err = shared.NewLocalizedText(cmd.Name.Ar, cmd.Name.En); err != nil {
+			return d, active, err
+		}
+	}
+	if cmd.Description != nil {
+		d.Description = *cmd.Description
+	}
+	if cmd.Duration != nil {
+		d.Duration = *cmd.Duration
+	}
+	if cmd.Price != nil {
+		if d.Price, err = money(*cmd.Price); err != nil {
+			return d, active, err
+		}
+	}
+	if cmd.SortOrder != nil {
+		d.SortOrder = *cmd.SortOrder
+	}
+	if cmd.Active != nil {
+		active = *cmd.Active
+	}
+	return d, active, nil
+}
+
+func details(category string, name Name, desc domain.Description, duration time.Duration, price Money, sort int) (domain.ServiceDetails, error) {
+	text, err := shared.NewLocalizedText(name.Ar, name.En)
+	if err != nil {
+		return domain.ServiceDetails{}, err
+	}
+	p, err := money(price)
+	if err != nil {
+		return domain.ServiceDetails{}, err
+	}
+	return domain.ServiceDetails{
+		Category: domain.CategoryCode(category), Name: text, Description: desc,
+		Duration: duration, Price: p, SortOrder: sort,
+	}, nil
+}
+
+func money(m Money) (shared.Money, error) {
+	p, err := shared.NewMoney(m.Amount, shared.Currency(m.Currency))
+	if err != nil {
+		return shared.Money{}, domain.ErrInvalidPrice
+	}
+	return p, nil
+}

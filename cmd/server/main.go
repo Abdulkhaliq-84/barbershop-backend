@@ -25,6 +25,8 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/billing"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business"
 	businesshttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog"
+	cataloghttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
 	iamhttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media"
@@ -106,12 +108,14 @@ type (
 	iamAPI      = iamhttp.Handlers
 	businessAPI = businesshttp.Handlers
 	mediaAPI    = mediahttp.Handlers
+	catalogAPI  = cataloghttp.Handlers
 )
 
 type apiServer struct {
 	*iamAPI      // iam: /v1/auth/*, /v1/me
 	*businessAPI // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
 	*mediaAPI    // media: /v1/media/* (signed downloads)
+	*catalogAPI  // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
 }
 
 // application is every module, wired: the API for the api role, the outbox
@@ -151,10 +155,11 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Pool: pool, Clock: clock.System{}, Logger: logger,
 		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus,
 	})
+	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
 	subscribe(bus, billingModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP()}
+	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP()}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}

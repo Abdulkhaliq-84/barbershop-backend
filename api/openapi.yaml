@@ -28,6 +28,8 @@ tags:
     description: Business mode — a business's shops, with location and booking policy
   - name: staff
     description: Business mode — a business's team, and inviting people to it
+  - name: services
+    description: What a branch sells — its service menu, with prices and durations
   - name: media
     description: Stored files, served through short-lived signed links
   - name: admin
@@ -507,6 +509,99 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/service-categories:
+    get:
+      operationId: listServiceCategories
+      tags: [services]
+      summary: Service categories (public)
+      description: Platform reference data, in display order. Every service belongs to one.
+      security: []
+      responses:
+        "200":
+          description: The categories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceCategoryList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/services:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: listServices
+      tags: [services]
+      summary: The branch's services (anyone working at the branch)
+      description: |
+        Inactive services included, so staff can turn them back on. Ordered by
+        `sort_order`, then oldest first. A branch's menu is short, so the list
+        is not paginated.
+      responses:
+        "200":
+          description: The services
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createService
+      tags: [services]
+      summary: Add a service (owner, or a manager of the branch)
+      description: |
+        Durations are 5–480 minutes in steps of 5. Prices are VAT-inclusive
+        halalas (`{"amount": 6000, "currency": "SAR"}` is 60.00 SAR).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Service"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/services/{service_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+      - $ref: "#/components/parameters/ServiceID"
+    patch:
+      operationId: updateService
+      tags: [services]
+      summary: Edit or deactivate a service (owner, or a manager of the branch)
+      description: |
+        Send only the fields that change; `"active": false` takes it off the
+        menu (services are never deleted: appointments point at them).
+        `If-Match` carries the `version` you last read (`412 version_conflict`
+        if it changed since).
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceUpdate"
+      responses:
+        "200":
+          description: The updated service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Service"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/businesses/{business_id}/verification/documents:
     parameters:
       - $ref: "#/components/parameters/BusinessID"
@@ -776,6 +871,14 @@ components:
 
     BranchID:
       name: branch_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    ServiceID:
+      name: service_id
       in: path
       required: true
       schema:
@@ -1518,3 +1621,148 @@ components:
           type: integer
           description: Managers and barbers, including pending invitations. The owner is free.
           example: 30
+
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount, currency]
+      properties:
+        amount:
+          type: integer
+          format: int64
+          description: In the currency's minor unit (halalas for SAR).
+          example: 6000
+        currency:
+          type: string
+          enum: [SAR]
+
+    ServiceCategory:
+      type: object
+      required: [code, name, icon]
+      properties:
+        code:
+          type: string
+          example: haircut
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        icon:
+          type: string
+          example: scissors
+
+    ServiceCategoryList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceCategory"
+
+    ServiceDescription:
+      type: object
+      additionalProperties: false
+      description: Optional, in either language; an empty string means none.
+      properties:
+        ar:
+          type: string
+          maxLength: 500
+        en:
+          type: string
+          maxLength: 500
+
+    ServiceCreate:
+      type: object
+      additionalProperties: false
+      required: [category, name, duration_minutes, price]
+      properties:
+        category:
+          type: string
+          description: A code from `GET /v1/service-categories`.
+          example: haircut
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        description:
+          $ref: "#/components/schemas/ServiceDescription"
+        duration_minutes:
+          type: integer
+          minimum: 5
+          maximum: 480
+          multipleOf: 5
+          example: 30
+        price:
+          $ref: "#/components/schemas/Money"
+        sort_order:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Lower first. Default 0.
+
+    ServiceUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        category:
+          type: string
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        description:
+          $ref: "#/components/schemas/ServiceDescription"
+        duration_minutes:
+          type: integer
+          minimum: 5
+          maximum: 480
+          multipleOf: 5
+        price:
+          $ref: "#/components/schemas/Money"
+        sort_order:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        active:
+          type: boolean
+
+    Service:
+      type: object
+      required: [id, branch_id, category, name, duration_minutes, price, active, sort_order, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        category:
+          type: string
+          example: haircut
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        description:
+          $ref: "#/components/schemas/ServiceDescription"
+        duration_minutes:
+          type: integer
+          example: 30
+        price:
+          $ref: "#/components/schemas/Money"
+        active:
+          type: boolean
+        sort_order:
+          type: integer
+        version:
+          type: integer
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ServiceList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Service"

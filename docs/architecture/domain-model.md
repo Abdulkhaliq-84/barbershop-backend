@@ -155,6 +155,13 @@ Events: `BusinessRegistered`, `BusinessSubmittedForReview`, `BusinessApproved`, 
 
 Events: `ServiceCreated`, `ServiceUpdated`, `ServiceDeactivated`.
 
+**Live since M4.1 (ADR-0020):** categories are reference data in code (haircut, beard, shave, kids,
+skin care, colour, packages). A service belongs to one branch. Anyone working there lists the menu;
+the owner or a manager of that branch adds and edits it (`If-Match` versions). Services are never
+deleted, only deactivated. Authorization is `business.AuthorizeBranch`: the caller must be staff with
+the role, the branch must be the business's, and the caller must work there. Offerings and the events
+come in later slices.
+
 ### 3.4 `scheduling` — When work *can* happen ★
 
 | Aggregate | Key fields | Invariants |

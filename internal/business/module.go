@@ -24,6 +24,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/invites"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/events"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media"
@@ -48,7 +49,37 @@ type Deps struct {
 
 // Module is the wired business module.
 type Module struct {
-	http *httpapi.Handlers
+	http   *httpapi.Handlers
+	access *app.AccessHandler
+}
+
+// Roles, from most to least powerful, for AuthorizeBranch.
+const (
+	RoleOwner   = string(domain.RoleOwner)
+	RoleManager = string(domain.RoleManager)
+	RoleBarber  = string(domain.RoleBarber)
+)
+
+// Errors AuthorizeBranch returns. They are the domain's own sentinels,
+// re-exported so callers never import business/domain.
+var (
+	// ErrNotFound: the caller isn't active staff of the business, or the
+	// branch isn't the business's. Answer 404, as for an ID that doesn't exist.
+	ErrNotFound = domain.ErrNotFound
+	// ErrForbidden: staff whose role is too small, or who don't work at the
+	// branch. Answer 403.
+	ErrForbidden = domain.ErrForbidden
+)
+
+// AuthorizeBranch checks that actor may work on branch of business with at
+// least role need (RoleOwner, RoleManager or RoleBarber). Modules that keep
+// data per branch (catalog, scheduling) call it first in every use case.
+func (m *Module) AuthorizeBranch(ctx context.Context, actor shared.UserID, business shared.BusinessID, branch shared.BranchID, need string) error {
+	role, err := domain.ParseRole(need)
+	if err != nil {
+		return fmt.Errorf("authorize branch: %w", err)
+	}
+	return m.access.Branch(ctx, actor, business, branch, role)
 }
 
 // New wires the repositories, use cases and HTTP handlers.
@@ -61,6 +92,7 @@ func New(d Deps) *Module {
 		sender = invites.NewConsole(d.Logger)
 	}
 	return &Module{
+		access: app.NewAccessHandler(store, store.Branches()),
 		http: httpapi.NewHandlers(httpapi.UseCases{
 			Register:  app.NewRegisterBusinessHandler(store, d.Clock),
 			Get:       app.NewGetBusinessHandler(store, store),

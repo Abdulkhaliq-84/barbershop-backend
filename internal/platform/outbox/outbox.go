@@ -117,22 +117,44 @@ func (b *Bus) PublishTx(ctx context.Context, tx pgx.Tx, events ...Event) error {
 	return nil
 }
 
-// Run works delivery jobs until ctx is cancelled, then waits up to
-// shutdownTimeout for running handlers to finish.
+// Run works delivery jobs until ctx is cancelled (SIGTERM), then stops in
+// two steps: running handlers get up to shutdownTimeout to finish, and any
+// still running after that are cancelled — River retries them later.
 func (b *Bus) Run(ctx context.Context, shutdownTimeout time.Duration) error {
-	if err := b.client.Start(ctx); err != nil {
+	// River treats a cancelled Start context as a hard stop that cancels
+	// running jobs at once, so it gets a context the signal doesn't cancel:
+	// stopping is done explicitly below. This also keeps a stop that arrives
+	// during startup from turning into a startup error.
+	riverCtx := context.WithoutCancel(ctx)
+	if err := b.client.Start(riverCtx); err != nil {
 		return fmt.Errorf("outbox: start: %w", err)
 	}
 	b.logger.InfoContext(ctx, "outbox worker started")
 	<-ctx.Done()
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
-	defer cancel()
-	if err := b.client.Stop(stopCtx); err != nil && !errors.Is(err, context.Canceled) {
+
+	soft, cancelSoft := context.WithTimeout(riverCtx, shutdownTimeout)
+	defer cancelSoft()
+	err := b.client.Stop(soft)
+	if err == nil {
+		b.logger.InfoContext(riverCtx, "outbox worker stopped")
+		return nil
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("outbox: stop: %w", err)
 	}
-	b.logger.InfoContext(stopCtx, "outbox worker stopped")
+	b.logger.WarnContext(riverCtx, "outbox handlers still running after the shutdown timeout; cancelling them (they will be retried)")
+	hard, cancelHard := context.WithTimeout(riverCtx, hardStopTimeout)
+	defer cancelHard()
+	if err := b.client.StopAndCancel(hard); err != nil {
+		return fmt.Errorf("outbox: cancel running handlers: %w", err)
+	}
 	return nil
 }
+
+// hardStopTimeout bounds the wait for cancelled handlers to return. A
+// handler that ignores its context can't be stopped; the process exits
+// anyway and the job is retried after River notices it was abandoned.
+const hardStopTimeout = 5 * time.Second
 
 // deliveryArgs is one event for one subscriber.
 type deliveryArgs struct {

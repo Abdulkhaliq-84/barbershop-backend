@@ -103,6 +103,25 @@ type BusinessVerificationDocument struct {
 	UploadedAt  time.Time
 }
 
+type CatalogService struct {
+	ID              uuid.UUID
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	CategoryCode    string
+	NameAr          string
+	NameEn          string
+	DescriptionAr   string
+	DescriptionEn   string
+	DurationMinutes int16
+	PriceAmount     int64
+	PriceCurrency   string
+	Active          bool
+	SortOrder       int16
+	Version         int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type IamOtpChallenge struct {
 	ID         uuid.UUID
 	Phone      string
