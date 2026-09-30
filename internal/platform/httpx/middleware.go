@@ -86,10 +86,14 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 					panic(rec)
 				}
 				logger.LogAttrs(r.Context(), slog.LevelError, "panic recovered",
-
 					slog.String("stack", string(debug.Stack())),
 					slog.String("request_id", RequestIDFrom(r.Context())),
 				)
+				if responseStarted(w) {
+					// Too late for a problem response: net/http would log a
+					// superfluous WriteHeader and glue JSON onto the body.
+					panic(http.ErrAbortHandler)
+				}
 				WriteProblem(w, r, Problem{Status: http.StatusInternalServerError, Code: "internal"})
 			}()
 			next.ServeHTTP(w, r)

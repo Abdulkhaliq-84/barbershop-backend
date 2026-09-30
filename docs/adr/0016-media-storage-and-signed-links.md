@@ -24,8 +24,9 @@ Later the same module will hold public files (logos, branch photos, avatars). We
 - **Files are checked by content, not by claims.**
   - The type comes from the first bytes (magic numbers). Only PDF, JPEG and PNG are accepted, so no
     HTML, SVG or executables.
-  - Files are at most 10 MiB, counted while streaming. Uploads use `application/octet-stream`, whose
-    body cap is 10 MiB; JSON bodies stay capped at 1 MiB. Too big → `413`.
+  - Files are at most 10 MiB, counted while streaming. Uploads use `application/octet-stream`.
+    The body cap follows the operation in the spec, never the client's Content-Type: 10 MiB for
+    an operation whose body is `format: binary`, 1 MiB for everything else. Too big → `413`.
 - **Private files are served through signed links.**
   - `GET /v1/media/{id}?expires=…&signature=…` is public: the link is the permission.
   - The signature is HMAC-SHA256 over the file ID and expiry, keyed by `MEDIA_SIGNING_SECRET`. It is
@@ -49,8 +50,12 @@ Later the same module will hold public files (logos, branch photos, avatars). We
   `download_url` field keeps its meaning.
 - A leaked link works for at most 5 minutes. There is no revocation list; rotating
   `MEDIA_SIGNING_SECRET` kills every outstanding link.
-- The request validator buffers an upload (≤ 10 MiB) in memory before the handler streams it to
-  storage. That is acceptable at this size; a direct-to-storage upload can replace it if files grow.
+- *Changed after review (M4):* the request validator used to buffer an upload in memory (three
+  copies, and the security check a fourth) before the handler streamed it. Now an upload's body
+  goes around the validator: its token, path and query are still checked, and its Content-Type
+  after that, but the bytes reach media untouched. File transfers get two minutes of read and write
+  time instead of the server's 15 s (`http.ResponseController`), enough for 10 MiB on a slow
+  mobile link.
 - Unreferenced files (crashes, refused attaches that failed to clean up) need a periodic sweep job
   once River arrives (M3.4).
 - Deleting a user's data (PDPL) must include their files; the SHA-256 lets us spot duplicates and
