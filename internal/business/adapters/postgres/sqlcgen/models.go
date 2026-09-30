@@ -186,3 +186,18 @@ type MediaObject struct {
 	CreatedBy   uuid.UUID
 	CreatedAt   time.Time
 }
+
+type SchedulingBranchCalendar struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	Version    int32
+	UpdatedAt  time.Time
+}
+
+type SchedulingOpeningHour struct {
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	Weekday         int16
+	StartMinute     int16
+	DurationMinutes int16
+}

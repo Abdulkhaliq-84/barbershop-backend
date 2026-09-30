@@ -119,7 +119,7 @@ Client flow (Flutter):
 | GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
 | GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner or a manager of that branch (M3.5) | manager |
 | POST | `…/branches/{branch_id}/publish` · `…/unpublish` | owner |
-| PUT | `…/branches/{branch_id}/opening-hours` | manager |
+| GET / PUT | `…/branches/{branch_id}/opening-hours` — live (M4.3): GET anyone working at the branch; PUT owner or a manager of the branch, `If-Match` (`0` the first time) | manager |
 | GET / POST / DELETE | `…/branches/{branch_id}/closures` | manager |
 | GET / POST / PATCH | `…/branches/{branch_id}/services[/{service_id}]` — live (M4.1): GET anyone working at the branch; POST/PATCH owner or a manager of the branch (`If-Match`); deactivate with `"active": false` | manager |
 | GET | `/v1/service-categories` — live (M4.1), public reference data | — |

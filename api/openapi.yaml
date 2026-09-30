@@ -30,6 +30,8 @@ tags:
     description: Business mode — a business's team, and inviting people to it
   - name: services
     description: What a branch sells — its service menu, with prices and durations
+  - name: scheduling
+    description: When work can happen — branch opening hours, barber schedules, time off
   - name: media
     description: Stored files, served through short-lived signed links
   - name: admin
@@ -635,6 +637,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Service"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/opening-hours:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: getOpeningHours
+      tags: [scheduling]
+      summary: The branch's weekly opening hours (anyone working at the branch)
+      description: |
+        All seven days, Sunday first; a day with no intervals is closed. Times
+        are the branch's local wall-clock time. A branch that never set its
+        hours is closed all week, with `version` 0.
+      responses:
+        "200":
+          description: The opening hours
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningHours"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setOpeningHours
+      tags: [scheduling]
+      summary: Set the weekly opening hours (owner, or a manager of the branch)
+      description: |
+        Replaces the whole week. Times are `HH:MM` on 5-minute steps, in the
+        branch's local time. A `closes` at or before `opens` is on the next
+        day: Thursday `16:00`–`02:00` is one ten-hour shift that belongs to
+        Thursday. `00:00`–`00:00` (or `00:00`–`24:00`) is all day. At most
+        4 intervals start on one day, and none may overlap — including a
+        Saturday-night shift running into Sunday (`422 validation_failed`).
+
+        `If-Match` carries the `version` you last read: `0` the first time.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpeningHoursUpdate"
+      responses:
+        "200":
+          description: The saved opening hours
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningHours"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -1835,3 +1889,64 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Service"
+
+    Weekday:
+      type: string
+      enum: [sunday, monday, tuesday, wednesday, thursday, friday, saturday]
+
+    TimeRange:
+      type: object
+      additionalProperties: false
+      required: [opens, closes]
+      properties:
+        opens:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][05]$'
+          example: "16:00"
+        closes:
+          type: string
+          pattern: '^(([01][0-9]|2[0-3]):[0-5][05]|24:00)$'
+          description: At or before `opens` means the next day.
+          example: "02:00"
+
+    DayHours:
+      type: object
+      additionalProperties: false
+      required: [weekday, intervals]
+      properties:
+        weekday:
+          $ref: "#/components/schemas/Weekday"
+        intervals:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/TimeRange"
+
+    OpeningHoursUpdate:
+      type: object
+      additionalProperties: false
+      required: [days]
+      properties:
+        days:
+          type: array
+          maxItems: 7
+          description: Days left out are closed.
+          items:
+            $ref: "#/components/schemas/DayHours"
+
+    OpeningHours:
+      type: object
+      required: [days, version]
+      properties:
+        days:
+          type: array
+          description: All seven days, Sunday first.
+          items:
+            $ref: "#/components/schemas/DayHours"
+        version:
+          type: integer
+          description: 0 until the hours are first set; send it as `If-Match`.
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true

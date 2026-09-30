@@ -184,6 +184,10 @@ Time modelling (see also [persistence](persistence.md#time)):
 
 Public API used by `booking`: `WorkingWindows(ctx, branchID, staffIDs, from, to) → map[staffID][]Interval`.
 
+**Live since M4.3 (ADR-0021):** branch opening hours — `GET`/`PUT …/branches/{id}/opening-hours`, a
+whole week of `opens`/`closes` intervals in branch-local time (a `closes` at or before `opens` is the
+next day; at most 4 per day; no overlaps, including Saturday into Sunday). Version 0 until first set.
+
 Events: `OpeningHoursChanged`, `ClosureAdded`, `BarberScheduleChanged`, `TimeOffAdded`, `TimeOffRemoved`.
 
 ### 3.5 `booking` — Appointments ★

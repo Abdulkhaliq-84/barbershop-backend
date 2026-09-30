@@ -28,7 +28,7 @@ iam.users, iam.otp_challenges, iam.otp_phone_guards, iam.sessions, iam.refresh_t
 business.businesses, business.branches, business.staff_members, business.staff_branches,
 business.verification_documents, business.invitations
 catalog.services, catalog.service_offerings  (categories are reference data in code — ADR-0020)
-scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures,
+scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures (the owner's exercise),
 scheduling.barber_schedules, scheduling.schedule_intervals, scheduling.time_off
 booking.appointments, booking.appointment_items, booking.idempotency_keys
 discovery.branch_listings, discovery.cities

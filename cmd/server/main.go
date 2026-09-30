@@ -37,6 +37,8 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/logging"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling"
+	schedulinghttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/adapters/httpapi"
 )
 
 // version is stamped at build time by the Dockerfile and the Makefile:
@@ -105,17 +107,19 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 // Every module calls its type Handlers, and an embedded field is named after
 // its type, so two of them would clash; the aliases give each a distinct name.
 type (
-	iamAPI      = iamhttp.Handlers
-	businessAPI = businesshttp.Handlers
-	mediaAPI    = mediahttp.Handlers
-	catalogAPI  = cataloghttp.Handlers
+	iamAPI        = iamhttp.Handlers
+	businessAPI   = businesshttp.Handlers
+	mediaAPI      = mediahttp.Handlers
+	catalogAPI    = cataloghttp.Handlers
+	schedulingAPI = schedulinghttp.Handlers
 )
 
 type apiServer struct {
-	*iamAPI      // iam: /v1/auth/*, /v1/me
-	*businessAPI // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
-	*mediaAPI    // media: /v1/media/* (signed downloads)
-	*catalogAPI  // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
+	*iamAPI        // iam: /v1/auth/*, /v1/me
+	*businessAPI   // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
+	*mediaAPI      // media: /v1/media/* (signed downloads)
+	*catalogAPI    // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
+	*schedulingAPI // scheduling: /v1/businesses/{id}/branches/{id}/opening-hours
 }
 
 // application is every module, wired: the API for the api role, the outbox
@@ -156,10 +160,11 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus,
 	})
 	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
+	schedulingModule := scheduling.New(scheduling.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
 	subscribe(bus, billingModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP()}
+	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP()}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
