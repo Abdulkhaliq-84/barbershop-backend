@@ -29,7 +29,9 @@ their own price or duration; M4.3 the `scheduling` module — branch opening hou
 wall-clock time, shifts past midnight (ADR-0021); M4.4 barber schedules (weekly template + date
 overrides, no overlap across branches) and time off (a Postgres exclusion constraint); M4.5 working
 windows — opening hours ∩ schedule − time off as real instants, the pure function booking (M5) will
-call through `scheduling.Module.WorkingWindows`.
+call through `scheduling.Module.WorkingWindows`. M5 (booking) is in progress: M5.1 branch publishing,
+with readiness from catalog and scheduling answered in `main` so `business` imports neither
+(ADR-0022).
 
 ## 2. Where things are
 

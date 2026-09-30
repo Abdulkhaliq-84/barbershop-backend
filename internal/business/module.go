@@ -46,6 +46,21 @@ type Deps struct {
 	// InviteSender delivers staff invitations; nil = development console
 	// sender (only with SMS_PROVIDER=console, refused in production).
 	InviteSender app.InvitationSender
+	// Readiness says whether a branch could take a booking, for publishing.
+	// Catalog and scheduling know; they depend on this module, so main
+	// answers for them (see ReadinessChecker).
+	Readiness ReadinessChecker
+}
+
+// Readiness is whether a branch could take a booking: opening hours, an
+// active service at least one barber performs, and one of those barbers
+// with a weekly schedule.
+type Readiness = domain.BranchReadiness
+
+// ReadinessChecker answers Readiness for a branch. It authorizes nobody:
+// business asks it after checking the caller is the owner.
+type ReadinessChecker interface {
+	BranchReadiness(ctx context.Context, business shared.BusinessID, branch shared.BranchID) (Readiness, error)
 }
 
 // Module is the wired business module.
@@ -139,10 +154,12 @@ func New(d Deps) *Module {
 	return &Module{
 		access: app.NewAccessHandler(store, store.Branches()),
 		http: httpapi.NewHandlers(httpapi.UseCases{
-			Register:  app.NewRegisterBusinessHandler(store, d.Clock),
-			Get:       app.NewGetBusinessHandler(store, store),
-			Update:    app.NewUpdateBusinessHandler(store, store, d.Clock),
-			Branches:  app.NewBranchHandlers(store.Branches(), store, plans, d.Clock),
+			Register: app.NewRegisterBusinessHandler(store, d.Clock),
+			Get:      app.NewGetBusinessHandler(store, store),
+			Update:   app.NewUpdateBusinessHandler(store, store, d.Clock),
+			Branches: app.NewBranchHandlers(app.BranchDeps{
+				Branches: store.Branches(), Businesses: store, Staff: store, Plans: plans, Readiness: d.Readiness, Clock: d.Clock,
+			}),
 			Documents: app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock, d.Logger),
 			Submit:    app.NewSubmitHandler(store, store, d.Clock),
 			Review:    app.NewReviewHandlers(store, store, store.Documents(), store.Branches(), store, files, d.Clock),

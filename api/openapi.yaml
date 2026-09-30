@@ -379,6 +379,57 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/businesses/{business_id}/branches/{branch_id}/publish:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    post:
+      operationId: publishBranch
+      tags: [branches]
+      summary: Show a branch to customers (owner)
+      description: |
+        `draft` or `unpublished` → `published`. The business must be
+        `active` (`409 business_not_active`), and the branch able to take a
+        booking: it has opening hours, an active service that a barber
+        performs, and one of those barbers has a weekly schedule there.
+        Anything missing: `409 branch_not_ready`, with a `detail` listing
+        what to do. Already published: `409 invalid_state_transition`.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      responses:
+        "200":
+          description: The published branch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/unpublish:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    post:
+      operationId: unpublishBranch
+      tags: [branches]
+      summary: Hide a published branch from customers (owner)
+      description: |
+        `published` → `unpublished`; anything else is
+        `409 invalid_state_transition`. Bookings already made stay; no new
+        ones can be made. Publish again when ready.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      responses:
+        "200":
+          description: The unpublished branch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/businesses/{business_id}/subscription:
     parameters:
       - $ref: "#/components/parameters/BusinessID"
@@ -1215,7 +1266,7 @@ components:
             `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
             `branch_required`, `cr_number_taken`, `invitation_invalid`,
             `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`,
-            `registration_limit_reached`.
+            `registration_limit_reached`, `branch_not_ready`, `business_not_active`.
           example: otp_cooldown
         detail:
           type: string

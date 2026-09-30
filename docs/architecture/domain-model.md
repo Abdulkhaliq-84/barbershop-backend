@@ -124,6 +124,12 @@ on discovery's PostGIS read model (M6). A branch is always loaded by `(business_
 another business's branch ID is "not found". Any staff may read branches; the owner creates them, and
 the owner or a manager of the branch edits them.
 
+**Publishing (M5.1, ADR-0022).** The owner publishes a branch once the business is `Active` and the
+branch can take a booking: it has opening hours, an active service at least one barber performs, and
+one of those barbers has a weekly schedule there. Catalog and scheduling know those parts; `main`
+answers business's `ReadinessChecker` from them, so business imports neither. Publishing and
+unpublishing record `BranchPublished` / `BranchUnpublished`, published in the same transaction.
+
 **Staff and invitations (M3.5, ADR-0018).** The owner invites a phone as a `manager` or `barber` for
 1–50 of the business's branches. The invitee gets an SMS link with a random token (only its hash is
 stored) and accepts it signed in with that same phone; the invitation then becomes an active

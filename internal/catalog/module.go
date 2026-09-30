@@ -9,6 +9,7 @@
 package catalog
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,6 +20,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 // Deps are what the module needs from the outside world.
@@ -31,13 +33,21 @@ type Deps struct {
 
 // Module is the wired catalog module.
 type Module struct {
-	http *httpapi.Handlers
+	http     *httpapi.Handlers
+	services *app.ServiceHandlers
 }
 
 // New wires the repository, use cases and HTTP handlers.
 func New(d Deps) *Module {
 	services := app.NewServiceHandlers(postgres.NewServices(d.Pool), acl.NewBusinessAccess(d.Business), d.Clock)
-	return &Module{http: httpapi.NewHandlers(services, d.Logger)}
+	return &Module{services: services, http: httpapi.NewHandlers(services, d.Logger)}
+}
+
+// PerformingStaff returns who performs at least one active service at the
+// branch, in ID order — part of whether the branch can take a booking. It
+// authorizes nobody: callers check first.
+func (m *Module) PerformingStaff(ctx context.Context, business shared.BusinessID, branch shared.BranchID) ([]shared.StaffID, error) {
+	return m.services.PerformingStaff(ctx, business, branch)
 }
 
 // HTTP returns the handlers for the catalog API operations.

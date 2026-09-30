@@ -213,6 +213,14 @@ func (s *Store) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event)
 			ev, err = outbox.NewEvent(events.TypeBusinessApproved, e.At, events.BusinessApproved{
 				BusinessID: e.Business.UUID(), OwnerID: e.Owner.UUID(), ApprovedAt: e.At,
 			})
+		case domain.BranchPublishedEvent:
+			ev, err = outbox.NewEvent(events.TypeBranchPublished, e.At, events.BranchPublished{
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), PublishedAt: e.At,
+			})
+		case domain.BranchUnpublishedEvent:
+			ev, err = outbox.NewEvent(events.TypeBranchUnpublished, e.At, events.BranchUnpublished{
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), UnpublishedAt: e.At,
+			})
 		default:
 			err = fmt.Errorf("no contract for event %T", e)
 		}

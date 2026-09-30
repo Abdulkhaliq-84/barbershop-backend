@@ -5,8 +5,10 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/domain"
@@ -260,4 +262,25 @@ func money(m Money) (shared.Money, error) {
 		return shared.Money{}, domain.ErrInvalidPrice
 	}
 	return p, nil
+}
+
+// PerformingStaff returns who performs at least one active service at the
+// branch, in ID order. It authorizes nobody: business's publish rule asks
+// it (through main) after checking the caller is the owner.
+func (h *ServiceHandlers) PerformingStaff(ctx context.Context, business shared.BusinessID, branch shared.BranchID) ([]shared.StaffID, error) {
+	services, err := h.services.List(ctx, business, branch)
+	if err != nil {
+		return nil, fmt.Errorf("performing staff: %w", err)
+	}
+	var staff []shared.StaffID
+	for _, s := range services {
+		if !s.IsActive() {
+			continue
+		}
+		for _, o := range s.Offerings() {
+			staff = append(staff, o.Staff)
+		}
+	}
+	slices.SortFunc(staff, func(a, b shared.StaffID) int { return cmp.Compare(a.String(), b.String()) })
+	return slices.Compact(staff), nil
 }

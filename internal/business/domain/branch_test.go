@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -149,5 +150,75 @@ func TestBranchEdit(t *testing.T) {
 	}
 	if b.Version() != 2 || b.Profile().City != "riyadh" {
 		t.Fatalf("a refused edit changed the branch: %+v", b)
+	}
+}
+
+func TestBranchPublish(t *testing.T) {
+	t.Parallel()
+	ready := domain.BranchReadiness{OpeningHours: true, OfferedService: true, BookableBarber: true}
+	newDraft := func(t *testing.T) *domain.Branch {
+		t.Helper()
+		b, err := domain.NewBranch(shared.NewID[shared.BranchTag](), shared.NewID[shared.BusinessTag](), profile(t), domain.BookingPolicy{}, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	for name, tt := range map[string]struct {
+		business domain.Status
+		ready    domain.BranchReadiness
+		want     error
+		missing  []string
+	}{
+		"a draft business":     {domain.StatusDraft, ready, domain.ErrBusinessNotActive, nil},
+		"a suspended business": {domain.StatusSuspended, ready, domain.ErrBusinessNotActive, nil},
+		"nothing set up":       {domain.StatusActive, domain.BranchReadiness{}, domain.ErrBranchNotReady, []string{"set the branch's opening hours", "add a service and choose who performs it"}},
+		"no barber scheduled":  {domain.StatusActive, domain.BranchReadiness{OpeningHours: true, OfferedService: true}, domain.ErrBranchNotReady, []string{"give a barber who performs a service a weekly schedule"}},
+		"no opening hours":     {domain.StatusActive, domain.BranchReadiness{OfferedService: true, BookableBarber: true}, domain.ErrBranchNotReady, []string{"set the branch's opening hours"}},
+	} {
+		b := newDraft(t)
+		err := b.Publish(tt.business, tt.ready, t0.Add(time.Hour))
+		if !errors.Is(err, tt.want) {
+			t.Errorf("%s: %v, want %v", name, err, tt.want)
+		}
+		if nr, ok := errors.AsType[*domain.NotReadyError](err); tt.missing != nil && (!ok || !slices.Equal(nr.Missing, tt.missing)) {
+			t.Errorf("%s: missing = %v, want %v", name, err, tt.missing)
+		}
+		if b.Status() != domain.BranchDraft || b.Version() != 1 || len(b.Events()) != 0 {
+			t.Errorf("%s: a refused publish changed the branch", name)
+		}
+	}
+
+	// Ready and active: published, a new version, and an event.
+	b := newDraft(t)
+	if err := b.Publish(domain.StatusActive, ready, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if b.Status() != domain.BranchPublished || b.Version() != 2 || !b.UpdatedAt().Equal(t0.Add(time.Hour)) {
+		t.Errorf("published = %s v%d at %s", b.Status(), b.Version(), b.UpdatedAt())
+	}
+	if ev, ok := b.Events()[0].(domain.BranchPublishedEvent); len(b.Events()) != 1 || !ok || ev.Branch != b.ID() || ev.Business != b.BusinessID() {
+		t.Errorf("events = %+v", b.Events())
+	}
+	if err := b.Publish(domain.StatusActive, ready, t0.Add(2*time.Hour)); !errors.Is(err, domain.ErrInvalidStateTransition) {
+		t.Errorf("publish twice: %v", err)
+	}
+
+	// Unpublish, then publish again.
+	if err := b.Unpublish(t0.Add(3 * time.Hour)); err != nil || b.Status() != domain.BranchUnpublished || b.Version() != 3 {
+		t.Fatalf("unpublish: %v, %s v%d", err, b.Status(), b.Version())
+	}
+	if _, ok := b.Events()[1].(domain.BranchUnpublishedEvent); !ok {
+		t.Errorf("events = %+v", b.Events())
+	}
+	if err := b.Unpublish(t0.Add(4 * time.Hour)); !errors.Is(err, domain.ErrInvalidStateTransition) {
+		t.Errorf("unpublish twice: %v", err)
+	}
+	if err := b.Publish(domain.StatusActive, ready, t0.Add(5*time.Hour)); err != nil || b.Status() != domain.BranchPublished {
+		t.Errorf("publish again: %v", err)
+	}
+	if err := newDraft(t).Unpublish(t0); !errors.Is(err, domain.ErrInvalidStateTransition) {
+		t.Errorf("unpublish a draft: %v", err)
 	}
 }

@@ -93,3 +93,24 @@ func (h *WindowsHandlers) compute(ctx context.Context, business shared.BusinessI
 	}
 	return out, loc, nil
 }
+
+// Readiness says whether the branch has opening hours, and which of staff
+// have a weekly schedule there — part of whether it can take a booking. It
+// authorizes nobody: business's publish rule asks it (through main) after
+// checking the caller is the owner.
+func (h *WindowsHandlers) Readiness(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) (openingHours bool, scheduled []shared.StaffID, err error) {
+	cal, err := h.calendars.Get(ctx, business, branch)
+	if err != nil {
+		return false, nil, fmt.Errorf("readiness: %w", err)
+	}
+	for _, s := range staff {
+		schedule, err := h.schedules.Get(ctx, business, branch, s)
+		if err != nil {
+			return false, nil, fmt.Errorf("readiness: %w", err)
+		}
+		if !schedule.Weekly().IsClosed() {
+			scheduled = append(scheduled, s)
+		}
+	}
+	return !cal.OpeningHours().IsClosed(), scheduled, nil
+}

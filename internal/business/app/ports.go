@@ -42,3 +42,11 @@ type PlanStanding struct {
 type Plans interface {
 	Standing(ctx context.Context, business shared.BusinessID) (PlanStanding, error)
 }
+
+// Readiness tells whether a branch could take a booking: whether it has
+// opening hours, a service someone performs, and a barber with a schedule.
+// Catalog and scheduling know; main asks them (they depend on this module,
+// so it can't).
+type Readiness interface {
+	BranchReadiness(ctx context.Context, business shared.BusinessID, branch shared.BranchID) (domain.BranchReadiness, error)
+}

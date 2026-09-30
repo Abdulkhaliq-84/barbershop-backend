@@ -106,7 +106,7 @@ func newBranchFixture(t *testing.T) *branchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &branchFixture{fixture: f, branchStore: bs, branches: app.NewBranchHandlers(bs, f.store, f.plans, f.clock), owner: owner, business: b.ID()}
+	return &branchFixture{fixture: f, branchStore: bs, branches: app.NewBranchHandlers(app.BranchDeps{Branches: bs, Businesses: f.store, Staff: f.store, Plans: f.plans, Clock: f.clock}), owner: owner, business: b.ID()}
 }
 
 func createCmd(actor shared.UserID, business shared.BusinessID) app.CreateBranch {

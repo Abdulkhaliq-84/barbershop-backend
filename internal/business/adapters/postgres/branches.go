@@ -138,7 +138,7 @@ func (r *BranchStore) Update(ctx context.Context, business shared.BusinessID, id
 		if n == 0 {
 			return domain.ErrVersionConflict
 		}
-		return nil
+		return r.store.publish(ctx, tx, b.Events())
 	})
 }
 
