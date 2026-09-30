@@ -370,6 +370,32 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/businesses/{business_id}/subscription:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: getSubscription
+      tags: [businesses]
+      summary: The business's plan, limits and trial (owner)
+      description: |
+        Before approval (`setup`) a business sets up under the Pro plan's
+        limits. Approval starts a 30-day Pro trial (`trialing`) — a moment
+        after the approval, as the trial is started by a background job.
+        When the trial ends the business is on the Free plan (`free`).
+
+        Limits are checked when adding: a branch past `max_branches` or an
+        invitation past `max_staff` gets `409 plan_limit_reached`. Nothing
+        is removed when a plan shrinks.
+      responses:
+        "200":
+          description: The subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/businesses/{business_id}/staff:
     parameters:
       - $ref: "#/components/parameters/BusinessID"
@@ -818,7 +844,7 @@ components:
             `version_conflict`, `unsupported_media_type`, `payload_too_large`,
             `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
             `branch_required`, `cr_number_taken`, `invitation_invalid`,
-            `invitation_closed`, `already_staff`.
+            `invitation_closed`, `already_staff`, `plan_limit_reached`.
           example: otp_cooldown
         detail:
           type: string
@@ -1457,3 +1483,38 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StaffMember"
+
+    Plan:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          enum: [free, pro]
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+
+    Subscription:
+      type: object
+      required: [plan, status, max_branches, max_staff]
+      properties:
+        plan:
+          $ref: "#/components/schemas/Plan"
+        status:
+          type: string
+          enum: [setup, trialing, free]
+          description: |
+            `setup` — not approved yet (Pro limits while setting up);
+            `trialing` — the 30-day Pro trial; `free` — the trial ended.
+        trial_ends_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the trial ends or ended; absent before approval.
+        max_branches:
+          type: integer
+          example: 5
+        max_staff:
+          type: integer
+          description: Managers and barbers, including pending invitations. The owner is free.
+          example: 30

@@ -23,13 +23,28 @@ type invitationStore struct {
 	invs     []*domain.Invitation
 }
 
-func (s *invitationStore) Invite(_ context.Context, inv *domain.Invitation) error {
+func (s *invitationStore) Invite(ctx context.Context, inv *domain.Invitation, allow func(int) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, b := range inv.Branches() {
 		if s.branches[b] != inv.BusinessID() {
 			return domain.ErrUnknownBranch
 		}
+	}
+	seats := 0
+	for _, other := range s.invs {
+		if other.BusinessID() == inv.BusinessID() && other.Phone() != inv.Phone() && other.IsOpen(inv.CreatedAt()) {
+			seats++
+		}
+	}
+	members, _ := s.store.List(ctx, inv.BusinessID())
+	for _, m := range members {
+		if m.Role() != domain.RoleOwner && m.IsActive() {
+			seats++
+		}
+	}
+	if err := allow(seats); err != nil {
+		return err
 	}
 	for _, old := range s.invs {
 		if old.BusinessID() == inv.BusinessID() && old.Phone() == inv.Phone() && old.Status() == domain.InvitationPending {
@@ -162,7 +177,10 @@ func newStaffFixture(t *testing.T) *staffFixture {
 	o := &outbox{sent: map[shared.PhoneNumber]string{}}
 	return &staffFixture{
 		fixture: f, invs: invs, users: u, outbox: o,
-		staff: app.NewStaffHandlers(f.store, f.store, invs, u, &countingTokens{}, o, f.clock),
+		staff: app.NewStaffHandlers(app.StaffDeps{
+			Businesses: f.store, Staff: f.store, Invitations: invs, Users: u,
+			Plans: f.plans, Tokens: &countingTokens{}, Sender: o, Clock: f.clock,
+		}),
 		owner: owner, business: b.ID(), branch: branch,
 	}
 }

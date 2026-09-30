@@ -56,18 +56,19 @@ type BranchQuery struct {
 
 // BranchHandlers are the branch use cases. Who may do what:
 //
-//	create         owner
+//	create         owner, within the plan's branch limit
 //	edit           owner, or a manager of that branch
 //	list, get      any active staff of the business
 type BranchHandlers struct {
 	branches domain.Branches
 	staff    domain.Staff
+	plans    Plans
 	clock    clock.Clock
 }
 
 // NewBranchHandlers wires the branch use cases.
-func NewBranchHandlers(branches domain.Branches, staff domain.Staff, clk clock.Clock) *BranchHandlers {
-	return &BranchHandlers{branches: branches, staff: staff, clock: clk}
+func NewBranchHandlers(branches domain.Branches, staff domain.Staff, plans Plans, clk clock.Clock) *BranchHandlers {
+	return &BranchHandlers{branches: branches, staff: staff, plans: plans, clock: clk}
 }
 
 // Create adds a draft branch to the business.
@@ -100,7 +101,11 @@ func (h *BranchHandlers) Create(ctx context.Context, cmd CreateBranch) (*domain.
 	if err != nil {
 		return nil, err
 	}
-	if err := h.branches.Add(ctx, branch); err != nil {
+	plan, err := h.plans.Standing(ctx, cmd.BusinessID)
+	if err != nil {
+		return nil, fmt.Errorf("create branch: %w", err)
+	}
+	if err := h.branches.Add(ctx, branch, plan.Limits.AllowBranch); err != nil {
 		return nil, fmt.Errorf("create branch: %w", err)
 	}
 	return branch, nil

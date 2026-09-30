@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -56,6 +57,7 @@ type Business struct {
 	createdAt   time.Time
 	updatedAt   time.Time
 	review      Review
+	events      []Event // recorded since it was loaded; published when saved
 }
 
 // Registration is what an owner provides to register a business.
@@ -164,3 +166,7 @@ func (b *Business) CreatedAt() time.Time { return b.createdAt }
 
 // UpdatedAt returns when the business last changed.
 func (b *Business) UpdatedAt() time.Time { return b.updatedAt }
+
+// Events returns what happened to the business since it was loaded, for the
+// repository to publish together with the change.
+func (b *Business) Events() []Event { return slices.Clone(b.events) }

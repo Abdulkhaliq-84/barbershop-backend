@@ -74,6 +74,8 @@ linters:
               desc: use the business root package, never its internals
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media/
               desc: use the media root package, never its internals
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/billing
+              desc: iam must not depend on billing
         business-keeps-to-itself:
           files:
             - "**/internal/business/**"
@@ -82,6 +84,20 @@ linters:
               desc: use the iam root package, never its internals
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media/
               desc: use the media root package (through adapters/acl), never its internals
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/billing/
+              desc: use the billing root package (through adapters/acl), never its internals
+        # billing depends on no other module: it hears about businesses through
+        # events that main subscribes it to (ADR-0019).
+        billing-keeps-to-itself:
+          files:
+            - "**/internal/billing/**"
+          deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
+              desc: billing must not depend on other modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
+              desc: billing must not depend on other modules (main wires business events to it)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media
+              desc: billing must not depend on other modules
         # media is generic: it knows nothing about who stores files or why.
         media-keeps-to-itself:
           files:
@@ -90,6 +106,8 @@ linters:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
               desc: media must not depend on other modules
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
+              desc: media must not depend on other modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/billing
               desc: media must not depend on other modules
         # Platform plumbing must never depend on business modules.
         platform-has-no-business:
@@ -103,6 +121,8 @@ linters:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
               desc: platform code must not import business modules
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media
+              desc: platform code must not import business modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/billing
               desc: platform code must not import business modules
   exclusions:
     presets:

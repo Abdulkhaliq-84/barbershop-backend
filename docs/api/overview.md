@@ -131,7 +131,7 @@ Client flow (Flutter):
 | GET | `…/branches/{branch_id}/day?date=` — per-barber timeline + KPIs (dashboard) | barber (own) / manager |
 | POST | `…/branches/{branch_id}/appointments` — staff booking / walk-in | barber |
 | POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` | barber (own) / manager |
-| GET | `/v1/businesses/{business_id}/subscription` | owner |
+| GET | `/v1/businesses/{business_id}/subscription` — live (M3.6): plan, status (`setup`/`trialing`/`free`), trial end, limits; `409 plan_limit_reached` when adding past them | owner |
 
 **Authorization (M3.1, ADR-0015).** Every business-mode use case checks the caller's membership
 first. A caller who is not active staff of `{business_id}` gets `404 not_found` — the same as for a

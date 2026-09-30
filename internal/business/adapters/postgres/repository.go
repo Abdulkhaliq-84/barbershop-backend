@@ -17,18 +17,28 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres/sqlcgen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/events"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 // Store implements the business module's repositories and read models.
 // They share one pool; each method is one statement or one transaction.
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	events EventPublisher
 }
 
-// NewStore returns a store backed by pool.
-func NewStore(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
+// EventPublisher saves events inside the caller's transaction: the outbox
+// (ADR-0009). An event is published if and only if its change commits.
+type EventPublisher interface {
+	PublishTx(ctx context.Context, tx pgx.Tx, events ...outbox.Event) error
+}
+
+// NewStore returns a store backed by pool that publishes the aggregates'
+// events through events.
+func NewStore(pool *pgxpool.Pool, events EventPublisher) *Store {
+	return &Store{pool: pool, events: events}
 }
 
 // Compile-time checks that the adapter satisfies the ports.
@@ -177,8 +187,36 @@ func (s *Store) update(ctx context.Context, id shared.BusinessID, expectedVersio
 		if n == 0 {
 			return domain.ErrVersionConflict
 		}
-		return nil
+		return s.publish(ctx, tx, b.Events())
 	})
+}
+
+// publish hands the aggregate's events to the outbox inside tx, in the
+// contract's JSON shape (package events).
+func (s *Store) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event) error {
+	out := make([]outbox.Event, 0, len(recorded))
+	for _, e := range recorded {
+		var (
+			ev  outbox.Event
+			err error
+		)
+		switch e := e.(type) {
+		case domain.BusinessApproved:
+			ev, err = outbox.NewEvent(events.TypeBusinessApproved, e.At, events.BusinessApproved{
+				BusinessID: e.Business.UUID(), OwnerID: e.Owner.UUID(), ApprovedAt: e.At,
+			})
+		default:
+			err = fmt.Errorf("no contract for event %T", e)
+		}
+		if err != nil {
+			return err
+		}
+		out = append(out, ev)
+	}
+	if err := s.events.PublishTx(ctx, tx, out...); err != nil {
+		return fmt.Errorf("publish events: %w", err)
+	}
+	return nil
 }
 
 // ReviewPage returns up to limit businesses in status, oldest submission

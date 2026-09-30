@@ -46,12 +46,12 @@ func newBranch(t *testing.T, business shared.BusinessID, withPhone bool) *domain
 func TestBranchStoreRoundTrip(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	branches := store.Branches()
 	business := registered(t, store, "1010123456")
 	first, second := newBranch(t, business, true), newBranch(t, business, false)
 	for _, b := range []*domain.Branch{first, second} {
-		if err := branches.Add(ctx, b); err != nil {
+		if err := branches.Add(ctx, b, allowAll); err != nil {
 			t.Fatalf("Add: %v", err)
 		}
 	}
@@ -80,11 +80,11 @@ func TestBranchStoreRoundTrip(t *testing.T) {
 func TestBranchStoreIsScopedByBusiness(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	branches := store.Branches()
 	mine, theirs := registered(t, store, "1010000001"), registered(t, store, "1010000002")
 	b := newBranch(t, theirs, true)
-	if err := branches.Add(ctx, b); err != nil {
+	if err := branches.Add(ctx, b, allowAll); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,11 +106,11 @@ func TestBranchStoreIsScopedByBusiness(t *testing.T) {
 func TestBranchStoreUpdate(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	branches := store.Branches()
 	business := registered(t, store, "1010123456")
 	b := newBranch(t, business, true)
-	if err := branches.Add(ctx, b); err != nil {
+	if err := branches.Add(ctx, b, allowAll); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,11 +148,11 @@ func TestBranchStoreUpdate(t *testing.T) {
 // is told to reload instead of overwriting.
 func TestBranchStoreParallelUpdatesOfTheSameVersion(t *testing.T) {
 	t.Parallel()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	branches := store.Branches()
 	business := registered(t, store, "1010123456")
 	b := newBranch(t, business, true)
-	if err := branches.Add(t.Context(), b); err != nil {
+	if err := branches.Add(t.Context(), b, allowAll); err != nil {
 		t.Fatal(err)
 	}
 

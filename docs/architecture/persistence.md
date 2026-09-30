@@ -32,10 +32,10 @@ scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures,
 scheduling.barber_schedules, scheduling.schedule_intervals, scheduling.time_off
 booking.appointments, booking.appointment_items, booking.idempotency_keys
 discovery.branch_listings, discovery.cities
-billing.plans, billing.subscriptions
+billing.subscriptions  (plans are reference data in code — ADR-0019)
 notification.device_tokens, notification.deliveries
 media.objects
-river.*   (job queue / outbox — managed by River's own migrations)
+river.*   (job queue / outbox — created and upgraded by River's own migrator, run by database.Migrate)
 ```
 
 Rules: a module's SQL (sqlc `queries.sql`) only touches its own schema. No foreign keys across

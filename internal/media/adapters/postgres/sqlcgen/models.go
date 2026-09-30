@@ -11,6 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type BillingSubscription struct {
+	BusinessID       uuid.UUID
+	PlanCode         string
+	Status           string
+	CurrentPeriodEnd time.Time
+	CreatedAt        time.Time
+}
+
 type BusinessBranch struct {
 	ID                   uuid.UUID
 	BusinessID           uuid.UUID

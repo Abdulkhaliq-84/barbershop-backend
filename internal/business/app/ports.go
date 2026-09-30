@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -25,4 +26,19 @@ type MembershipView struct {
 type MembershipReader interface {
 	// ForUser lists the active memberships of user, newest business first.
 	ForUser(ctx context.Context, user shared.UserID) ([]MembershipView, error)
+}
+
+// PlanStanding is the business's plan as billing reports it.
+type PlanStanding struct {
+	Plan        string // plan code: free, pro
+	PlanName    shared.LocalizedText
+	Status      string // setup, trialing, free
+	TrialEndsAt *time.Time
+	Limits      domain.Limits
+}
+
+// Plans answers "what does this business's plan allow?" (billing, through
+// adapters/acl).
+type Plans interface {
+	Standing(ctx context.Context, business shared.BusinessID) (PlanStanding, error)
 }

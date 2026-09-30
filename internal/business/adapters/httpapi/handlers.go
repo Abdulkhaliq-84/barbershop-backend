@@ -32,6 +32,7 @@ type UseCases struct {
 	Submit      *app.SubmitHandler
 	Review      *app.ReviewHandlers
 	Staff       *app.StaffHandlers
+	Plan        *app.PlanHandler
 	Memberships *app.ListMyMembershipsHandler
 }
 
@@ -196,6 +197,10 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "status: drafts are not in the review queue"
 	case errors.Is(err, errBadIfMatch):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the business version you last read"
+	case errors.Is(err, domain.ErrBranchLimitReached):
+		status, code, detail = http.StatusConflict, "plan_limit_reached", "your plan's branch limit is reached; see GET /v1/businesses/{business_id}/subscription"
+	case errors.Is(err, domain.ErrStaffLimitReached):
+		status, code, detail = http.StatusConflict, "plan_limit_reached", "your plan's staff limit is reached (pending invitations count); see GET /v1/businesses/{business_id}/subscription"
 	case errors.Is(err, domain.ErrInvitationInvalid):
 		status, code, detail = http.StatusNotFound, "invitation_invalid", "this invitation link is not valid for your account; ask the owner to invite you again"
 	case errors.Is(err, domain.ErrAlreadyStaff):

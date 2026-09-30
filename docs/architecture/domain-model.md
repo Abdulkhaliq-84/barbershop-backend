@@ -263,13 +263,20 @@ Arabic normalisation for search: strip diacritics/tatweel, unify alef forms (أ 
 
 | Aggregate | Key fields | Invariants |
 |---|---|---|
-| `Plan` (reference data) | code, name {ar,en}, entitlements {max branches, max barbers}, price monthly/yearly | — |
+| `Plan` (reference data) | code, name {ar,en}, entitlements {max branches, max staff}, price monthly/yearly (later) | — |
 | `Subscription` | business id, plan code, status (`trialing`/`active`/`past_due`/`cancelled`/`expired`), current period | one live subscription per business |
 
 v1: an approved business starts a trial on the top plan, then falls back to Free; platform admins can
-assign plans manually. Public API: `Entitlements(ctx, businessID)`. On `SubscriptionExpired`, `business`
-unpublishes branches beyond the Free limit (never deletes data). Online payment collection and ZATCA
-e-invoicing come later.
+assign plans manually. Public API: `Standing(ctx, businessID)` (plan, status, limits). On
+`SubscriptionExpired`, `business` unpublishes branches beyond the Free limit (never deletes data).
+Online payment collection and ZATCA e-invoicing come later.
+
+**Live since M3.6 (ADR-0019):** plans `free` (1 branch, 3 staff) and `pro` (5 branches, 30 staff);
+"staff" is managers and barbers plus open invitations, the owner is free. Statuses the owner sees:
+`setup` (not approved yet — Pro limits while setting up), `trialing` (30 days from approval, started
+by the `business.approved` event), `free` (the trial ended — computed on read, no job). `business`
+checks the limits when adding a branch or an invitation, under its business-row lock; nothing is
+removed when a plan shrinks. Only trials are stored so far.
 
 ### 3.8 `notification`
 

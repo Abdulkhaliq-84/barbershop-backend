@@ -1,9 +1,10 @@
 // Command server is the barbershop backend. One binary, several roles:
 //
 //	server api       serve the HTTP API (default)
+//	server worker    deliver domain events between modules (outbox jobs on River)
 //	server migrate   apply pending database migrations, then exit
 //
-// The worker role (background jobs) arrives with River in M3.
+// api and worker build the same modules; they differ only in what they run.
 package main
 
 import (
@@ -21,6 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/billing"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business"
 	businesshttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
@@ -32,6 +34,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/logging"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 )
 
 // version is stamped at build time by the Dockerfile and the Makefile:
@@ -62,8 +65,8 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	if len(args) > 0 {
 		role = args[0]
 	}
-	if role != "api" && role != "migrate" {
-		return errors.New("unknown command (want: api, migrate)")
+	if role != "api" && role != "worker" && role != "migrate" {
+		return errors.New("unknown command (want: api, worker, migrate)")
 	}
 
 	cfg, err := config.Load(environ)
@@ -83,11 +86,14 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 		return database.Migrate(ctx, pool, logger)
 	}
 
-	handler, err := newHandler(cfg, pool, logger)
+	a, err := newApplication(cfg, pool, logger)
 	if err != nil {
 		return err
 	}
-	return serveAPI(ctx, cfg.HTTP, handler, logger)
+	if role == "worker" {
+		return a.bus.Run(ctx, cfg.Worker.StopTimeout)
+	}
+	return serveAPI(ctx, cfg.HTTP, a.handler, logger)
 }
 
 // apiServer is the whole API: one embedded handler set per module. Embedding
@@ -108,8 +114,20 @@ type apiServer struct {
 	*mediaAPI    // media: /v1/media/* (signed downloads)
 }
 
-// newHandler builds every module and mounts the API next to the health checks.
-func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, error) {
+// application is every module, wired: the API for the api role, the outbox
+// for the worker role.
+type application struct {
+	handler http.Handler
+	bus     *outbox.Bus
+}
+
+// newApplication builds every module, subscribes them to each other's
+// events, and mounts the API next to the health checks.
+func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*application, error) {
+	bus, err := outbox.New(pool, logger)
+	if err != nil {
+		return nil, err
+	}
 	iamModule, err := iam.New(iam.Deps{
 		Pool:        pool,
 		Clock:       clock.System{},
@@ -128,14 +146,28 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 	if err != nil {
 		return nil, err
 	}
-	businessModule := business.New(business.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Media: mediaModule, Users: iamModule})
+	billingModule := billing.New(billing.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
+	businessModule := business.New(business.Deps{
+		Pool: pool, Clock: clock.System{}, Logger: logger,
+		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus,
+	})
+	subscribe(bus, billingModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
 	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP()}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
-	return router, nil
+	return &application{handler: router, bus: bus}, nil
+}
+
+// subscribe wires who reacts to which event. Subscriber names are stored in
+// queued jobs: never rename one (add a new name and retire the old).
+func subscribe(bus *outbox.Bus, billingModule *billing.Module) {
+	// An approved business starts its free trial.
+	business.OnApproved(bus, "billing.start_trial", func(ctx context.Context, e business.Approved) error {
+		return billingModule.StartTrial(ctx, e.BusinessID, e.ApprovedAt)
+	})
 }
 
 func serveAPI(ctx context.Context, cfg config.HTTP, handler http.Handler, logger *slog.Logger) error {

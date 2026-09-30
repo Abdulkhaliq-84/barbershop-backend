@@ -281,6 +281,27 @@ func (q *Queries) CountBranchesIn(ctx context.Context, arg CountBranchesInParams
 	return count, err
 }
 
+const countStaffSeats = `-- name: CountStaffSeats :one
+SELECT ((SELECT count(*) FROM business.staff_members s
+          WHERE s.business_id = $1 AND s.role <> 'owner' AND s.active)
+      + (SELECT count(*) FROM business.invitations i
+          WHERE i.business_id = $1 AND i.status = 'pending' AND i.expires_at > $2::timestamptz))::int AS seats
+`
+
+type CountStaffSeatsParams struct {
+	BusinessID uuid.UUID
+	Now        time.Time
+}
+
+// Seats in use: active managers and barbers, plus invitations that can
+// still be accepted. The owner doesn't take a seat.
+func (q *Queries) CountStaffSeats(ctx context.Context, arg CountStaffSeatsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countStaffSeats, arg.BusinessID, arg.Now)
+	var seats int32
+	err := row.Scan(&seats)
+	return seats, err
+}
+
 const countVerificationDocuments = `-- name: CountVerificationDocuments :one
 SELECT count(*) FROM business.verification_documents WHERE business_id = $1
 `
@@ -558,15 +579,15 @@ func (q *Queries) InvitationForUpdate(ctx context.Context, arg InvitationForUpda
 	return i, err
 }
 
-const lockBusinessForInvite = `-- name: LockBusinessForInvite :one
+const lockBusiness = `-- name: LockBusiness :one
 SELECT id FROM business.businesses WHERE id = $1 FOR NO KEY UPDATE
 `
 
-// Takes turns between invitations of one business, so two at once for the
-// same phone can't both be pending. NO KEY UPDATE doesn't block rows that
-// merely reference the business (branches, documents).
-func (q *Queries) LockBusinessForInvite(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, lockBusinessForInvite, id)
+// Takes turns between additions to one business (invitations, branches), so
+// two at once can't both pass a count check. NO KEY UPDATE doesn't block
+// rows that merely reference the business (their foreign-key checks).
+func (q *Queries) LockBusiness(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockBusiness, id)
 	var id_2 uuid.UUID
 	err := row.Scan(&id_2)
 	return id_2, err

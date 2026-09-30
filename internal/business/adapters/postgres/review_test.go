@@ -17,7 +17,7 @@ func makeReady(t *testing.T, store *postgres.Store, business shared.BusinessID) 
 	if err := store.Documents().Attach(t.Context(), newDoc(business, t0), allow); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Branches().Add(t.Context(), newBranch(t, business, false)); err != nil {
+	if err := store.Branches().Add(t.Context(), newBranch(t, business, false), allowAll); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -32,7 +32,7 @@ func submit(t *testing.T, store *postgres.Store, id shared.BusinessID, version i
 func TestStoreUpdateWithReadiness(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	id := registered(t, store, "1010123456")
 
 	var seen domain.Readiness
@@ -54,7 +54,7 @@ func TestStoreUpdateWithReadiness(t *testing.T) {
 func TestStoreReviewRoundTrip(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	id := registered(t, store, "1010123456")
 	makeReady(t, store, id)
 	admin := shared.NewID[shared.UserTag]()
@@ -80,7 +80,7 @@ func TestStoreReviewRoundTrip(t *testing.T) {
 func TestSubmitClaimsTheCRNumber(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	first, second := registered(t, store, "1010123456"), registered(t, store, "1010123456")
 	makeReady(t, store, first)
 	makeReady(t, store, second)
@@ -107,7 +107,7 @@ func TestSubmitClaimsTheCRNumber(t *testing.T) {
 func TestReviewPage(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	store := postgres.NewStore(migratedDB(t))
+	store := postgres.NewStore(migratedDB(t), discardEvents{})
 	var want []shared.BusinessID
 	for i, at := range []time.Time{t0, t0.Add(time.Minute), t0.Add(time.Minute), t0.Add(2 * time.Minute)} { // a tie in the middle
 		id := registered(t, store, "101000000"+string(rune('1'+i)))

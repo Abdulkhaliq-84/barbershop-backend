@@ -84,6 +84,10 @@ generate: ## Regenerate code from api/openapi.yaml (oapi-codegen) and SQL (sqlc)
 run: ## Run the API once
 	go run ./cmd/server api
 
+.PHONY: worker
+worker: ## Run the background worker (delivers events, e.g. starts trials on approval)
+	go run ./cmd/server worker
+
 .PHONY: dev
 dev: ## Run the API with live reload (air)
 	$(GOBIN)/air

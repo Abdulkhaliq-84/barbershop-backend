@@ -34,6 +34,14 @@ type Config struct {
 	Log      Log
 	Auth     Auth
 	Media    Media
+	Worker   Worker
+}
+
+// Worker configures the background worker role (outbox deliveries).
+type Worker struct {
+	// StopTimeout is how long running jobs get to finish on shutdown; jobs
+	// still running after it are cancelled and retried later.
+	StopTimeout time.Duration `env:"WORKER_SHUTDOWN_TIMEOUT" envDefault:"20s"`
 }
 
 // HTTP configures the HTTP server. The timeouts protect the server from slow
@@ -130,6 +138,7 @@ func (c Config) validate() error {
 		"HTTP_WRITE_TIMEOUT":       c.HTTP.WriteTimeout,
 		"HTTP_IDLE_TIMEOUT":        c.HTTP.IdleTimeout,
 		"HTTP_SHUTDOWN_TIMEOUT":    c.HTTP.ShutdownTimeout,
+		"WORKER_SHUTDOWN_TIMEOUT":  c.Worker.StopTimeout,
 	} {
 		if value <= 0 {
 			errs = append(errs, fmt.Errorf("%s must be positive", key))
