@@ -9,12 +9,23 @@ outbox is built, where plans and limits live, and how `business` checks them wit
 modules depending on each other in a circle.
 
 ## Decision
-- **One job per subscriber.**
-  - `outbox.Bus.PublishTx` inserts one River job per subscriber of each event, in the caller's
-    transaction. When a handler fails, River retries that handler alone (with backoff); the
-    other subscribers aren't run again.
-  - Events nobody subscribes to insert nothing. An event goes to the subscribers known when it
-    is published: a subscriber added later doesn't receive old events.
+- **One delivery job per subscriber.**
+  - When a handler fails, River retries that handler alone (with backoff); the other
+    subscribers aren't run again.
+  - *Changed after review (M4):* `outbox.Bus.PublishTx` inserts one `outbox_event` job per
+    event, in the caller's transaction. The worker fans it out: one `outbox_delivery` job per
+    subscriber, inserted in the same transaction that marks the event done
+    (`river.JobCompleteTx`).
+  - The fan-out uses the subscribers the publishing release knew (carried in the job) plus the
+    ones the worker's release knows. This matters while a release rolls out and the api and
+    worker run different versions:
+    - A new subscriber that only the api knows waits for a worker that has it. A worker that
+      doesn't know a subscriber snoozes the delivery (`river.JobSnooze`, which uses no attempts)
+      every minute for up to a day, then drops it with a warning (a removed subscriber).
+    - A new subscriber that only the worker knows gets events from older apis too.
+    - Before, fan-out happened at publish time and an unknown subscriber cancelled its job, so
+      either order of upgrading could silently lose an event.
+  - A subscriber added later doesn't receive events that were fanned out before it existed.
   - Subscriber names are stored in the jobs, so a name is never renamed.
   - Handlers must be idempotent (delivery is at least once). Billing's trial is an
     `INSERT … ON CONFLICT DO NOTHING`, and it counts from the approval time carried in the
@@ -36,8 +47,10 @@ modules depending on each other in a circle.
     the transaction that adds it.
   - Upgrading River never needs a hand-copied SQL file.
 - **A `worker` role.** `server worker` builds the same modules as `server api` and runs the
-  River client until SIGTERM. Running jobs get `WORKER_SHUTDOWN_TIMEOUT`, then they are
-  cancelled and retried later. The api role only inserts jobs.
+  River client until SIGTERM. Running jobs get `WORKER_SHUTDOWN_TIMEOUT` (River's
+  `SoftStopTimeout`), then they are cancelled and retried later. The api role only inserts jobs,
+  through a client that has no queues. If River stops by itself, the worker exits with an error
+  so the platform restarts it.
 - **Plans are reference data in code:**
   - `free`: 1 branch, 3 staff.
   - `pro`: 5 branches, 30 staff.
@@ -63,3 +76,6 @@ modules depending on each other in a circle.
 - Payments, paid plans and admin-assigned plans come later. Only `trialing` is stored so far.
 - Deployments run two processes from one image (`api`, `worker`). If the worker is down,
   approvals still succeed and trials start as soon as it is back.
+- A delivery that uses up River's 25 attempts (about three weeks of backoff) is discarded. A
+  reconciliation job (for example "approved, but no subscription") is still to come; until
+  then, discarded jobs stay visible in `river.river_job` for an operator.

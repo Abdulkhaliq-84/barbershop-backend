@@ -126,7 +126,7 @@ func TestPublishAndDeliver(t *testing.T) {
 	}
 	ignored, _ := outbox.NewEvent("test.nobody_listens", t0, greeting{})
 	publish(t, pool, bus, true, hello, ignored)
-	// One job per subscriber of each event; an event nobody listens to makes none.
+	// One job per event; the worker fans them out.
 	if n := jobs(t, pool); n != 2 {
 		t.Fatalf("jobs = %d, want 2", n)
 	}
@@ -147,6 +147,87 @@ func TestPublishAndDeliver(t *testing.T) {
 	if rec.count("c.other") != 0 {
 		t.Error("a subscriber got another type's event")
 	}
+	// Two events, two deliveries: every job ends completed.
+	eventually(t, "all jobs completed", func() bool { return countJobs(t, pool, "completed") == 4 })
+}
+
+func countJobs(t *testing.T, pool *pgxpool.Pool, state string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM river.river_job WHERE state = $1`, state).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func newBus(t *testing.T, pool *pgxpool.Pool, rec *recorder, subscribers ...string) *outbox.Bus {
+	t.Helper()
+	bus, err := outbox.New(pool, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range subscribers {
+		bus.Subscribe(name, "test.greeted", rec.handler(name, nil))
+	}
+	return bus
+}
+
+// While a release rolls out, the api and the worker run different versions.
+// A subscriber only the api knows waits for a worker that has it; one only
+// the worker knows gets the event too.
+func TestRollingReleases(t *testing.T) {
+	t.Parallel()
+	pool := migrated(t)
+	rec := &recorder{got: map[string][]outbox.Event{}}
+	newAPI := newBus(t, pool, rec, "billing", "discovery") // discovery is new
+	e, _ := outbox.NewEvent("test.greeted", t0, greeting{})
+	publish(t, pool, newAPI, true, e)
+
+	// The old worker delivers to billing, and holds discovery's delivery.
+	oldWorker := newBus(t, pool, rec, "billing")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- oldWorker.Run(ctx, 5*time.Second) }()
+	eventually(t, "billing's delivery, discovery's snoozed", func() bool {
+		return rec.count("billing") == 1 && countJobs(t, pool, "scheduled") == 1
+	})
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	// A minute later, the new worker is up.
+	if _, err := pool.Exec(t.Context(), `UPDATE river.river_job SET scheduled_at = now() WHERE state = 'scheduled'`); err != nil {
+		t.Fatal(err)
+	}
+	newWorker := newBus(t, pool, rec, "billing", "discovery", "search") // search: newer still
+	runWorker(t, newWorker)
+	eventually(t, "discovery's delivery", func() bool { return rec.count("discovery") == 1 })
+
+	// An old api's event reaches the new worker's new subscribers too
+	// (search only exists from this release on: this is its first event).
+	oldAPI := newBus(t, pool, rec, "billing")
+	e2, _ := outbox.NewEvent("test.greeted", t0, greeting{})
+	publish(t, pool, oldAPI, true, e2)
+	eventually(t, "everyone's delivery of the second event", func() bool {
+		return rec.count("billing") == 2 && rec.count("discovery") == 2 && rec.count("search") == 1
+	})
+}
+
+// A delivery for a subscriber no release has had for a day is dropped.
+func TestRemovedSubscriberIsDroppedAfterADay(t *testing.T) {
+	t.Parallel()
+	pool := migrated(t)
+	rec := &recorder{got: map[string][]outbox.Event{}}
+	oldAPI := newBus(t, pool, rec, "retired")
+	e, _ := outbox.NewEvent("test.greeted", t0, greeting{})
+	publish(t, pool, oldAPI, true, e)
+	runWorker(t, newBus(t, pool, rec))
+	eventually(t, "the snoozed delivery", func() bool { return countJobs(t, pool, "scheduled") == 1 })
+	if _, err := pool.Exec(t.Context(), `UPDATE river.river_job SET created_at = now() - interval '25 hours', scheduled_at = now() WHERE state = 'scheduled'`); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the delivery cancelled", func() bool { return countJobs(t, pool, "cancelled") == 1 })
 }
 
 func TestFailedDeliveryIsRetriedAlone(t *testing.T) {
@@ -175,7 +256,7 @@ func TestFailedDeliveryIsRetriedAlone(t *testing.T) {
 		t.Errorf("steady ran %d times, want 1", rec.count("steady"))
 	}
 	var attempts int
-	err = pool.QueryRow(t.Context(), `SELECT attempt FROM river.river_job WHERE args->>'handler' = 'flaky'`).Scan(&attempts)
+	err = pool.QueryRow(t.Context(), `SELECT attempt FROM river.river_job WHERE kind = 'outbox_delivery' AND args->>'handler' = 'flaky'`).Scan(&attempts)
 	if err != nil || attempts != 2 {
 		t.Errorf("attempts = %d, %v", attempts, err)
 	}
@@ -246,7 +327,7 @@ func TestRunFinishesRunningHandlersOnStop(t *testing.T) {
 		t.Fatal("the running handler was cancelled instead of allowed to finish")
 	}
 	var state string
-	if err := pool.QueryRow(t.Context(), `SELECT state FROM river.river_job`).Scan(&state); err != nil || state != "completed" {
+	if err := pool.QueryRow(t.Context(), `SELECT state FROM river.river_job WHERE kind = 'outbox_delivery'`).Scan(&state); err != nil || state != "completed" {
 		t.Errorf("job state = %q, %v; want completed", state, err)
 	}
 }
@@ -278,7 +359,7 @@ func TestRunCancelsHandlersAfterTheTimeout(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	var state string
-	if err := pool.QueryRow(t.Context(), `SELECT state FROM river.river_job`).Scan(&state); err != nil || state == "completed" {
+	if err := pool.QueryRow(t.Context(), `SELECT state FROM river.river_job WHERE kind = 'outbox_delivery'`).Scan(&state); err != nil || state == "completed" {
 		t.Errorf("job state = %q, %v; want it left for a retry", state, err)
 	}
 }
