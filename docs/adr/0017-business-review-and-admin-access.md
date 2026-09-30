@@ -15,7 +15,9 @@ platform-admin API and the first paginated list. The plan also scheduled the Riv
   - Removing the role takes effect when the token expires (≤ 15 minutes). A refresh after
     promotion carries the new role.
   - There is no API to create admins. An operator sets `iam.users.platform_role = 'admin'`.
-- **Nobody reviews their own business**, admin or not (`403`).
+- **Nobody reviews their own business**, admin or not (`403`). *Changed after review (M4):* nor a
+  business they work at or used to work at. Any staff record, active or not, makes an admin not
+  independent.
 - **Submission is checked under the business row lock.** The CR document and branch counts are
   read in the same transaction, and attaching a document takes the same lock. The CR number is
   claimed platform-wide by the partial unique index from ADR-0015. A clash returns

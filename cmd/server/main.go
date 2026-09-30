@@ -37,6 +37,8 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/logging"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling"
+	schedulinghttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/adapters/httpapi"
 )
 
 // version is stamped at build time by the Dockerfile and the Makefile:
@@ -62,6 +64,9 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	// everything below watches it to shut down cleanly.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// After the first signal, stop listening: a second Ctrl-C then kills the
+	// process the default way instead of waiting out the graceful shutdown.
+	context.AfterFunc(ctx, stop)
 
 	role := "api"
 	if len(args) > 0 {
@@ -78,7 +83,13 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	logger := logging.New(stdout, cfg.Log, cfg.Env)
 	logger.InfoContext(ctx, "starting", slog.String("role", role), slog.String("version", version))
 
-	pool, err := database.Open(ctx, cfg.Database)
+	dbCfg := cfg.Database
+	if role == "migrate" {
+		// Migrations may rewrite a table or wait for traffic to let go of
+		// one: no statement or lock limits, and they run one at a time.
+		dbCfg.StatementTimeout, dbCfg.LockTimeout, dbCfg.IdleInTxTimeout = 0, 0, 0
+	}
+	pool, err := database.Open(ctx, dbCfg)
 	if err != nil {
 		return err
 	}
@@ -92,6 +103,11 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := a.close(); err != nil {
+			logger.WarnContext(ctx, "closing the application", slog.String("error_type", fmt.Sprintf("%T", err)))
+		}
+	}()
 	if role == "worker" {
 		return a.bus.Run(ctx, cfg.Worker.StopTimeout)
 	}
@@ -105,17 +121,19 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 // Every module calls its type Handlers, and an embedded field is named after
 // its type, so two of them would clash; the aliases give each a distinct name.
 type (
-	iamAPI      = iamhttp.Handlers
-	businessAPI = businesshttp.Handlers
-	mediaAPI    = mediahttp.Handlers
-	catalogAPI  = cataloghttp.Handlers
+	iamAPI        = iamhttp.Handlers
+	businessAPI   = businesshttp.Handlers
+	mediaAPI      = mediahttp.Handlers
+	catalogAPI    = cataloghttp.Handlers
+	schedulingAPI = schedulinghttp.Handlers
 )
 
 type apiServer struct {
-	*iamAPI      // iam: /v1/auth/*, /v1/me
-	*businessAPI // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
-	*mediaAPI    // media: /v1/media/* (signed downloads)
-	*catalogAPI  // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
+	*iamAPI        // iam: /v1/auth/*, /v1/me
+	*businessAPI   // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
+	*mediaAPI      // media: /v1/media/* (signed downloads)
+	*catalogAPI    // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
+	*schedulingAPI // scheduling: /v1/businesses/{id}/branches/{id}/opening-hours
 }
 
 // application is every module, wired: the API for the api role, the outbox
@@ -123,6 +141,7 @@ type apiServer struct {
 type application struct {
 	handler http.Handler
 	bus     *outbox.Bus
+	close   func() error // releases what the modules hold open (the media directory)
 }
 
 // newApplication builds every module, subscribes them to each other's
@@ -156,14 +175,15 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus,
 	})
 	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
+	schedulingModule := scheduling.New(scheduling.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
 	subscribe(bus, billingModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP()}
+	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP()}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
-	return &application{handler: router, bus: bus}, nil
+	return &application{handler: router, bus: bus, close: mediaModule.Close}, nil
 }
 
 // subscribe wires who reacts to which event. Subscriber names are stored in

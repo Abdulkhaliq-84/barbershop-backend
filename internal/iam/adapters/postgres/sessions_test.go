@@ -13,6 +13,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -129,6 +130,7 @@ func TestSessionsParallelRefreshesTakeTurns(t *testing.T) {
 	repo, session, _ := startSession(t, pool)
 
 	const callers = 8 // dbtest pools hold 8 connections
+	queued := dbtest.OthersQueued(t, pool, callers-1)
 	warm := make([]*pgxpool.Conn, callers)
 	for i := range warm {
 		c, err := pool.Acquire(t.Context())
@@ -153,7 +155,7 @@ func TestSessionsParallelRefreshesTakeTurns(t *testing.T) {
 			err := repo.Rotate(t.Context(), hashOf("first"), func(s *domain.Session, tk *domain.RefreshToken) (*domain.RefreshToken, error) {
 				next, err := s.Rotate(tk, hashOf(fmt.Sprintf("next-%d", i)), t0.Add(time.Minute), domain.DefaultTokenPolicy())
 				refused = err
-				time.Sleep(20 * time.Millisecond) // hold the token a moment
+				queued() // every other rotation waits for this token
 				return next, nil
 			})
 			switch {

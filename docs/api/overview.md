@@ -119,7 +119,7 @@ Client flow (Flutter):
 | GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
 | GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner or a manager of that branch (M3.5) | manager |
 | POST | `…/branches/{branch_id}/publish` · `…/unpublish` | owner |
-| PUT | `…/branches/{branch_id}/opening-hours` | manager |
+| GET / PUT | `…/branches/{branch_id}/opening-hours` — live (M4.3): GET anyone working at the branch; PUT owner or a manager of the branch, `If-Match` (`0` the first time) | manager |
 | GET / POST / DELETE | `…/branches/{branch_id}/closures` | manager |
 | GET / POST / PATCH | `…/branches/{branch_id}/services[/{service_id}]` — live (M4.1): GET anyone working at the branch; POST/PATCH owner or a manager of the branch (`If-Match`); deactivate with `"active": false` | manager |
 | GET | `/v1/service-categories` — live (M4.1), public reference data | — |
@@ -128,8 +128,9 @@ Client flow (Flutter):
 | GET / POST | `/v1/businesses/{business_id}/staff/invitations` — live (M3.5): invite by phone, texts a 7-day link | owner |
 | DELETE | `/v1/businesses/{business_id}/staff/invitations/{invitation_id}` — live (M3.5): revoke | owner |
 | POST | `/v1/invitations/accept` `{token}` — live (M3.5): signed in with the invited phone; `404 invitation_invalid`, `409 already_staff` | invited user |
-| GET / PUT | `/v1/businesses/{business_id}/staff/{staff_id}/schedule` | manager / the barber |
-| GET / POST / DELETE | `/v1/businesses/{business_id}/staff/{staff_id}/time-off` | manager / the barber |
+| GET / PUT | `…/branches/{branch_id}/staff/{staff_id}/schedule` — live (M4.4): weekly template + date overrides; GET anyone at the branch; PUT the person, the owner or the branch's manager (`If-Match`, `0` first) | manager / the barber |
+| GET / POST / DELETE | `/v1/businesses/{business_id}/staff/{staff_id}/time-off[/{time_off_id}]` — live (M4.4): instants; `409 time_off_overlaps` | manager / the barber |
+| GET | `…/branches/{branch_id}/staff/{staff_id}/working-windows?from=&to=` — live (M4.5): when they can work (opening hours ∩ schedule − time off), UTC instants, at most 62 days (`422` beyond) | anyone at the branch |
 | GET | `…/branches/{branch_id}/day?date=` — per-barber timeline + KPIs (dashboard) | barber (own) / manager |
 | POST | `…/branches/{branch_id}/appointments` — staff booking / walk-in | barber |
 | POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` | barber (own) / manager |

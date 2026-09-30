@@ -29,7 +29,9 @@ func Serve(ctx context.Context, srv *http.Server, ln net.Listener, shutdownTimeo
 	case <-ctx.Done():
 	}
 
-	logger.InfoContext(ctx, "shutting down http server", slog.Duration("timeout", shutdownTimeout))
+	// With signal.NotifyContext, the cause names the signal ("interrupt
+	// signal received").
+	logger.InfoContext(ctx, "shutting down http server", slog.Duration("timeout", shutdownTimeout), slog.String("reason", context.Cause(ctx).Error()))
 
 	// ctx is already cancelled; derive a fresh deadline that keeps its values.
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)

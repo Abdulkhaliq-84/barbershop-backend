@@ -15,6 +15,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -61,12 +62,18 @@ func hashOf(token string) []byte {
 
 func (s staffSetup) invitation(t *testing.T, phone, token string, branches ...shared.BranchID) *domain.Invitation {
 	t.Helper()
+	return s.invitationAt(t, t0, s.business, phone, token, branches...)
+}
+
+// invitationAt is an invitation from business, sent at.
+func (s staffSetup) invitationAt(t *testing.T, at time.Time, business shared.BusinessID, phone, token string, branches ...shared.BranchID) *domain.Invitation {
+	t.Helper()
 	p, err := shared.NewPhoneNumber(phone)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inv, err := domain.NewInvitation(shared.NewID[domain.InvitationTag](), s.business,
-		domain.StaffInvite{Phone: p, Name: "أحمد", Role: domain.RoleBarber, Branches: branches}, hashOf(token), s.owner, t0)
+	inv, err := domain.NewInvitation(shared.NewID[domain.InvitationTag](), business,
+		domain.StaffInvite{Phone: p, Name: "أحمد", Role: domain.RoleBarber, Branches: branches}, hashOf(token), s.owner, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +153,8 @@ func TestInvitationStoreScopingAndResend(t *testing.T) {
 	if err := invs.Invite(ctx, first, allowAll); err != nil {
 		t.Fatal(err)
 	}
-	// Invite the same phone again: the first is revoked.
-	second := s.invitation(t, "+966551234567", "inv_second", s.b)
+	// Invite the same phone again (after the cooldown): the first is revoked.
+	second := s.invitationAt(t, t0.Add(domain.InviteCooldown), s.business, "+966551234567", "inv_second", s.b)
 	if err := invs.Invite(ctx, second, allowAll); err != nil {
 		t.Fatal(err)
 	}
@@ -193,8 +200,10 @@ func TestInvitationStoreParallelInvites(t *testing.T) {
 	for i := range 4 {
 		wg.Go(func() {
 			<-start
-			inv := s.invitation(t, "0551234567", "inv_"+strconv.Itoa(i), s.a)
-			if err := s.store.Invitations().Invite(t.Context(), inv, allowAll); err != nil {
+			// A minute apart, so the cooldown lets any order through: the
+			// race is between revoking the open one and inserting.
+			inv := s.invitationAt(t, t0.Add(time.Duration(i)*time.Minute), s.business, "0551234567", "inv_"+strconv.Itoa(i), s.a)
+			if err := s.store.Invitations().Invite(t.Context(), inv, allowAll); err != nil && !errors.Is(err, domain.ErrTooManyInvitations) {
 				t.Errorf("Invite: %v", err)
 			}
 		})
@@ -213,6 +222,7 @@ func TestInvitationStoreParallelAccepts(t *testing.T) {
 		t.Fatal(err)
 	}
 	user := shared.NewID[shared.UserTag]()
+	queued := dbtest.OthersQueued(t, s.pool, 1)
 	var (
 		wg              sync.WaitGroup
 		start           = make(chan struct{})
@@ -222,7 +232,7 @@ func TestInvitationStoreParallelAccepts(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			err := s.store.Invitations().Accept(t.Context(), hashOf("inv_tap"), func(inv *domain.Invitation) (*domain.StaffMember, error) {
-				time.Sleep(20 * time.Millisecond) // overlap the two transactions
+				queued() // the other tap waits for this invitation
 				return inv.Accept(shared.NewID[shared.StaffTag](), user, t0.Add(time.Hour))
 			})
 			switch {

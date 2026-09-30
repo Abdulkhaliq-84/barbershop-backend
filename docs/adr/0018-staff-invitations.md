@@ -43,7 +43,9 @@ roles.
 - **Branch-scoped authorization.**
   - `StaffMember.AuthorizeBranch(role, branch)` is the role check plus "works at this branch".
     The owner works at every branch.
-  - Editing a branch now needs a manager of that branch, or the owner.
+  - Editing a branch now needs a manager of that branch, or the owner. Only the owner changes a
+    branch's time zone (*changed after review, M4*): opening hours and schedules are wall-clock
+    times in it, so all of them move with it.
   - Creating branches, inviting, and reading or editing the business stay owner-only.
   - Listing the team is for managers and up.
 - **Delivery.** The SMS is sent after the transaction commits, so a failed save never texts a
@@ -52,6 +54,15 @@ roles.
   - In development the link is written to the log by the same `SMS_PROVIDER=console` mode as
     login codes, with the phone masked. The config refuses that mode in production.
   - Real SMS arrives with notifications (M7). Retries arrive with the outbox (M3.6).
+- **Sending limits** (*changed after review, M4*). Every invitation is a paid SMS to someone who
+  didn't ask for it, and drafts may invite, so without limits one account could text a stranger
+  without end (SMS pumping, harassment).
+  - One a minute to a phone from a business; 5 a day to a phone from all businesses together;
+    50 a day from a business. Over a limit: `429 rate_limited` with `Retry-After`.
+  - They are checked in the invite transaction, under the business lock and an advisory lock on
+    the phone, so parallel invites from different businesses can't all get through.
+  - A user has at most 3 businesses not yet approved (`409 registration_limit_reached`), so
+    fresh drafts don't multiply the per-business limit.
 
 ## Consequences
 - Inviting a number that already works at the business only fails when it is accepted

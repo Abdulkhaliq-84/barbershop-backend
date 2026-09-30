@@ -186,3 +186,61 @@ type MediaObject struct {
 	CreatedBy   uuid.UUID
 	CreatedAt   time.Time
 }
+
+type SchedulingBarberHour struct {
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	StaffID         uuid.UUID
+	Weekday         int16
+	StartMinute     int16
+	DurationMinutes int16
+}
+
+type SchedulingBarberSchedule struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+	Version    int32
+	UpdatedAt  time.Time
+}
+
+type SchedulingBranchCalendar struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	Version    int32
+	UpdatedAt  time.Time
+}
+
+type SchedulingOpeningHour struct {
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	Weekday         int16
+	StartMinute     int16
+	DurationMinutes int16
+}
+
+type SchedulingOverrideHour struct {
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	StaffID         uuid.UUID
+	OnDate          pgtype.Date
+	StartMinute     int16
+	DurationMinutes int16
+}
+
+type SchedulingScheduleOverride struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+	OnDate     pgtype.Date
+}
+
+type SchedulingTimeOff struct {
+	ID         uuid.UUID
+	BusinessID uuid.UUID
+	StaffID    uuid.UUID
+	StartsAt   time.Time
+	EndsAt     time.Time
+	Reason     string
+	CreatedAt  time.Time
+}

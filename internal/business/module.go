@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -82,6 +83,43 @@ func (m *Module) AuthorizeBranch(ctx context.Context, actor shared.UserID, busin
 	return m.access.Branch(ctx, actor, business, branch, role)
 }
 
+// StaffInfo is a staff member as other modules see them.
+type StaffInfo struct {
+	ID       shared.StaffID
+	Role     string            // RoleOwner, RoleManager or RoleBarber
+	Branches []shared.BranchID // empty for the owner, who works at every branch
+}
+
+// WorksAt reports whether the member works at branch.
+func (s StaffInfo) WorksAt(branch shared.BranchID) bool {
+	return s.Role == RoleOwner || slices.Contains(s.Branches, branch)
+}
+
+// MemberOf returns actor's own active membership of business: who "me" is
+// in that business. ErrNotFound if actor isn't active staff there.
+func (m *Module) MemberOf(ctx context.Context, actor shared.UserID, business shared.BusinessID) (StaffInfo, error) {
+	member, err := m.access.MemberOf(ctx, actor, business)
+	return toStaffInfo(member), err
+}
+
+// StaffMember returns an active staff member of business, or ErrNotFound.
+// Callers have already authorized the actor.
+func (m *Module) StaffMember(ctx context.Context, business shared.BusinessID, staff shared.StaffID) (StaffInfo, error) {
+	member, err := m.access.StaffMember(ctx, business, staff)
+	return toStaffInfo(member), err
+}
+
+func toStaffInfo(m app.Member) StaffInfo {
+	return StaffInfo{ID: m.ID, Role: string(m.Role), Branches: m.Branches}
+}
+
+// BranchLocation returns the branch's time zone (its opening hours and
+// schedules are wall-clock times there). ErrNotFound if the branch isn't
+// the business's.
+func (m *Module) BranchLocation(ctx context.Context, business shared.BusinessID, branch shared.BranchID) (*time.Location, error) {
+	return m.access.BranchLocation(ctx, business, branch)
+}
+
 // StaffAtBranch checks that every staff ID is active staff of business
 // working at branch (the owner works at all of them); ErrNotFound if not.
 // Callers have already authorized the actor with AuthorizeBranch.
@@ -105,9 +143,9 @@ func New(d Deps) *Module {
 			Get:       app.NewGetBusinessHandler(store, store),
 			Update:    app.NewUpdateBusinessHandler(store, store, d.Clock),
 			Branches:  app.NewBranchHandlers(store.Branches(), store, plans, d.Clock),
-			Documents: app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock),
+			Documents: app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock, d.Logger),
 			Submit:    app.NewSubmitHandler(store, store, d.Clock),
-			Review:    app.NewReviewHandlers(store, store.Documents(), store.Branches(), store, files, d.Clock),
+			Review:    app.NewReviewHandlers(store, store, store.Documents(), store.Branches(), store, files, d.Clock),
 			Staff: app.NewStaffHandlers(app.StaffDeps{
 				Businesses: store, Staff: store, Invitations: store.Invitations(), Users: acl.NewIAMUsers(d.Users),
 				Plans: plans, Tokens: invites.Tokens{}, Sender: sender, Clock: d.Clock,

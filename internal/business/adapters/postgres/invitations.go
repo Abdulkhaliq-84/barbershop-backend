@@ -24,9 +24,10 @@ type InvitationStore struct {
 // Invitations returns the invitation repository.
 func (s *Store) Invitations() *InvitationStore { return &InvitationStore{store: s} }
 
-// Invite checks the branches belong to the business, revokes any other
-// pending invitation for the phone, and saves inv — one transaction, under
-// a lock on the business so parallel invites take turns.
+// Invite checks the branches belong to the business and the sending limits,
+// revokes any other pending invitation for the phone, and saves inv — one
+// transaction, under a lock on the business (and one on the phone) so
+// parallel invites take turns.
 func (r *InvitationStore) Invite(ctx context.Context, inv *domain.Invitation, allow func(seats int) error) error {
 	ids := make([]uuid.UUID, 0, len(inv.Branches()))
 	for _, b := range inv.Branches() {
@@ -43,6 +44,24 @@ func (r *InvitationStore) Invite(ctx context.Context, inv *domain.Invitation, al
 		}
 		if int(n) != len(ids) {
 			return domain.ErrUnknownBranch
+		}
+		// Every invitation is an SMS: the limits come first, under a lock on
+		// the phone as well, since other businesses may be inviting it too.
+		if err := q.AdvisoryLock(ctx, "business.invite:"+inv.Phone().String()); err != nil {
+			return fmt.Errorf("lock phone: %w", err)
+		}
+		h, err := q.InviteHistory(ctx, sqlcgen.InviteHistoryParams{
+			BusinessID: inv.BusinessID().UUID(), Phone: inv.Phone().String(), Since: inv.CreatedAt().Add(-domain.InviteWindow),
+		})
+		if err != nil {
+			return fmt.Errorf("invitation history: %w", err)
+		}
+		history := domain.InviteHistory{
+			LastToPhone: h.LastToPhone, ToPhone: int(h.ToPhone), OldestToPhone: h.OldestToPhone,
+			ByBusiness: int(h.ByBusiness), OldestBusiness: h.OldestByBusiness,
+		}
+		if err := history.AllowInvite(inv.CreatedAt()); err != nil {
+			return err
 		}
 		if err := q.RevokePendingInvitations(ctx, sqlcgen.RevokePendingInvitationsParams{BusinessID: inv.BusinessID().UUID(), Phone: inv.Phone().String()}); err != nil {
 			return fmt.Errorf("revoke older invitation: %w", err)
@@ -138,8 +157,7 @@ func (r *InvitationStore) Accept(ctx context.Context, tokenHash []byte, fn func(
 		}
 		return insertStaff(ctx, q, member)
 	})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "staff_members_user_business_key" {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "staff_members_user_business_key" {
 		return domain.ErrAlreadyStaff
 	}
 	return err
@@ -148,8 +166,7 @@ func (r *InvitationStore) Accept(ctx context.Context, tokenHash []byte, fn func(
 func saveInvitation(ctx context.Context, q *sqlcgen.Queries, inv *domain.Invitation) error {
 	var by *uuid.UUID
 	if !inv.AcceptedBy().IsZero() {
-		u := inv.AcceptedBy().UUID()
-		by = &u
+		by = new(inv.AcceptedBy().UUID())
 	}
 	if err := q.SaveInvitation(ctx, sqlcgen.SaveInvitationParams{
 		Status: string(inv.Status()), AcceptedAt: inv.AcceptedAt(), AcceptedBy: by, ID: inv.ID().UUID(),

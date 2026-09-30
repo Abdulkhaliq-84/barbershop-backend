@@ -76,6 +76,12 @@ func TestStaffAtBranch(t *testing.T) {
 	f.store.addStaff(f.business, barber, domain.RoleBarber, true, mine.ID())
 	f.store.addStaff(f.business, elsewhere, domain.RoleBarber, true, other.ID())
 	f.store.addStaff(f.business, former, domain.RoleBarber, false, mine.ID())
+	elsewhereBiz := newBranchFixture(t)
+	foreign, err := elsewhereBiz.branches.Create(ctx, createCmd(elsewhereBiz.owner, elsewhereBiz.business))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.branchStore.branches = append(f.branchStore.branches, elsewhereBiz.branchStore.branches...)
 	staffID := func(user shared.UserID) shared.StaffID {
 		t.Helper()
 		m, err := f.store.Membership(ctx, f.business, user)
@@ -92,6 +98,12 @@ func TestStaffAtBranch(t *testing.T) {
 	}
 	if err := access.StaffAtBranch(ctx, f.business, mine.ID(), nil); err != nil {
 		t.Errorf("nobody: %v", err)
+	}
+	// The owner "works at" every branch — but only their own business's.
+	for name, branch := range map[string]shared.BranchID{"another business's branch": foreign.ID(), "made-up branch": shared.NewID[shared.BranchTag]()} {
+		if err := access.StaffAtBranch(ctx, f.business, branch, []shared.StaffID{staffID(f.owner)}); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("%s: error = %v, want ErrNotFound", name, err)
+		}
 	}
 	for name, id := range map[string]shared.StaffID{
 		"barber of another branch": staffID(elsewhere),

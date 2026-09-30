@@ -110,8 +110,7 @@ func (c *OTPChallenge) Verify(guessHash []byte, now time.Time, maxAttempts int) 
 		}
 		return ErrOTPInvalid
 	}
-	consumed := now
-	c.consumedAt = &consumed
+	c.consumedAt = new(now)
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
@@ -54,11 +55,12 @@ type DocumentHandlers struct {
 	staff      domain.Staff
 	files      DocumentFiles
 	clock      clock.Clock
+	logger     *slog.Logger
 }
 
 // NewDocumentHandlers wires the use cases.
-func NewDocumentHandlers(businesses domain.Businesses, documents domain.VerificationDocuments, staff domain.Staff, files DocumentFiles, clk clock.Clock) *DocumentHandlers {
-	return &DocumentHandlers{businesses: businesses, documents: documents, staff: staff, files: files, clock: clk}
+func NewDocumentHandlers(businesses domain.Businesses, documents domain.VerificationDocuments, staff domain.Staff, files DocumentFiles, clk clock.Clock, logger *slog.Logger) *DocumentHandlers {
+	return &DocumentHandlers{businesses: businesses, documents: documents, staff: staff, files: files, clock: clk, logger: logger}
 }
 
 // Upload stores the file, then attaches it to the business.
@@ -96,7 +98,7 @@ func (h *DocumentHandlers) Upload(ctx context.Context, cmd UploadDocument) (Docu
 		return b.CanAttachDocument(existing)
 	})
 	if err != nil {
-		h.discard(file.ID)
+		h.discard(ctx, file.ID)
 		return DocumentView{}, fmt.Errorf("upload document: %w", err)
 	}
 	return h.view(doc), nil
@@ -124,9 +126,13 @@ func (h *DocumentHandlers) view(d *domain.VerificationDocument) DocumentView {
 	return DocumentView{Document: d, DownloadURL: url, Expires: expires}
 }
 
-// discard removes an unused file, even if the request was cancelled.
-func (h *DocumentHandlers) discard(id shared.MediaID) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// discard removes an unused file, even if the request was cancelled (it
+// keeps the request's values, for the log line).
+func (h *DocumentHandlers) discard(ctx context.Context, id shared.MediaID) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	_ = h.files.Discard(ctx, id) // best effort: an orphan file is never linked to anyone
+	if err := h.files.Discard(ctx, id); err != nil {
+		// Harmless — nothing links to it — but worth a sweep.
+		h.logger.WarnContext(ctx, "business: unattached document left in media", slog.String("media_id", id.String()), slog.String("error_type", fmt.Sprintf("%T", err)))
+	}
 }

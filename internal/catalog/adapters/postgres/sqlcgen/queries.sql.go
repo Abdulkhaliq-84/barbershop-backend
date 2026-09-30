@@ -274,7 +274,7 @@ UPDATE catalog.services SET
     description_ar = $4, description_en = $5,
     duration_minutes = $6, price_amount = $7, price_currency = $8,
     active = $9, sort_order = $10, version = $11, updated_at = $12
-WHERE id = $13 AND version = $14
+WHERE business_id = $13 AND branch_id = $14 AND id = $15 AND version = $16
 `
 
 type UpdateServiceParams struct {
@@ -290,6 +290,8 @@ type UpdateServiceParams struct {
 	SortOrder       int16
 	Version         int32
 	UpdatedAt       time.Time
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
 	ID              uuid.UUID
 	ExpectedVersion int32
 }
@@ -308,6 +310,8 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (i
 		arg.SortOrder,
 		arg.Version,
 		arg.UpdatedAt,
+		arg.BusinessID,
+		arg.BranchID,
 		arg.ID,
 		arg.ExpectedVersion,
 	)

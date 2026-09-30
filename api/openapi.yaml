@@ -30,6 +30,8 @@ tags:
     description: Business mode — a business's team, and inviting people to it
   - name: services
     description: What a branch sells — its service menu, with prices and durations
+  - name: scheduling
+    description: When work can happen — branch opening hours, barber schedules, time off
   - name: media
     description: Stored files, served through short-lived signed links
   - name: admin
@@ -197,6 +199,8 @@ paths:
         Creates a business in `draft` status with the caller as its owner.
         A draft is private to its staff; customers see nothing until the
         platform approves it (submission and review arrive later in M3).
+        A user has at most 3 businesses not yet approved (draft, under
+        review or rejected): `409 registration_limit_reached`.
 
         The CR number (Saudi Commercial Registration, 10 digits) is checked
         for format only. It is claimed — made unique across the platform —
@@ -354,6 +358,9 @@ paths:
 
         The owner may edit every branch; a manager only the branches they
         work at (`403 forbidden` for the others). Barbers can't edit.
+        Only the owner changes `timezone` (`403 forbidden` for a manager):
+        opening hours and schedules are wall-clock times in it, so they all
+        move with it.
       parameters:
         - $ref: "#/components/parameters/IfMatchVersion"
       requestBody:
@@ -451,6 +458,10 @@ paths:
         (the old link stops working) — that is how to resend one. Every
         branch in `branch_ids` must belong to the business
         (`422 validation_failed` otherwise).
+
+        Each invitation is an SMS, so they are limited: one a minute to a
+        phone from a business, 5 a day to a phone from all businesses, 50 a
+        day from a business (`429 rate_limited`, with `Retry-After`).
       requestBody:
         required: true
         content:
@@ -635,6 +646,207 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Service"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/opening-hours:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: getOpeningHours
+      tags: [scheduling]
+      summary: The branch's weekly opening hours (anyone working at the branch)
+      description: |
+        All seven days, Sunday first; a day with no intervals is closed. Times
+        are the branch's local wall-clock time. A branch that never set its
+        hours is closed all week, with `version` 0.
+      responses:
+        "200":
+          description: The opening hours
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningHours"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setOpeningHours
+      tags: [scheduling]
+      summary: Set the weekly opening hours (owner, or a manager of the branch)
+      description: |
+        Replaces the whole week. Times are `HH:MM` on 5-minute steps, in the
+        branch's local time. A `closes` at or before `opens` is on the next
+        day: Thursday `16:00`–`02:00` is one ten-hour shift that belongs to
+        Thursday. `00:00`–`00:00` (or `00:00`–`24:00`) is all day. At most
+        4 intervals start on one day, and none may overlap — including a
+        Saturday-night shift running into Sunday (`422 validation_failed`).
+
+        `If-Match` carries the `version` you last read: `0` the first time.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpeningHoursUpdate"
+      responses:
+        "200":
+          description: The saved opening hours
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningHours"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+      - $ref: "#/components/parameters/StaffID"
+    get:
+      operationId: getBarberSchedule
+      tags: [scheduling]
+      summary: A staff member's schedule at a branch (anyone working at the branch)
+      description: |
+        The weekly template (all seven days, Sunday first) and the date
+        overrides. A schedule never set is empty, with `version` 0. Someone
+        who doesn't work at the branch gets `404 not_found`.
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarberSchedule"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setBarberSchedule
+      tags: [scheduling]
+      summary: Set a staff member's schedule at a branch (the person, the owner or a manager of the branch)
+      description: |
+        Replaces the weekly template and every date override. Times follow
+        the opening-hours rules (branch-local, 5-minute steps, a `closes` at
+        or before `opens` is the next day). An override replaces the
+        intervals that start on its date; with no intervals it is a day off.
+        The template may not overlap the same person's template at another
+        branch (`422 validation_failed`): nobody works in two shops at once.
+
+        `If-Match` carries the `version` you last read: `0` the first time.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BarberScheduleUpdate"
+      responses:
+        "200":
+          description: The saved schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarberSchedule"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/working-windows:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+      - $ref: "#/components/parameters/StaffID"
+    get:
+      operationId: getWorkingWindows
+      tags: [scheduling]
+      summary: When a staff member can work at a branch (anyone working at the branch)
+      description: |
+        The branch's opening hours ∩ the person's schedule (overrides
+        included), minus their time off — as real instants within
+        [`from`, `to`), sorted and merged. A shift that started the night
+        before `from` is included from `from`. This is the calculation
+        booking uses before offering slots. At most 62 days per query.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          example: "2026-10-01T00:00:00+03:00"
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          example: "2026-10-08T00:00:00+03:00"
+      responses:
+        "200":
+          description: The windows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkingWindows"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/staff/{staff_id}/time-off:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/StaffID"
+    get:
+      operationId: listTimeOff
+      tags: [scheduling]
+      summary: A staff member's upcoming time off (the person, the owner or a manager of one of their branches)
+      description: Time off that hasn't ended yet, earliest first.
+      responses:
+        "200":
+          description: The time off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeOffList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: addTimeOff
+      tags: [scheduling]
+      summary: Record time off (the person, the owner or a manager of one of their branches)
+      description: |
+        Real instants, at every branch the person works at. At most a year
+        long. Overlapping existing time off gets `409 time_off_overlaps`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TimeOffCreate"
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeOff"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/staff/{staff_id}/time-off/{time_off_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/StaffID"
+      - $ref: "#/components/parameters/TimeOffID"
+    delete:
+      operationId: deleteTimeOff
+      tags: [scheduling]
+      summary: Remove time off (the person, the owner or a manager of one of their branches)
+      responses:
+        "204":
+          description: Removed
         default:
           $ref: "#/components/responses/Problem"
 
@@ -838,7 +1050,10 @@ paths:
       operationId: approveBusiness
       tags: [admin]
       summary: Approve a business under review (platform admins)
-      description: "`pending_review` → `active`. Anything else: `409 invalid_state_transition`."
+      description: |
+        `pending_review` → `active`. Anything else: `409 invalid_state_transition`.
+        An admin who owns, works at or used to work at the business can't
+        decide on it (`403 forbidden`).
       parameters:
         - $ref: "#/components/parameters/IfMatchVersion"
       responses:
@@ -921,6 +1136,22 @@ components:
         type: string
         format: uuid
 
+    StaffID:
+      name: staff_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    TimeOffID:
+      name: time_off_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
     InvitationID:
       name: invitation_id
       in: path
@@ -983,7 +1214,8 @@ components:
             `version_conflict`, `unsupported_media_type`, `payload_too_large`,
             `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
             `branch_required`, `cr_number_taken`, `invitation_invalid`,
-            `invitation_closed`, `already_staff`, `plan_limit_reached`.
+            `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`,
+            `registration_limit_reached`.
           example: otp_cooldown
         detail:
           type: string
@@ -1835,3 +2067,200 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Service"
+
+    Weekday:
+      type: string
+      enum: [sunday, monday, tuesday, wednesday, thursday, friday, saturday]
+
+    TimeRange:
+      type: object
+      additionalProperties: false
+      required: [opens, closes]
+      properties:
+        opens:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][05]$'
+          example: "16:00"
+        closes:
+          type: string
+          pattern: '^(([01][0-9]|2[0-3]):[0-5][05]|24:00)$'
+          description: At or before `opens` means the next day.
+          example: "02:00"
+
+    DayHours:
+      type: object
+      additionalProperties: false
+      required: [weekday, intervals]
+      properties:
+        weekday:
+          $ref: "#/components/schemas/Weekday"
+        intervals:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/TimeRange"
+
+    OpeningHoursUpdate:
+      type: object
+      additionalProperties: false
+      required: [days]
+      properties:
+        days:
+          type: array
+          maxItems: 7
+          description: Days left out are closed.
+          items:
+            $ref: "#/components/schemas/DayHours"
+
+    OpeningHours:
+      type: object
+      required: [days, version]
+      properties:
+        days:
+          type: array
+          description: All seven days, Sunday first.
+          items:
+            $ref: "#/components/schemas/DayHours"
+        version:
+          type: integer
+          description: 0 until the hours are first set; send it as `If-Match`.
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    DateHours:
+      type: object
+      additionalProperties: false
+      required: [date, intervals]
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2026-10-08"
+        intervals:
+          type: array
+          maxItems: 4
+          description: Empty for a day off.
+          items:
+            $ref: "#/components/schemas/TimeRange"
+
+    BarberScheduleUpdate:
+      type: object
+      additionalProperties: false
+      required: [weekly]
+      properties:
+        weekly:
+          type: array
+          maxItems: 7
+          description: Days left out are days off.
+          items:
+            $ref: "#/components/schemas/DayHours"
+        overrides:
+          type: array
+          maxItems: 400
+          items:
+            $ref: "#/components/schemas/DateHours"
+
+    BarberSchedule:
+      type: object
+      required: [staff_id, branch_id, weekly, overrides, version]
+      properties:
+        staff_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        weekly:
+          type: array
+          description: All seven days, Sunday first.
+          items:
+            $ref: "#/components/schemas/DayHours"
+        overrides:
+          type: array
+          description: By date.
+          items:
+            $ref: "#/components/schemas/DateHours"
+        version:
+          type: integer
+          description: 0 until first set; send it as `If-Match`.
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    TimeOffCreate:
+      type: object
+      additionalProperties: false
+      required: [starts_at, ends_at]
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          example: "2026-10-05T10:00:00+03:00"
+        ends_at:
+          type: string
+          format: date-time
+          example: "2026-10-05T12:00:00+03:00"
+        reason:
+          type: string
+          maxLength: 200
+
+    TimeOff:
+      type: object
+      required: [id, staff_id, starts_at, ends_at, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        staff_id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TimeOffList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeOff"
+
+    TimeWindow:
+      type: object
+      required: [starts_at, ends_at]
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+
+    WorkingWindows:
+      type: object
+      required: [staff_id, time_zone, data]
+      properties:
+        staff_id:
+          type: string
+          format: uuid
+        time_zone:
+          type: string
+          description: The branch's time zone, for showing the windows in local time.
+          example: Asia/Riyadh
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeWindow"

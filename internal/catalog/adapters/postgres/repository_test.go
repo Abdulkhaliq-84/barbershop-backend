@@ -131,7 +131,9 @@ func TestUpdateAndVersion(t *testing.T) {
 
 func TestParallelUpdatesOfTheSameVersion(t *testing.T) {
 	t.Parallel()
-	repo := postgres.NewServices(migrated(t))
+	pool := migrated(t)
+	repo := postgres.NewServices(pool)
+	queued := dbtest.OthersQueued(t, pool, 1)
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 	s := newService(t, business, branch, 0, t0)
 	if err := repo.Add(t.Context(), s); err != nil {
@@ -146,7 +148,7 @@ func TestParallelUpdatesOfTheSameVersion(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			err := repo.Update(t.Context(), business, branch, s.ID(), 1, func(svc *domain.Service) error {
-				time.Sleep(20 * time.Millisecond) // overlap the transactions
+				queued() // the other update waits for this lock
 				d := svc.Details()
 				d.Price = shared.Halalas(int64(1000 * (i + 1)))
 				return svc.Edit(d, true, t0)

@@ -9,6 +9,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -16,7 +17,7 @@ import (
 func (h *Handlers) InviteStaff(ctx context.Context, req apigen.InviteStaffRequestObject) (apigen.InviteStaffResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.InviteStaffdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	body := req.Body
@@ -43,7 +44,7 @@ func (h *Handlers) InviteStaff(ctx context.Context, req apigen.InviteStaffReques
 func (h *Handlers) ListStaffInvitations(ctx context.Context, req apigen.ListStaffInvitationsRequestObject) (apigen.ListStaffInvitationsResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.ListStaffInvitationsdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	invs, err := h.uc.Staff.ListInvitations(ctx, p.UserID, shared.IDFromUUID[shared.BusinessTag](req.BusinessId))
@@ -62,7 +63,7 @@ func (h *Handlers) ListStaffInvitations(ctx context.Context, req apigen.ListStaf
 func (h *Handlers) RevokeStaffInvitation(ctx context.Context, req apigen.RevokeStaffInvitationRequestObject) (apigen.RevokeStaffInvitationResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.RevokeStaffInvitationdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	err := h.uc.Staff.Revoke(ctx, app.InvitationQuery{
@@ -81,7 +82,7 @@ func (h *Handlers) RevokeStaffInvitation(ctx context.Context, req apigen.RevokeS
 func (h *Handlers) ListStaff(ctx context.Context, req apigen.ListStaffRequestObject) (apigen.ListStaffResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.ListStaffdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	members, err := h.uc.Staff.ListStaff(ctx, p.UserID, shared.IDFromUUID[shared.BusinessTag](req.BusinessId))
@@ -107,7 +108,7 @@ func (h *Handlers) ListStaff(ctx context.Context, req apigen.ListStaffRequestObj
 func (h *Handlers) AcceptStaffInvitation(ctx context.Context, req apigen.AcceptStaffInvitationRequestObject) (apigen.AcceptStaffInvitationResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.AcceptStaffInvitationdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	v, err := h.uc.Staff.Accept(ctx, p.UserID, req.Body.Token)

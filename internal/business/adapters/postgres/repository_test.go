@@ -295,6 +295,7 @@ func TestStoreParallelUpdatesOfTheSameVersion(t *testing.T) {
 	if err := store.Register(t.Context(), b, m); err != nil {
 		t.Fatal(err)
 	}
+	queued := dbtest.OthersQueued(t, pool, 1)
 
 	var (
 		wg               sync.WaitGroup
@@ -305,7 +306,7 @@ func TestStoreParallelUpdatesOfTheSameVersion(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			err := store.Update(t.Context(), b.ID(), 1, func(b *domain.Business) error {
-				time.Sleep(20 * time.Millisecond) // hold the row a moment, so the calls overlap
+				queued() // the other call waits for this row
 				return b.Rename(b.DisplayName(), []string{"مؤسسة أ", "مؤسسة ب"}[i], t0)
 			})
 			switch {

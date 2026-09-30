@@ -13,6 +13,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -24,9 +25,9 @@ func (h *Handlers) SubmitBusiness(ctx context.Context, req apigen.SubmitBusiness
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 1)
 	if err != nil {
 		return fail(err)
 	}
@@ -69,8 +70,7 @@ func (h *Handlers) ListBusinessesForReview(ctx context.Context, req apigen.ListB
 		out.Data = append(out.Data, toAPIAdminBusiness(b))
 	}
 	if next != nil {
-		c := encodeCursor(*next)
-		out.NextCursor = &c
+		out.NextCursor = new(encodeCursor(*next))
 	}
 	return out, nil
 }
@@ -113,7 +113,7 @@ func (h *Handlers) ApproveBusiness(ctx context.Context, req apigen.ApproveBusine
 	if err != nil {
 		return fail(err)
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 1)
 	if err != nil {
 		return fail(err)
 	}
@@ -134,7 +134,7 @@ func (h *Handlers) RejectBusiness(ctx context.Context, req apigen.RejectBusiness
 	if err != nil {
 		return fail(err)
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 1)
 	if err != nil {
 		return fail(err)
 	}
@@ -150,7 +150,7 @@ func (h *Handlers) RejectBusiness(ctx context.Context, req apigen.RejectBusiness
 func adminFrom(ctx context.Context) (app.Admin, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return app.Admin{}, errNoPrincipal
+		return app.Admin{}, httpx.ErrNoPrincipal
 	}
 	return app.Admin{ID: p.UserID, IsPlatformAdmin: p.IsPlatformAdmin()}, nil
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -82,6 +83,7 @@ type AdminView struct {
 // ReviewHandlers are the platform admin's review use cases.
 type ReviewHandlers struct {
 	businesses domain.Businesses
+	staff      domain.Staff
 	documents  domain.VerificationDocuments
 	branches   domain.Branches
 	queue      ReviewQueue
@@ -90,8 +92,8 @@ type ReviewHandlers struct {
 }
 
 // NewReviewHandlers wires the use cases.
-func NewReviewHandlers(businesses domain.Businesses, documents domain.VerificationDocuments, branches domain.Branches, queue ReviewQueue, files DocumentFiles, clk clock.Clock) *ReviewHandlers {
-	return &ReviewHandlers{businesses: businesses, documents: documents, branches: branches, queue: queue, files: files, clock: clk}
+func NewReviewHandlers(businesses domain.Businesses, staff domain.Staff, documents domain.VerificationDocuments, branches domain.Branches, queue ReviewQueue, files DocumentFiles, clk clock.Clock) *ReviewHandlers {
+	return &ReviewHandlers{businesses: businesses, staff: staff, documents: documents, branches: branches, queue: queue, files: files, clock: clk}
 }
 
 // Queue returns one page of businesses in status (never drafts: those are
@@ -163,6 +165,14 @@ func (h *ReviewHandlers) Reject(ctx context.Context, admin Admin, id shared.Busi
 func (h *ReviewHandlers) decide(ctx context.Context, admin Admin, id shared.BusinessID, expectedVersion int, fn func(*domain.Business) error) (*domain.Business, error) {
 	if err := admin.require(); err != nil {
 		return nil, err
+	}
+	// Not only the owner: an admin who works there, or used to, isn't
+	// independent either.
+	switch _, err := h.staff.Membership(ctx, id, admin.ID); {
+	case err == nil:
+		return nil, domain.ErrSelfReview
+	case !errors.Is(err, domain.ErrNotFound):
+		return nil, fmt.Errorf("review decision: %w", err)
 	}
 	var decided *domain.Business
 	err := h.businesses.Update(ctx, id, expectedVersion, func(b *domain.Business) error {

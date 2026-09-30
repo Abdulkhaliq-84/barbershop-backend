@@ -116,7 +116,7 @@ func (r *Services) Update(ctx context.Context, business shared.BusinessID, branc
 			DescriptionAr: next.DescriptionAr, DescriptionEn: next.DescriptionEn,
 			DurationMinutes: next.DurationMinutes, PriceAmount: next.PriceAmount, PriceCurrency: next.PriceCurrency,
 			Active: next.Active, SortOrder: next.SortOrder, Version: next.Version, UpdatedAt: next.UpdatedAt,
-			ID: next.ID, ExpectedVersion: row.Version,
+			BusinessID: business.UUID(), BranchID: branch.UUID(), ID: next.ID, ExpectedVersion: row.Version,
 		})
 		if err != nil {
 			return fmt.Errorf("update service: %w", err)

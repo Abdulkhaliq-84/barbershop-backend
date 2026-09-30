@@ -150,8 +150,7 @@ func toBranchRow(b *domain.Branch) (sqlcgen.BusinessBranch, error) {
 	}
 	var phone *string
 	if !p.Phone.IsZero() {
-		s := p.Phone.String()
-		phone = &s
+		phone = new(p.Phone.String())
 	}
 	// The domain already limits every value far below these types' ranges;
 	// the checked conversions only guard against a future change there.

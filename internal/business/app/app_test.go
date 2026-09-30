@@ -1,9 +1,10 @@
 package app_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
-	"sort"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -87,13 +88,14 @@ func (s *store) ReviewPage(_ context.Context, status domain.Status, after *app.Q
 			page = append(page, b)
 		}
 	}
-	key := func(b *domain.Business) string {
-		return b.Review().SubmittedAt.Format(time.RFC3339Nano) + b.ID().String()
+	// Oldest submission first, then by ID — compared as times: formatted
+	// strings don't sort ("…:00Z" comes after "…:00.1Z").
+	order := func(at time.Time, id shared.BusinessID, b *domain.Business) int {
+		return cmp.Or(at.Compare(*b.Review().SubmittedAt), cmp.Compare(id.String(), b.ID().String()))
 	}
-	sort.Slice(page, func(i, j int) bool { return key(page[i]) < key(page[j]) })
+	slices.SortFunc(page, func(a, b *domain.Business) int { return order(*a.Review().SubmittedAt, a.ID(), b) })
 	if after != nil {
-		cut := after.SubmittedAt.Format(time.RFC3339Nano) + after.ID.String()
-		for len(page) > 0 && key(page[0]) <= cut {
+		for len(page) > 0 && order(after.SubmittedAt, after.ID, page[0]) >= 0 {
 			page = page[1:]
 		}
 	}

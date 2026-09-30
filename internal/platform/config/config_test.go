@@ -36,6 +36,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Database.MaxConns != 10 {
 		t.Errorf("Database.MaxConns = %d, want 10", cfg.Database.MaxConns)
 	}
+	if d := cfg.Database; d.StatementTimeout != 10*time.Second || d.LockTimeout != 5*time.Second || d.IdleInTxTimeout != 30*time.Second {
+		t.Errorf("Database timeouts = %v, %v, %v; want 10s, 5s, 30s", d.StatementTimeout, d.LockTimeout, d.IdleInTxTimeout)
+	}
 	if cfg.Log.Level != slog.LevelInfo || cfg.Log.Format != "json" {
 		t.Errorf("Log = %+v, want info/json", cfg.Log)
 	}
@@ -98,6 +101,10 @@ func TestLoadErrors(t *testing.T) {
 		{"bad log level", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "LOG_LEVEL=loud"}, "LOG_LEVEL"},
 		{"bad duration", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "HTTP_READ_TIMEOUT=soon"}, "HTTP_READ_TIMEOUT"},
 		{"zero pool size", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "DATABASE_MAX_CONNS=0"}, "DATABASE_MAX_CONNS"},
+		{"a pool of one", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "DATABASE_MAX_CONNS=1"}, "DATABASE_MAX_CONNS must be at least 2"},
+		{"no statement timeout", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "DATABASE_STATEMENT_TIMEOUT=0s"}, "DATABASE_STATEMENT_TIMEOUT must be positive"},
+		{"no lock timeout", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "DATABASE_LOCK_TIMEOUT=0s"}, "DATABASE_LOCK_TIMEOUT must be positive"},
+		{"no idle transaction timeout", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "DATABASE_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=-1s"}, "DATABASE_IDLE_IN_TRANSACTION_SESSION_TIMEOUT must be positive"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -162,6 +169,27 @@ func TestConfigurationErrorsDoNotEchoInput(t *testing.T) {
 		_, err := config.Load([]string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=test", key + "=+966551234567-private"})
 		if err == nil || strings.Contains(err.Error(), "+966551234567-private") {
 			t.Fatalf("unsafe error for %s: %v", key, err)
+		}
+	}
+}
+
+// The same mistakes give the same message, in the same order, every time.
+func TestLoadErrorsAreStable(t *testing.T) {
+	t.Parallel()
+	environ := []string{
+		dbURL, "HTTP_READ_TIMEOUT=0s", "HTTP_WRITE_TIMEOUT=0s", "HTTP_IDLE_TIMEOUT=0s", "DATABASE_LOCK_TIMEOUT=0s",
+		"APP_ENV=production", "MEDIA_DIR=/srv/media",
+		"OTP_SECRET=local-development-otp-secret-not-for-real-use",
+		"TOKEN_SIGNING_SECRET=local-development-token-signing-secret-not-for-real-use",
+		"MEDIA_SIGNING_SECRET=local-development-media-signing-secret-not-for-real-use",
+	}
+	_, first := config.Load(environ)
+	if first == nil {
+		t.Fatal("Load() error = nil, want error")
+	}
+	for range 20 {
+		if _, err := config.Load(environ); err.Error() != first.Error() {
+			t.Fatalf("errors changed order:\n%v\nthen\n%v", first, err)
 		}
 	}
 }

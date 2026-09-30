@@ -150,6 +150,11 @@ func (h *BranchHandlers) Update(ctx context.Context, cmd UpdateBranch) (*domain.
 		if err != nil {
 			return err
 		}
+		// The time zone moves every opening hour and schedule of the branch
+		// (they are wall-clock times there): the owner's decision alone.
+		if p.Timezone != b.Profile().Timezone && member.Role() != domain.RoleOwner {
+			return domain.ErrForbidden
+		}
 		if err := b.Edit(p, policy, h.clock.Now()); err != nil {
 			return err
 		}

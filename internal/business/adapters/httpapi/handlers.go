@@ -10,9 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
@@ -48,15 +47,11 @@ func NewHandlers(uc UseCases, logger *slog.Logger) *Handlers {
 	return &Handlers{uc: uc, logger: logger}
 }
 
-// errNoPrincipal guards against a route mounted without the spec's security
-// requirement, which would otherwise have rejected an anonymous caller.
-var errNoPrincipal = errors.New("no authenticated caller")
-
 // RegisterBusiness handles POST /v1/businesses.
 func (h *Handlers) RegisterBusiness(ctx context.Context, req apigen.RegisterBusinessRequestObject) (apigen.RegisterBusinessResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.RegisterBusinessdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	body := req.Body
@@ -78,7 +73,7 @@ func (h *Handlers) RegisterBusiness(ctx context.Context, req apigen.RegisterBusi
 func (h *Handlers) GetBusiness(ctx context.Context, req apigen.GetBusinessRequestObject) (apigen.GetBusinessResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.GetBusinessdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	b, err := h.uc.Get.Handle(ctx, app.GetBusiness{
@@ -96,10 +91,10 @@ func (h *Handlers) GetBusiness(ctx context.Context, req apigen.GetBusinessReques
 func (h *Handlers) UpdateBusiness(ctx context.Context, req apigen.UpdateBusinessRequestObject) (apigen.UpdateBusinessResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.UpdateBusinessdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 1)
 	if err != nil {
 		problem, headers := h.problem(ctx, err)
 		return apigen.UpdateBusinessdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
@@ -121,27 +116,11 @@ func (h *Handlers) UpdateBusiness(ctx context.Context, req apigen.UpdateBusiness
 	return apigen.UpdateBusiness200JSONResponse(toAPIBusiness(b)), nil
 }
 
-// errBadIfMatch reports an If-Match header that isn't a version number.
-var errBadIfMatch = errors.New("if-match: not a version")
-
-// parseIfMatch reads a version from If-Match, bare (3) or as an ETag ("3").
-func parseIfMatch(v string) (int, error) {
-	v = strings.TrimSpace(v)
-	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
-		v = v[1 : len(v)-1]
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 {
-		return 0, errBadIfMatch
-	}
-	return n, nil
-}
-
 // ListMyMemberships handles GET /v1/me/memberships.
 func (h *Handlers) ListMyMemberships(ctx context.Context, _ apigen.ListMyMembershipsRequestObject) (apigen.ListMyMembershipsResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.ListMyMembershipsdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	views, err := h.uc.Memberships.Handle(ctx, p.UserID)
@@ -162,7 +141,7 @@ func toAPIMembership(v app.MembershipView) apigen.Membership {
 		Role:    apigen.StaffRole(v.Role),
 		Business: apigen.BusinessSummary{
 			Id:          v.BusinessID.UUID(),
-			DisplayName: toAPIText(v.DisplayName),
+			DisplayName: httpx.APIText(v.DisplayName),
 			Status:      apigen.BusinessStatus(v.Status),
 		},
 	}
@@ -175,16 +154,15 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	var headers apigen.ProblemResponseHeaders
 	var policyErr *domain.PolicyError // its text is ours, safe to show
 	switch {
-	case errors.Is(err, errNoPrincipal):
+	case errors.Is(err, httpx.ErrNoPrincipal):
 		status, code, detail = http.StatusUnauthorized, "unauthorized", "a valid access token is required"
-		challenge := httpx.BearerChallenge
-		headers.WWWAuthenticate = &challenge
+		headers.WWWAuthenticate = new(httpx.BearerChallenge)
 	case errors.Is(err, errBadCursor):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "cursor: pass next_cursor from the previous page"
 	case errors.Is(err, domain.ErrNotPlatformAdmin):
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, domain.ErrSelfReview):
-		status, code, detail = http.StatusForbidden, "forbidden", "another admin must review your own business"
+		status, code, detail = http.StatusForbidden, "forbidden", "another admin must review a business you own or work at"
 	case errors.Is(err, domain.ErrCRDocumentRequired):
 		status, code, detail = http.StatusConflict, "cr_document_required", "upload the CR certificate first"
 	case errors.Is(err, domain.ErrBranchRequired):
@@ -195,10 +173,17 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "reason: required"
 	case errors.Is(err, domain.ErrUnknownStatus):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "status: drafts are not in the review queue"
-	case errors.Is(err, errBadIfMatch):
+	case errors.Is(err, httpx.ErrBadIfMatch):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the business version you last read"
 	case errors.Is(err, domain.ErrBranchLimitReached):
 		status, code, detail = http.StatusConflict, "plan_limit_reached", "your plan's branch limit is reached; see GET /v1/businesses/{business_id}/subscription"
+	case errors.Is(err, domain.ErrTooManyInvitations):
+		status, code, detail = http.StatusTooManyRequests, "rate_limited", "too many invitations; try again later"
+		if rate, ok := errors.AsType[*domain.InviteRateError](err); ok {
+			headers.RetryAfter = new(int(math.Ceil(rate.RetryAfter.Seconds())))
+		}
+	case errors.Is(err, domain.ErrTooManyRegistrations):
+		status, code, detail = http.StatusConflict, "registration_limit_reached", "finish, or wait for the review of, an earlier registration first"
 	case errors.Is(err, domain.ErrStaffLimitReached):
 		status, code, detail = http.StatusConflict, "plan_limit_reached", "your plan's staff limit is reached (pending invitations count); see GET /v1/businesses/{business_id}/subscription"
 	case errors.Is(err, domain.ErrInvitationInvalid):
@@ -262,7 +247,7 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 func toAPIBusiness(b *domain.Business) apigen.Business {
 	out := apigen.Business{
 		Id:          b.ID().UUID(),
-		DisplayName: toAPIText(b.DisplayName()),
+		DisplayName: httpx.APIText(b.DisplayName()),
 		LegalName:   b.LegalName(),
 		CrNumber:    b.CRNumber().String(),
 		Status:      apigen.BusinessStatus(b.Status()),
@@ -276,15 +261,6 @@ func toAPIBusiness(b *domain.Business) apigen.Business {
 		out.RejectionReason = &reason
 	}
 	return out
-}
-
-// toAPIText returns both languages: business-mode screens edit them.
-func toAPIText(t shared.LocalizedText) apigen.LocalizedText {
-	text := apigen.LocalizedText{Ar: t.Ar()}
-	if en := t.En(); en != "" {
-		text.En = &en
-	}
-	return text
 }
 
 func deref(s *string) string {

@@ -84,8 +84,7 @@ func (s *Session) Rotate(t *RefreshToken, nextHash []byte, now time.Time, p Toke
 	if err != nil {
 		return nil, err
 	}
-	used := now
-	t.usedAt = &used
+	t.usedAt = new(now)
 	s.lastRefreshedAt = now
 	return next, nil
 }

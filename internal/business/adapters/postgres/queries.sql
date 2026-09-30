@@ -43,7 +43,9 @@ ORDER BY b.id DESC; -- UUIDv7: newest first
 
 -- name: BusinessByIDForUpdate :one
 -- Locks the row until the transaction ends: a second editor waits here.
-SELECT * FROM business.businesses WHERE id = $1 FOR UPDATE;
+-- NO KEY: the id never changes, so rows that reference the business
+-- (branches, invitations) can still be inserted meanwhile.
+SELECT * FROM business.businesses WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: UpdateBusiness :execrows
 -- The version check is repeated in the WHERE clause as a second guard:
@@ -71,7 +73,7 @@ INSERT INTO business.branches (
 SELECT * FROM business.branches WHERE business_id = $1 AND id = $2;
 
 -- name: BranchByIDForUpdate :one
-SELECT * FROM business.branches WHERE business_id = $1 AND id = $2 FOR UPDATE;
+SELECT * FROM business.branches WHERE business_id = $1 AND id = $2 FOR NO KEY UPDATE;
 
 -- name: BranchesByBusiness :many
 SELECT * FROM business.branches WHERE business_id = $1 ORDER BY id; -- UUIDv7: oldest first
@@ -146,3 +148,26 @@ SELECT * FROM business.invitations WHERE token_hash = $1 FOR UPDATE;
 -- name: SaveInvitation :exec
 UPDATE business.invitations SET status = @status, accepted_at = @accepted_at, accepted_by = @accepted_by
 WHERE id = @id;
+
+-- name: InviteHistory :one
+-- What the invitation limits need, in one round trip (both indexes above).
+SELECT
+    (SELECT coalesce(max(i.created_at), @since::timestamptz) FROM business.invitations i
+     WHERE i.business_id = @business_id AND i.phone = @phone AND i.created_at > @since)::timestamptz AS last_to_phone,
+    (SELECT count(*) FROM business.invitations i
+     WHERE i.phone = @phone AND i.created_at > @since) AS to_phone,
+    (SELECT coalesce(min(i.created_at), @since::timestamptz) FROM business.invitations i
+     WHERE i.phone = @phone AND i.created_at > @since)::timestamptz AS oldest_to_phone,
+    (SELECT count(*) FROM business.invitations i
+     WHERE i.business_id = @business_id AND i.created_at > @since) AS by_business,
+    (SELECT coalesce(min(i.created_at), @since::timestamptz) FROM business.invitations i
+     WHERE i.business_id = @business_id AND i.created_at > @since)::timestamptz AS oldest_by_business;
+
+-- name: AdvisoryLock :exec
+-- A transaction lock on a name, for what no row lock covers: invitations
+-- to one phone across businesses, one user's registrations.
+SELECT pg_advisory_xact_lock(hashtextextended(@name::text, 0));
+
+-- name: CountOpenRegistrations :one
+SELECT count(*) FROM business.businesses
+WHERE owner_user_id = @owner_user_id AND status IN ('draft', 'pending_review', 'rejected');

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -13,6 +14,9 @@ import (
 // migrationLock is the advisory lock key that makes River migrations take
 // turns when several instances start at once ("rivermig" in ASCII).
 const migrationLock int64 = 0x7269766572_6d6967
+
+// unlockTimeout bounds releasing the lock after migrating.
+const unlockTimeout = 5 * time.Second
 
 // Migrate creates or upgrades River's tables in the river schema (created by
 // the goose migrations). It is idempotent.
@@ -34,9 +38,16 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) (err 
 		return fmt.Errorf("outbox: migration lock: %w", err)
 	}
 	defer func() {
-		// Unlock even if ctx is cancelled, or the pooled connection keeps the lock.
-		if _, uerr := conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock($1)", migrationLock); uerr != nil && err == nil {
-			err = fmt.Errorf("outbox: migration unlock: %w", uerr)
+		// Unlock even if ctx is cancelled, or the pooled connection keeps the
+		// lock — but not for ever: if the database doesn't answer, give up
+		// and destroy the connection, which ends the session and its lock.
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unlockTimeout)
+		defer cancel()
+		if _, uerr := conn.Exec(unlockCtx, "SELECT pg_advisory_unlock($1)", migrationLock); uerr != nil {
+			_ = conn.Conn().Close(unlockCtx)
+			if err == nil {
+				err = fmt.Errorf("outbox: migration unlock: %w", uerr)
+			}
 		}
 	}()
 

@@ -6,6 +6,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -13,7 +14,7 @@ import (
 func (h *Handlers) UploadVerificationDocument(ctx context.Context, req apigen.UploadVerificationDocumentRequestObject) (apigen.UploadVerificationDocumentResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.UploadVerificationDocumentdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	view, err := h.uc.Documents.Upload(ctx, app.UploadDocument{
@@ -33,7 +34,7 @@ func (h *Handlers) UploadVerificationDocument(ctx context.Context, req apigen.Up
 func (h *Handlers) ListVerificationDocuments(ctx context.Context, req apigen.ListVerificationDocumentsRequestObject) (apigen.ListVerificationDocumentsResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.ListVerificationDocumentsdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	views, err := h.uc.Documents.List(ctx, p.UserID, shared.IDFromUUID[shared.BusinessTag](req.BusinessId))

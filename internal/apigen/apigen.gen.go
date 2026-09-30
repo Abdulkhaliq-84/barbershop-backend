@@ -285,6 +285,39 @@ func (e VerificationDocumentKind) Valid() bool {
 	}
 }
 
+// Defines values for Weekday.
+const (
+	Friday    Weekday = "friday"
+	Monday    Weekday = "monday"
+	Saturday  Weekday = "saturday"
+	Sunday    Weekday = "sunday"
+	Thursday  Weekday = "thursday"
+	Tuesday   Weekday = "tuesday"
+	Wednesday Weekday = "wednesday"
+)
+
+// Valid indicates whether the value is a known member of the Weekday enum.
+func (e Weekday) Valid() bool {
+	switch e {
+	case Friday:
+		return true
+	case Monday:
+		return true
+	case Saturday:
+		return true
+	case Sunday:
+		return true
+	case Thursday:
+		return true
+	case Tuesday:
+		return true
+	case Wednesday:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListBusinessesForReviewParamsStatus.
 const (
 	ListBusinessesForReviewParamsStatusActive        ListBusinessesForReviewParamsStatus = "active"
@@ -344,6 +377,30 @@ type AdminBusinessPage struct {
 
 	// NextCursor Pass as `cursor` for the next page; absent on the last page.
 	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// BarberSchedule defines model for BarberSchedule.
+type BarberSchedule struct {
+	BranchId openapi_types.UUID `json:"branch_id"`
+
+	// Overrides By date.
+	Overrides []DateHours        `json:"overrides"`
+	StaffId   openapi_types.UUID `json:"staff_id"`
+	UpdatedAt *time.Time         `json:"updated_at,omitempty"`
+
+	// Version 0 until first set; send it as `If-Match`.
+	Version int `json:"version"`
+
+	// Weekly All seven days, Sunday first.
+	Weekly []DayHours `json:"weekly"`
+}
+
+// BarberScheduleUpdate defines model for BarberScheduleUpdate.
+type BarberScheduleUpdate struct {
+	Overrides *[]DateHours `json:"overrides,omitempty"`
+
+	// Weekly Days left out are days off.
+	Weekly []DayHours `json:"weekly"`
 }
 
 // BookingPolicy How a branch takes bookings. Defaults are shown as examples.
@@ -550,6 +607,21 @@ type BusinessUpdate struct {
 	LegalName   *string        `json:"legal_name,omitempty"`
 }
 
+// DateHours defines model for DateHours.
+type DateHours struct {
+	// Date Example: 2026-10-08
+	Date openapi_types.Date `json:"date"`
+
+	// Intervals Empty for a day off.
+	Intervals []TimeRange `json:"intervals"`
+}
+
+// DayHours defines model for DayHours.
+type DayHours struct {
+	Intervals []TimeRange `json:"intervals"`
+	Weekday   Weekday     `json:"weekday"`
+}
+
 // GeoPoint defines model for GeoPoint.
 type GeoPoint struct {
 	// Latitude Example: 24.6911
@@ -648,6 +720,22 @@ type OfferingsUpdate struct {
 	Offerings []Offering `json:"offerings"`
 }
 
+// OpeningHours defines model for OpeningHours.
+type OpeningHours struct {
+	// Days All seven days, Sunday first.
+	Days      []DayHours `json:"days"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+
+	// Version 0 until the hours are first set; send it as `If-Match`.
+	Version int `json:"version"`
+}
+
+// OpeningHoursUpdate defines model for OpeningHoursUpdate.
+type OpeningHoursUpdate struct {
+	// Days Days left out are closed.
+	Days []DayHours `json:"days"`
+}
+
 // Plan defines model for Plan.
 type Plan struct {
 	Code PlanCode `json:"code"`
@@ -670,7 +758,8 @@ type Problem struct {
 	// `version_conflict`, `unsupported_media_type`, `payload_too_large`,
 	// `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
 	// `branch_required`, `cr_number_taken`, `invitation_invalid`,
-	// `invitation_closed`, `already_staff`, `plan_limit_reached`.
+	// `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`,
+	// `registration_limit_reached`.
 	//
 	//
 	// Example: otp_cooldown
@@ -881,6 +970,48 @@ type Subscription struct {
 // `trialing` — the 30-day Pro trial; `free` — the trial ended.
 type SubscriptionStatus string
 
+// TimeOff defines model for TimeOff.
+type TimeOff struct {
+	CreatedAt time.Time          `json:"created_at"`
+	EndsAt    time.Time          `json:"ends_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Reason    *string            `json:"reason,omitempty"`
+	StaffId   openapi_types.UUID `json:"staff_id"`
+	StartsAt  time.Time          `json:"starts_at"`
+}
+
+// TimeOffCreate defines model for TimeOffCreate.
+type TimeOffCreate struct {
+	// EndsAt Example: 2026-10-05T12:00:00+03:00
+	EndsAt time.Time `json:"ends_at"`
+	Reason *string   `json:"reason,omitempty"`
+
+	// StartsAt Example: 2026-10-05T10:00:00+03:00
+	StartsAt time.Time `json:"starts_at"`
+}
+
+// TimeOffList defines model for TimeOffList.
+type TimeOffList struct {
+	Data []TimeOff `json:"data"`
+}
+
+// TimeRange defines model for TimeRange.
+type TimeRange struct {
+	// Closes At or before `opens` means the next day.
+	//
+	// Example: 02:00
+	Closes string `json:"closes"`
+
+	// Opens Example: 16:00
+	Opens string `json:"opens"`
+}
+
+// TimeWindow defines model for TimeWindow.
+type TimeWindow struct {
+	EndsAt   time.Time `json:"ends_at"`
+	StartsAt time.Time `json:"starts_at"`
+}
+
 // TokenPair defines model for TokenPair.
 type TokenPair struct {
 	// AccessToken Send as `Authorization: Bearer <access_token>`.
@@ -946,6 +1077,20 @@ type VerificationDocumentList struct {
 	Data []VerificationDocument `json:"data"`
 }
 
+// Weekday defines model for Weekday.
+type Weekday string
+
+// WorkingWindows defines model for WorkingWindows.
+type WorkingWindows struct {
+	Data    []TimeWindow       `json:"data"`
+	StaffId openapi_types.UUID `json:"staff_id"`
+
+	// TimeZone The branch's time zone, for showing the windows in local time.
+	//
+	// Example: Asia/Riyadh
+	TimeZone string `json:"time_zone"`
+}
+
 // AcceptLanguage Example: ar-SA
 type AcceptLanguage = string
 
@@ -963,6 +1108,12 @@ type InvitationID = openapi_types.UUID
 
 // ServiceID defines model for ServiceID.
 type ServiceID = openapi_types.UUID
+
+// StaffID defines model for StaffID.
+type StaffID = openapi_types.UUID
+
+// TimeOffID defines model for TimeOffID.
+type TimeOffID = openapi_types.UUID
 
 // ListBusinessesForReviewParams defines parameters for ListBusinessesForReview.
 type ListBusinessesForReviewParams struct {
@@ -1004,6 +1155,12 @@ type UpdateBranchParams struct {
 	IfMatch IfMatchVersion `json:"If-Match"`
 }
 
+// SetOpeningHoursParams defines parameters for SetOpeningHours.
+type SetOpeningHoursParams struct {
+	// IfMatch The `version` you last read, e.g. `3` or `"3"`.
+	IfMatch IfMatchVersion `json:"If-Match"`
+}
+
 // UpdateServiceParams defines parameters for UpdateService.
 type UpdateServiceParams struct {
 	// IfMatch The `version` you last read, e.g. `3` or `"3"`.
@@ -1014,6 +1171,18 @@ type UpdateServiceParams struct {
 type SetServiceOfferingsParams struct {
 	// IfMatch The `version` you last read, e.g. `3` or `"3"`.
 	IfMatch IfMatchVersion `json:"If-Match"`
+}
+
+// SetBarberScheduleParams defines parameters for SetBarberSchedule.
+type SetBarberScheduleParams struct {
+	// IfMatch The `version` you last read, e.g. `3` or `"3"`.
+	IfMatch IfMatchVersion `json:"If-Match"`
+}
+
+// GetWorkingWindowsParams defines parameters for GetWorkingWindows.
+type GetWorkingWindowsParams struct {
+	From time.Time `form:"from" json:"from"`
+	To   time.Time `form:"to" json:"to"`
 }
 
 // UploadVerificationDocumentParams defines parameters for UploadVerificationDocument.
@@ -1060,6 +1229,9 @@ type CreateBranchJSONRequestBody = BranchCreate
 // UpdateBranchJSONRequestBody defines body for UpdateBranch for application/json ContentType.
 type UpdateBranchJSONRequestBody = BranchUpdate
 
+// SetOpeningHoursJSONRequestBody defines body for SetOpeningHours for application/json ContentType.
+type SetOpeningHoursJSONRequestBody = OpeningHoursUpdate
+
 // CreateServiceJSONRequestBody defines body for CreateService for application/json ContentType.
 type CreateServiceJSONRequestBody = ServiceCreate
 
@@ -1069,8 +1241,14 @@ type UpdateServiceJSONRequestBody = ServiceUpdate
 // SetServiceOfferingsJSONRequestBody defines body for SetServiceOfferings for application/json ContentType.
 type SetServiceOfferingsJSONRequestBody = OfferingsUpdate
 
+// SetBarberScheduleJSONRequestBody defines body for SetBarberSchedule for application/json ContentType.
+type SetBarberScheduleJSONRequestBody = BarberScheduleUpdate
+
 // InviteStaffJSONRequestBody defines body for InviteStaff for application/json ContentType.
 type InviteStaffJSONRequestBody = StaffInvitationCreate
+
+// AddTimeOffJSONRequestBody defines body for AddTimeOff for application/json ContentType.
+type AddTimeOffJSONRequestBody = TimeOffCreate
 
 // AcceptStaffInvitationJSONRequestBody defines body for AcceptStaffInvitation for application/json ContentType.
 type AcceptStaffInvitationJSONRequestBody = InvitationAccept
@@ -1122,6 +1300,12 @@ type ServerInterface interface {
 	// UpdateBranch Edit a branch (owner, or a manager of the branch)
 	// (PATCH /v1/businesses/{business_id}/branches/{branch_id})
 	UpdateBranch(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, params UpdateBranchParams)
+	// GetOpeningHours The branch's weekly opening hours (anyone working at the branch)
+	// (GET /v1/businesses/{business_id}/branches/{branch_id}/opening-hours)
+	GetOpeningHours(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID)
+	// SetOpeningHours Set the weekly opening hours (owner, or a manager of the branch)
+	// (PUT /v1/businesses/{business_id}/branches/{branch_id}/opening-hours)
+	SetOpeningHours(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, params SetOpeningHoursParams)
 	// ListServices The branch's services (anyone working at the branch)
 	// (GET /v1/businesses/{business_id}/branches/{branch_id}/services)
 	ListServices(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID)
@@ -1134,6 +1318,15 @@ type ServerInterface interface {
 	// SetServiceOfferings Set who performs a service (owner, or a manager of the branch)
 	// (PUT /v1/businesses/{business_id}/branches/{branch_id}/services/{service_id}/offerings)
 	SetServiceOfferings(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, serviceId ServiceID, params SetServiceOfferingsParams)
+	// GetBarberSchedule A staff member's schedule at a branch (anyone working at the branch)
+	// (GET /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule)
+	GetBarberSchedule(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID)
+	// SetBarberSchedule Set a staff member's schedule at a branch (the person, the owner or a manager of the branch)
+	// (PUT /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule)
+	SetBarberSchedule(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID, params SetBarberScheduleParams)
+	// GetWorkingWindows When a staff member can work at a branch (anyone working at the branch)
+	// (GET /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/working-windows)
+	GetWorkingWindows(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID, params GetWorkingWindowsParams)
 	// ListStaff The business's team (owner and managers)
 	// (GET /v1/businesses/{business_id}/staff)
 	ListStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID)
@@ -1146,6 +1339,15 @@ type ServerInterface interface {
 	// RevokeStaffInvitation Revoke a pending invitation (owner)
 	// (DELETE /v1/businesses/{business_id}/staff/invitations/{invitation_id})
 	RevokeStaffInvitation(w http.ResponseWriter, r *http.Request, businessId BusinessID, invitationId InvitationID)
+	// ListTimeOff A staff member's upcoming time off (the person, the owner or a manager of one of their branches)
+	// (GET /v1/businesses/{business_id}/staff/{staff_id}/time-off)
+	ListTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID)
+	// AddTimeOff Record time off (the person, the owner or a manager of one of their branches)
+	// (POST /v1/businesses/{business_id}/staff/{staff_id}/time-off)
+	AddTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID)
+	// DeleteTimeOff Remove time off (the person, the owner or a manager of one of their branches)
+	// (DELETE /v1/businesses/{business_id}/staff/{staff_id}/time-off/{time_off_id})
+	DeleteTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID, timeOffId TimeOffID)
 	// GetSubscription The business's plan, limits and trial (owner)
 	// (GET /v1/businesses/{business_id}/subscription)
 	GetSubscription(w http.ResponseWriter, r *http.Request, businessId BusinessID)
@@ -1269,6 +1471,18 @@ func (_ Unimplemented) UpdateBranch(w http.ResponseWriter, r *http.Request, busi
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetOpeningHours The branch's weekly opening hours (anyone working at the branch)
+// (GET /v1/businesses/{business_id}/branches/{branch_id}/opening-hours)
+func (_ Unimplemented) GetOpeningHours(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetOpeningHours Set the weekly opening hours (owner, or a manager of the branch)
+// (PUT /v1/businesses/{business_id}/branches/{branch_id}/opening-hours)
+func (_ Unimplemented) SetOpeningHours(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, params SetOpeningHoursParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListServices The branch's services (anyone working at the branch)
 // (GET /v1/businesses/{business_id}/branches/{branch_id}/services)
 func (_ Unimplemented) ListServices(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID) {
@@ -1293,6 +1507,24 @@ func (_ Unimplemented) SetServiceOfferings(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetBarberSchedule A staff member's schedule at a branch (anyone working at the branch)
+// (GET /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule)
+func (_ Unimplemented) GetBarberSchedule(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetBarberSchedule Set a staff member's schedule at a branch (the person, the owner or a manager of the branch)
+// (PUT /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule)
+func (_ Unimplemented) SetBarberSchedule(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID, params SetBarberScheduleParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetWorkingWindows When a staff member can work at a branch (anyone working at the branch)
+// (GET /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/working-windows)
+func (_ Unimplemented) GetWorkingWindows(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID, params GetWorkingWindowsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListStaff The business's team (owner and managers)
 // (GET /v1/businesses/{business_id}/staff)
 func (_ Unimplemented) ListStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
@@ -1314,6 +1546,24 @@ func (_ Unimplemented) InviteStaff(w http.ResponseWriter, r *http.Request, busin
 // RevokeStaffInvitation Revoke a pending invitation (owner)
 // (DELETE /v1/businesses/{business_id}/staff/invitations/{invitation_id})
 func (_ Unimplemented) RevokeStaffInvitation(w http.ResponseWriter, r *http.Request, businessId BusinessID, invitationId InvitationID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListTimeOff A staff member's upcoming time off (the person, the owner or a manager of one of their branches)
+// (GET /v1/businesses/{business_id}/staff/{staff_id}/time-off)
+func (_ Unimplemented) ListTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AddTimeOff Record time off (the person, the owner or a manager of one of their branches)
+// (POST /v1/businesses/{business_id}/staff/{staff_id}/time-off)
+func (_ Unimplemented) AddTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteTimeOff Remove time off (the person, the owner or a manager of one of their branches)
+// (DELETE /v1/businesses/{business_id}/staff/{staff_id}/time-off/{time_off_id})
+func (_ Unimplemented) DeleteTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID, timeOffId TimeOffID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1900,6 +2150,104 @@ func (siw *ServerInterfaceWrapper) UpdateBranch(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetOpeningHours operation middleware
+func (siw *ServerInterfaceWrapper) GetOpeningHours(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "branch_id" -------------
+	var branchId BranchID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "branch_id", chi.URLParam(r, "branch_id"), &branchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "branch_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpeningHours(w, r, businessId, branchId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetOpeningHours operation middleware
+func (siw *ServerInterfaceWrapper) SetOpeningHours(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "branch_id" -------------
+	var branchId BranchID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "branch_id", chi.URLParam(r, "branch_id"), &branchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "branch_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SetOpeningHoursParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatchVersion
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = IfMatch
+
+	} else {
+		err := fmt.Errorf("Header parameter If-Match is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "If-Match", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOpeningHours(w, r, businessId, branchId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListServices operation middleware
 func (siw *ServerInterfaceWrapper) ListServices(w http.ResponseWriter, r *http.Request) {
 
@@ -2114,6 +2462,195 @@ func (siw *ServerInterfaceWrapper) SetServiceOfferings(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetBarberSchedule operation middleware
+func (siw *ServerInterfaceWrapper) GetBarberSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "branch_id" -------------
+	var branchId BranchID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "branch_id", chi.URLParam(r, "branch_id"), &branchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "branch_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "staff_id" -------------
+	var staffId StaffID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "staff_id", chi.URLParam(r, "staff_id"), &staffId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "staff_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBarberSchedule(w, r, businessId, branchId, staffId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetBarberSchedule operation middleware
+func (siw *ServerInterfaceWrapper) SetBarberSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "branch_id" -------------
+	var branchId BranchID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "branch_id", chi.URLParam(r, "branch_id"), &branchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "branch_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "staff_id" -------------
+	var staffId StaffID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "staff_id", chi.URLParam(r, "staff_id"), &staffId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "staff_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SetBarberScheduleParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatchVersion
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = IfMatch
+
+	} else {
+		err := fmt.Errorf("Header parameter If-Match is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "If-Match", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetBarberSchedule(w, r, businessId, branchId, staffId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkingWindows operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkingWindows(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "branch_id" -------------
+	var branchId BranchID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "branch_id", chi.URLParam(r, "branch_id"), &branchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "branch_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "staff_id" -------------
+	var staffId StaffID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "staff_id", chi.URLParam(r, "staff_id"), &staffId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "staff_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetWorkingWindowsParams
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkingWindows(w, r, businessId, branchId, staffId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListStaff operation middleware
 func (siw *ServerInterfaceWrapper) ListStaff(w http.ResponseWriter, r *http.Request) {
 
@@ -2218,6 +2755,120 @@ func (siw *ServerInterfaceWrapper) RevokeStaffInvitation(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeStaffInvitation(w, r, businessId, invitationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTimeOff operation middleware
+func (siw *ServerInterfaceWrapper) ListTimeOff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "staff_id" -------------
+	var staffId StaffID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "staff_id", chi.URLParam(r, "staff_id"), &staffId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "staff_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTimeOff(w, r, businessId, staffId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddTimeOff operation middleware
+func (siw *ServerInterfaceWrapper) AddTimeOff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "staff_id" -------------
+	var staffId StaffID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "staff_id", chi.URLParam(r, "staff_id"), &staffId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "staff_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddTimeOff(w, r, businessId, staffId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTimeOff operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTimeOff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "staff_id" -------------
+	var staffId StaffID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "staff_id", chi.URLParam(r, "staff_id"), &staffId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "staff_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "time_off_id" -------------
+	var timeOffId TimeOffID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "time_off_id", chi.URLParam(r, "time_off_id"), &timeOffId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "time_off_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTimeOff(w, r, businessId, staffId, timeOffId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2670,6 +3321,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/v1/businesses/{business_id}/branches/{branch_id}/services/{service_id}/offerings", wrapper.SetServiceOfferings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/businesses/{business_id}/branches/{branch_id}/opening-hours", wrapper.GetOpeningHours)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/businesses/{business_id}/branches/{branch_id}/opening-hours", wrapper.SetOpeningHours)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule", wrapper.GetBarberSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule", wrapper.SetBarberSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/working-windows", wrapper.GetWorkingWindows)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/businesses/{business_id}/staff/{staff_id}/time-off", wrapper.ListTimeOff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/businesses/{business_id}/staff/{staff_id}/time-off", wrapper.AddTimeOff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/businesses/{business_id}/staff/{staff_id}/time-off/{time_off_id}", wrapper.DeleteTimeOff)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/businesses/{business_id}/verification/documents", wrapper.ListVerificationDocuments)
@@ -3403,6 +4078,102 @@ func (response UpdateBranchdefaultApplicationProblemPlusJSONResponse) VisitUpdat
 	return err
 }
 
+type GetOpeningHoursRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	BranchId   BranchID   `json:"branch_id"`
+}
+
+type GetOpeningHoursResponseObject interface {
+	VisitGetOpeningHoursResponse(w http.ResponseWriter) error
+}
+
+type GetOpeningHours200JSONResponse OpeningHours
+
+func (response GetOpeningHours200JSONResponse) VisitGetOpeningHoursResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOpeningHoursdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetOpeningHoursdefaultApplicationProblemPlusJSONResponse) VisitGetOpeningHoursResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOpeningHoursRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	BranchId   BranchID   `json:"branch_id"`
+	Params     SetOpeningHoursParams
+	Body       *SetOpeningHoursJSONRequestBody
+}
+
+type SetOpeningHoursResponseObject interface {
+	VisitSetOpeningHoursResponse(w http.ResponseWriter) error
+}
+
+type SetOpeningHours200JSONResponse OpeningHours
+
+func (response SetOpeningHours200JSONResponse) VisitSetOpeningHoursResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOpeningHoursdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response SetOpeningHoursdefaultApplicationProblemPlusJSONResponse) VisitSetOpeningHoursResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListServicesRequestObject struct {
 	BusinessId BusinessID `json:"business_id"`
 	BranchId   BranchID   `json:"branch_id"`
@@ -3598,6 +4369,153 @@ func (response SetServiceOfferingsdefaultApplicationProblemPlusJSONResponse) Vis
 	return err
 }
 
+type GetBarberScheduleRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	BranchId   BranchID   `json:"branch_id"`
+	StaffId    StaffID    `json:"staff_id"`
+}
+
+type GetBarberScheduleResponseObject interface {
+	VisitGetBarberScheduleResponse(w http.ResponseWriter) error
+}
+
+type GetBarberSchedule200JSONResponse BarberSchedule
+
+func (response GetBarberSchedule200JSONResponse) VisitGetBarberScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBarberScheduledefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetBarberScheduledefaultApplicationProblemPlusJSONResponse) VisitGetBarberScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetBarberScheduleRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	BranchId   BranchID   `json:"branch_id"`
+	StaffId    StaffID    `json:"staff_id"`
+	Params     SetBarberScheduleParams
+	Body       *SetBarberScheduleJSONRequestBody
+}
+
+type SetBarberScheduleResponseObject interface {
+	VisitSetBarberScheduleResponse(w http.ResponseWriter) error
+}
+
+type SetBarberSchedule200JSONResponse BarberSchedule
+
+func (response SetBarberSchedule200JSONResponse) VisitSetBarberScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetBarberScheduledefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response SetBarberScheduledefaultApplicationProblemPlusJSONResponse) VisitSetBarberScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkingWindowsRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	BranchId   BranchID   `json:"branch_id"`
+	StaffId    StaffID    `json:"staff_id"`
+	Params     GetWorkingWindowsParams
+}
+
+type GetWorkingWindowsResponseObject interface {
+	VisitGetWorkingWindowsResponse(w http.ResponseWriter) error
+}
+
+type GetWorkingWindows200JSONResponse WorkingWindows
+
+func (response GetWorkingWindows200JSONResponse) VisitGetWorkingWindowsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkingWindowsdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetWorkingWindowsdefaultApplicationProblemPlusJSONResponse) VisitGetWorkingWindowsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListStaffRequestObject struct {
 	BusinessId BusinessID `json:"business_id"`
 }
@@ -3761,6 +4679,143 @@ type RevokeStaffInvitationdefaultApplicationProblemPlusJSONResponse struct {
 }
 
 func (response RevokeStaffInvitationdefaultApplicationProblemPlusJSONResponse) VisitRevokeStaffInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimeOffRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	StaffId    StaffID    `json:"staff_id"`
+}
+
+type ListTimeOffResponseObject interface {
+	VisitListTimeOffResponse(w http.ResponseWriter) error
+}
+
+type ListTimeOff200JSONResponse TimeOffList
+
+func (response ListTimeOff200JSONResponse) VisitListTimeOffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTimeOffdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ListTimeOffdefaultApplicationProblemPlusJSONResponse) VisitListTimeOffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTimeOffRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	StaffId    StaffID    `json:"staff_id"`
+	Body       *AddTimeOffJSONRequestBody
+}
+
+type AddTimeOffResponseObject interface {
+	VisitAddTimeOffResponse(w http.ResponseWriter) error
+}
+
+type AddTimeOff201JSONResponse TimeOff
+
+func (response AddTimeOff201JSONResponse) VisitAddTimeOffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTimeOffdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response AddTimeOffdefaultApplicationProblemPlusJSONResponse) VisitAddTimeOffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTimeOffRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	StaffId    StaffID    `json:"staff_id"`
+	TimeOffId  TimeOffID  `json:"time_off_id"`
+}
+
+type DeleteTimeOffResponseObject interface {
+	VisitDeleteTimeOffResponse(w http.ResponseWriter) error
+}
+
+type DeleteTimeOff204Response struct {
+}
+
+func (response DeleteTimeOff204Response) VisitDeleteTimeOffResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteTimeOffdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteTimeOffdefaultApplicationProblemPlusJSONResponse) VisitDeleteTimeOffResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4262,6 +5317,12 @@ type StrictServerInterface interface {
 	// UpdateBranch Edit a branch (owner, or a manager of the branch)
 	// (PATCH /v1/businesses/{business_id}/branches/{branch_id})
 	UpdateBranch(ctx context.Context, request UpdateBranchRequestObject) (UpdateBranchResponseObject, error)
+	// GetOpeningHours The branch's weekly opening hours (anyone working at the branch)
+	// (GET /v1/businesses/{business_id}/branches/{branch_id}/opening-hours)
+	GetOpeningHours(ctx context.Context, request GetOpeningHoursRequestObject) (GetOpeningHoursResponseObject, error)
+	// SetOpeningHours Set the weekly opening hours (owner, or a manager of the branch)
+	// (PUT /v1/businesses/{business_id}/branches/{branch_id}/opening-hours)
+	SetOpeningHours(ctx context.Context, request SetOpeningHoursRequestObject) (SetOpeningHoursResponseObject, error)
 	// ListServices The branch's services (anyone working at the branch)
 	// (GET /v1/businesses/{business_id}/branches/{branch_id}/services)
 	ListServices(ctx context.Context, request ListServicesRequestObject) (ListServicesResponseObject, error)
@@ -4274,6 +5335,15 @@ type StrictServerInterface interface {
 	// SetServiceOfferings Set who performs a service (owner, or a manager of the branch)
 	// (PUT /v1/businesses/{business_id}/branches/{branch_id}/services/{service_id}/offerings)
 	SetServiceOfferings(ctx context.Context, request SetServiceOfferingsRequestObject) (SetServiceOfferingsResponseObject, error)
+	// GetBarberSchedule A staff member's schedule at a branch (anyone working at the branch)
+	// (GET /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule)
+	GetBarberSchedule(ctx context.Context, request GetBarberScheduleRequestObject) (GetBarberScheduleResponseObject, error)
+	// SetBarberSchedule Set a staff member's schedule at a branch (the person, the owner or a manager of the branch)
+	// (PUT /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule)
+	SetBarberSchedule(ctx context.Context, request SetBarberScheduleRequestObject) (SetBarberScheduleResponseObject, error)
+	// GetWorkingWindows When a staff member can work at a branch (anyone working at the branch)
+	// (GET /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/working-windows)
+	GetWorkingWindows(ctx context.Context, request GetWorkingWindowsRequestObject) (GetWorkingWindowsResponseObject, error)
 	// ListStaff The business's team (owner and managers)
 	// (GET /v1/businesses/{business_id}/staff)
 	ListStaff(ctx context.Context, request ListStaffRequestObject) (ListStaffResponseObject, error)
@@ -4286,6 +5356,15 @@ type StrictServerInterface interface {
 	// RevokeStaffInvitation Revoke a pending invitation (owner)
 	// (DELETE /v1/businesses/{business_id}/staff/invitations/{invitation_id})
 	RevokeStaffInvitation(ctx context.Context, request RevokeStaffInvitationRequestObject) (RevokeStaffInvitationResponseObject, error)
+	// ListTimeOff A staff member's upcoming time off (the person, the owner or a manager of one of their branches)
+	// (GET /v1/businesses/{business_id}/staff/{staff_id}/time-off)
+	ListTimeOff(ctx context.Context, request ListTimeOffRequestObject) (ListTimeOffResponseObject, error)
+	// AddTimeOff Record time off (the person, the owner or a manager of one of their branches)
+	// (POST /v1/businesses/{business_id}/staff/{staff_id}/time-off)
+	AddTimeOff(ctx context.Context, request AddTimeOffRequestObject) (AddTimeOffResponseObject, error)
+	// DeleteTimeOff Remove time off (the person, the owner or a manager of one of their branches)
+	// (DELETE /v1/businesses/{business_id}/staff/{staff_id}/time-off/{time_off_id})
+	DeleteTimeOff(ctx context.Context, request DeleteTimeOffRequestObject) (DeleteTimeOffResponseObject, error)
 	// GetSubscription The business's plan, limits and trial (owner)
 	// (GET /v1/businesses/{business_id}/subscription)
 	GetSubscription(ctx context.Context, request GetSubscriptionRequestObject) (GetSubscriptionResponseObject, error)
@@ -4798,6 +5877,68 @@ func (sh *strictHandler) UpdateBranch(w http.ResponseWriter, r *http.Request, bu
 	}
 }
 
+// GetOpeningHours operation middleware
+func (sh *strictHandler) GetOpeningHours(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID) {
+	var request GetOpeningHoursRequestObject
+
+	request.BusinessId = businessId
+	request.BranchId = branchId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOpeningHours(ctx, request.(GetOpeningHoursRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOpeningHours")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOpeningHoursResponseObject); ok {
+		if err := validResponse.VisitGetOpeningHoursResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetOpeningHours operation middleware
+func (sh *strictHandler) SetOpeningHours(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, params SetOpeningHoursParams) {
+	var request SetOpeningHoursRequestObject
+
+	request.BusinessId = businessId
+	request.BranchId = branchId
+	request.Params = params
+
+	var body SetOpeningHoursJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetOpeningHours(ctx, request.(SetOpeningHoursRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetOpeningHours")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetOpeningHoursResponseObject); ok {
+		if err := validResponse.VisitSetOpeningHoursResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListServices operation middleware
 func (sh *strictHandler) ListServices(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID) {
 	var request ListServicesRequestObject
@@ -4931,6 +6072,99 @@ func (sh *strictHandler) SetServiceOfferings(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// GetBarberSchedule operation middleware
+func (sh *strictHandler) GetBarberSchedule(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID) {
+	var request GetBarberScheduleRequestObject
+
+	request.BusinessId = businessId
+	request.BranchId = branchId
+	request.StaffId = staffId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetBarberSchedule(ctx, request.(GetBarberScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetBarberSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetBarberScheduleResponseObject); ok {
+		if err := validResponse.VisitGetBarberScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetBarberSchedule operation middleware
+func (sh *strictHandler) SetBarberSchedule(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID, params SetBarberScheduleParams) {
+	var request SetBarberScheduleRequestObject
+
+	request.BusinessId = businessId
+	request.BranchId = branchId
+	request.StaffId = staffId
+	request.Params = params
+
+	var body SetBarberScheduleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetBarberSchedule(ctx, request.(SetBarberScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetBarberSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetBarberScheduleResponseObject); ok {
+		if err := validResponse.VisitSetBarberScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkingWindows operation middleware
+func (sh *strictHandler) GetWorkingWindows(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, staffId StaffID, params GetWorkingWindowsParams) {
+	var request GetWorkingWindowsRequestObject
+
+	request.BusinessId = businessId
+	request.BranchId = branchId
+	request.StaffId = staffId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkingWindows(ctx, request.(GetWorkingWindowsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkingWindows")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkingWindowsResponseObject); ok {
+		if err := validResponse.VisitGetWorkingWindowsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListStaff operation middleware
 func (sh *strictHandler) ListStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
 	var request ListStaffRequestObject
@@ -5036,6 +6270,95 @@ func (sh *strictHandler) RevokeStaffInvitation(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeStaffInvitationResponseObject); ok {
 		if err := validResponse.VisitRevokeStaffInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTimeOff operation middleware
+func (sh *strictHandler) ListTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID) {
+	var request ListTimeOffRequestObject
+
+	request.BusinessId = businessId
+	request.StaffId = staffId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTimeOff(ctx, request.(ListTimeOffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTimeOff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTimeOffResponseObject); ok {
+		if err := validResponse.VisitListTimeOffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddTimeOff operation middleware
+func (sh *strictHandler) AddTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID) {
+	var request AddTimeOffRequestObject
+
+	request.BusinessId = businessId
+	request.StaffId = staffId
+
+	var body AddTimeOffJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddTimeOff(ctx, request.(AddTimeOffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddTimeOff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddTimeOffResponseObject); ok {
+		if err := validResponse.VisitAddTimeOffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteTimeOff operation middleware
+func (sh *strictHandler) DeleteTimeOff(w http.ResponseWriter, r *http.Request, businessId BusinessID, staffId StaffID, timeOffId TimeOffID) {
+	var request DeleteTimeOffRequestObject
+
+	request.BusinessId = businessId
+	request.StaffId = staffId
+	request.TimeOffId = timeOffId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteTimeOff(ctx, request.(DeleteTimeOffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteTimeOff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTimeOffResponseObject); ok {
+		if err := validResponse.VisitDeleteTimeOffResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5286,178 +6609,211 @@ func (sh *strictHandler) ListServiceCategories(w http.ResponseWriter, r *http.Re
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

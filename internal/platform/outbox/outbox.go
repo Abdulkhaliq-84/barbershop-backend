@@ -1,11 +1,17 @@
 // Package outbox delivers domain events between modules (ADR-0009, ADR-0019).
 //
 // A module saves its events in the same transaction as the change they
-// describe (PublishTx), as River jobs: one job per subscriber. The worker
-// role (Run) works those jobs and calls each subscriber's handler. If the
-// transaction rolls back, the events vanish with it; if a handler fails,
-// River retries that handler alone, with backoff. Delivery is at least once,
-// so handlers must be idempotent.
+// describe (PublishTx), as River jobs: one per event. The worker role (Run)
+// fans each event out — one delivery job per subscriber, in one transaction
+// with marking the event done — and works the deliveries, calling each
+// subscriber's handler. If the publishing transaction rolls back, the events
+// vanish with it; if a handler fails, River retries that delivery alone,
+// with backoff. Delivery is at least once, so handlers must be idempotent.
+//
+// Fanning out in the worker, not at publish time, keeps events safe while
+// releases roll out: the api and the worker may run different versions for
+// a while, and a subscriber either side doesn't know yet waits (see
+// deliveryWorker) instead of being dropped.
 package outbox
 
 import (
@@ -14,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -55,7 +62,8 @@ type Handler func(ctx context.Context, e Event) error
 
 // Bus is the outbox: subscriptions, publishing and the worker.
 type Bus struct {
-	client *river.Client[pgx.Tx]
+	pool   *pgxpool.Pool
+	client *river.Client[pgx.Tx] // inserts jobs; Run starts its own client to work them
 	logger *slog.Logger
 
 	mu       sync.RWMutex
@@ -64,29 +72,29 @@ type Bus struct {
 }
 
 // New returns a bus on pool. Subscribe everything before serving requests or
-// calling Run: an event is fanned out to the subscribers known when it is
-// published.
+// calling Run.
 func New(pool *pgxpool.Pool, logger *slog.Logger) (*Bus, error) {
-	b := &Bus{logger: logger, handlers: map[string]Handler{}, byType: map[string][]string{}}
-	workers := river.NewWorkers()
-	if err := river.AddWorkerSafely(workers, &deliveryWorker{bus: b}); err != nil {
-		return nil, err
-	}
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Schema:  Schema,
-		Logger:  logger,
-		Workers: workers,
-		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 10}},
-	})
+	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Schema: Schema, Logger: logger})
 	if err != nil {
 		return nil, fmt.Errorf("outbox: %w", err)
 	}
-	b.client = client
-	return b, nil
+	return &Bus{pool: pool, client: client, logger: logger, handlers: map[string]Handler{}, byType: map[string][]string{}}, nil
+}
+
+// riverConns is how many pool connections River keeps for itself while it
+// works: the LISTEN connection, fetching, completing, and leader duties.
+const riverConns = 4
+
+// maxWorkers is how many handlers run at once: what the pool has left after
+// River's own connections, so a busy worker never waits for a connection
+// while holding a job. A handler uses one connection at a time.
+func maxWorkers(pool *pgxpool.Pool) int {
+	return max(1, min(10, int(pool.Config().MaxConns)-riverConns))
 }
 
 // Subscribe registers handler under a unique, stable name (it is stored in
-// every pending job; renaming a subscriber orphans its queued deliveries).
+// every pending job; a renamed subscriber's queued deliveries wait a day for
+// a worker that has the old name, then are dropped).
 func (b *Bus) Subscribe(name, eventType string, handler Handler) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -97,64 +105,117 @@ func (b *Bus) Subscribe(name, eventType string, handler Handler) {
 	b.byType[eventType] = append(b.byType[eventType], name)
 }
 
-// PublishTx saves events inside tx: one delivery job per subscriber of each
-// event's type. Events nobody subscribes to are dropped here.
+// PublishTx saves events inside tx, one job each. The worker fans them out
+// to their subscribers.
 func (b *Bus) PublishTx(ctx context.Context, tx pgx.Tx, events ...Event) error {
-	b.mu.RLock()
-	var jobs []river.InsertManyParams
-	for _, e := range events {
-		for _, name := range b.byType[e.Type] {
-			jobs = append(jobs, river.InsertManyParams{Args: deliveryArgs{Handler: name, Event: e}})
-		}
-	}
-	b.mu.RUnlock()
-	if len(jobs) == 0 {
+	if len(events) == 0 {
 		return nil
 	}
+	b.mu.RLock()
+	jobs := make([]river.InsertManyParams, 0, len(events))
+	for _, e := range events {
+		// The subscribers this release knows travel with the event, so an
+		// older worker still delivers to one it doesn't have yet.
+		jobs = append(jobs, river.InsertManyParams{Args: eventArgs{Event: e, Subscribers: slices.Clone(b.byType[e.Type])}})
+	}
+	b.mu.RUnlock()
 	if _, err := b.client.InsertManyTx(ctx, tx, jobs); err != nil {
 		return fmt.Errorf("outbox: publish: %w", err)
 	}
 	return nil
 }
 
-// Run works delivery jobs until ctx is cancelled (SIGTERM), then stops in
-// two steps: running handlers get up to shutdownTimeout to finish, and any
-// still running after that are cancelled — River retries them later.
-func (b *Bus) Run(ctx context.Context, shutdownTimeout time.Duration) error {
-	// River treats a cancelled Start context as a hard stop that cancels
-	// running jobs at once, so it gets a context the signal doesn't cancel:
-	// stopping is done explicitly below. This also keeps a stop that arrives
-	// during startup from turning into a startup error.
+// Run works jobs until ctx is cancelled (SIGTERM), then stops: running
+// handlers get up to stopTimeout to finish, and any still running after
+// that are cancelled — River retries them later.
+func (b *Bus) Run(ctx context.Context, stopTimeout time.Duration) error {
+	workers := river.NewWorkers()
+	if err := river.AddWorkerSafely(workers, &eventWorker{bus: b}); err != nil {
+		return err
+	}
+	if err := river.AddWorkerSafely(workers, &deliveryWorker{bus: b}); err != nil {
+		return err
+	}
+	client, err := river.NewClient(riverpgxv5.New(b.pool), &river.Config{
+		Schema:          Schema,
+		Logger:          b.logger,
+		Workers:         workers,
+		Queues:          map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: maxWorkers(b.pool)}},
+		SoftStopTimeout: stopTimeout, // then River cancels the handlers still running
+	})
+	if err != nil {
+		return fmt.Errorf("outbox: %w", err)
+	}
+	// River would treat a cancelled Start context as a stop request; stopping
+	// explicitly below keeps a SIGTERM during startup from being a startup
+	// error.
 	riverCtx := context.WithoutCancel(ctx)
-	if err := b.client.Start(riverCtx); err != nil {
+	if err := client.Start(riverCtx); err != nil {
 		return fmt.Errorf("outbox: start: %w", err)
 	}
 	b.logger.InfoContext(ctx, "outbox worker started")
-	<-ctx.Done()
-
-	soft, cancelSoft := context.WithTimeout(riverCtx, shutdownTimeout)
-	defer cancelSoft()
-	err := b.client.Stop(soft)
-	if err == nil {
-		b.logger.InfoContext(riverCtx, "outbox worker stopped")
-		return nil
+	select {
+	case <-ctx.Done():
+	case <-client.Stopped():
+		return errors.New("outbox: the worker stopped by itself")
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
+	// A handler that ignores its cancelled context can't be stopped; give up
+	// waiting for it hardStopTimeout after the soft stop. Its job is retried
+	// once River notices it was abandoned.
+	stopCtx, cancel := context.WithTimeout(riverCtx, stopTimeout+hardStopTimeout)
+	defer cancel()
+	if err := client.Stop(stopCtx); err != nil {
 		return fmt.Errorf("outbox: stop: %w", err)
 	}
-	b.logger.WarnContext(riverCtx, "outbox handlers still running after the shutdown timeout; cancelling them (they will be retried)")
-	hard, cancelHard := context.WithTimeout(riverCtx, hardStopTimeout)
-	defer cancelHard()
-	if err := b.client.StopAndCancel(hard); err != nil {
-		return fmt.Errorf("outbox: cancel running handlers: %w", err)
-	}
+	b.logger.InfoContext(riverCtx, "outbox worker stopped")
 	return nil
 }
 
-// hardStopTimeout bounds the wait for cancelled handlers to return. A
-// handler that ignores its context can't be stopped; the process exits
-// anyway and the job is retried after River notices it was abandoned.
+// hardStopTimeout bounds the wait for cancelled handlers to return.
 const hardStopTimeout = 5 * time.Second
+
+// eventArgs is one published event, not yet fanned out.
+type eventArgs struct {
+	Event       Event    `json:"event"`
+	Subscribers []string `json:"subscribers"` // as the publishing release knew them
+}
+
+func (eventArgs) Kind() string { return "outbox_event" }
+
+type eventWorker struct {
+	river.WorkerDefaults[eventArgs]
+	bus *Bus
+}
+
+// Work creates one delivery job per subscriber — the publisher's and this
+// release's — and marks the event done, in one transaction: either every
+// subscriber gets its delivery or the fan-out is retried.
+func (w *eventWorker) Work(ctx context.Context, job *river.Job[eventArgs]) error {
+	e := job.Args.Event
+	w.bus.mu.RLock()
+	names := slices.Clone(job.Args.Subscribers)
+	for _, name := range w.bus.byType[e.Type] {
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	w.bus.mu.RUnlock()
+	return pgx.BeginFunc(ctx, w.bus.pool, func(tx pgx.Tx) error {
+		if len(names) > 0 {
+			deliveries := make([]river.InsertManyParams, 0, len(names))
+			for _, name := range names {
+				deliveries = append(deliveries, river.InsertManyParams{Args: deliveryArgs{Handler: name, Event: e}})
+			}
+			if _, err := w.bus.client.InsertManyTx(ctx, tx, deliveries); err != nil {
+				return fmt.Errorf("outbox: fan out %s: %w", e.Type, err)
+			}
+		}
+		if _, err := river.JobCompleteTx[*riverpgxv5.Driver](ctx, tx, job); err != nil {
+			return fmt.Errorf("outbox: fan out %s: %w", e.Type, err)
+		}
+		return nil
+	})
+}
 
 // deliveryArgs is one event for one subscriber.
 type deliveryArgs struct {
@@ -175,9 +236,22 @@ func (w *deliveryWorker) Work(ctx context.Context, job *river.Job[deliveryArgs])
 	w.bus.mu.RLock()
 	handler, ok := w.bus.handlers[job.Args.Handler]
 	w.bus.mu.RUnlock()
-	if !ok {
-		// A subscriber removed in a later release: retrying can't help.
-		return river.JobCancel(fmt.Errorf("outbox: no subscriber %q", job.Args.Handler))
+	if ok {
+		return handler(ctx, job.Args.Event)
 	}
-	return handler(ctx, job.Args.Event)
+	// A subscriber this release doesn't have: most likely a newer release is
+	// rolling out and its workers will take this delivery. Snoozing doesn't
+	// use up attempts. After a day it's a subscriber that was removed.
+	if time.Since(job.CreatedAt) < unknownSubscriberWait {
+		return river.JobSnooze(unknownSubscriberSnooze)
+	}
+	w.bus.logger.WarnContext(ctx, "outbox delivery dropped: no such subscriber", slog.String("subscriber", job.Args.Handler), slog.String("event_type", job.Args.Event.Type))
+	return river.JobCancel(fmt.Errorf("outbox: no subscriber %q", job.Args.Handler))
 }
+
+// How long a delivery to an unknown subscriber waits for a worker that
+// knows it, checking every minute.
+const (
+	unknownSubscriberWait   = 24 * time.Hour
+	unknownSubscriberSnooze = time.Minute
+)

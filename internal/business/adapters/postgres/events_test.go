@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -77,11 +78,11 @@ func TestApprovalPublishesItsEvent(t *testing.T) {
 	}
 	got := jobs()
 	if len(got) != 1 {
-		t.Fatalf("jobs = %v, want one delivery", got)
+		t.Fatalf("jobs = %v, want one event", got)
 	}
 	var job struct {
-		Handler string       `json:"handler"`
-		Event   outbox.Event `json:"event"`
+		Subscribers []string     `json:"subscribers"`
+		Event       outbox.Event `json:"event"`
 	}
 	var payload events.BusinessApproved
 	if err := json.Unmarshal([]byte(got[0]), &job); err != nil {
@@ -103,7 +104,7 @@ func TestApprovalPublishesItsEvent(t *testing.T) {
 		t.Errorf("approval written by transaction %s, its event by %s: they must commit together", businessTx, jobTx)
 	}
 	b, _ := store.ByID(ctx, id)
-	if job.Handler != "test.listener" || job.Event.Type != "business.approved" || payload.BusinessID != id.UUID() ||
+	if !slices.Equal(job.Subscribers, []string{"test.listener"}) || job.Event.Type != "business.approved" || payload.BusinessID != id.UUID() ||
 		payload.OwnerID != b.OwnerID().UUID() || !payload.ApprovedAt.Equal(t0.Add(time.Hour)) {
 		t.Errorf("job = %+v, payload = %+v", job, payload)
 	}

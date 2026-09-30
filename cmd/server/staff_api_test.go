@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -145,7 +146,11 @@ func TestStaffInvitationsAPIRefusals(t *testing.T) {
 		t.Errorf("revoked link: %d %v", r.status, r.body)
 	}
 
-	// Expired: a week later the link stops working.
+	// Expired: a week later the link stops working. (Inviting the same phone
+	// again waits a minute: pretend it has passed.)
+	if _, err := a.pool.Exec(t.Context(), `UPDATE business.invitations SET created_at = created_at - interval '2 minutes'`); err != nil {
+		t.Fatal(err)
+	}
 	_, token = a.invite(t, biz, owner, "0554444444", "barber", branch)
 	if _, err := a.pool.Exec(t.Context(), `UPDATE business.invitations SET created_at = created_at - interval '8 days', expires_at = expires_at - interval '8 days' WHERE status = 'pending'`); err != nil {
 		t.Fatal(err)
@@ -191,5 +196,54 @@ func TestStaffInvitationsAPIRefusals(t *testing.T) {
 	}
 	if r := a.do(t, http.MethodPost, "/v1/invitations/accept", "", acceptBody(token)); r.status != http.StatusUnauthorized {
 		t.Errorf("anonymous accept: %d", r.status)
+	}
+}
+
+// Limits against abuse: invitations are SMS messages to people who didn't
+// ask for them, and each registration can send them before any review.
+func TestAbuseLimitsAPI(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner, biz := a.register(t, "0551234567", "1010000001")
+	branch := a.do(t, http.MethodPost, biz+"/branches", owner, branchJSON).body["id"].(string)
+
+	// The same phone again within a minute: 429, and when to retry.
+	a.invite(t, biz, owner, "0557777777", "barber", branch)
+	r := a.do(t, http.MethodPost, biz+"/staff/invitations", owner,
+		`{"phone":"0557777777","display_name":"سعد","role":"barber","branch_ids":["`+branch+`"]}`)
+	if secs, _ := strconv.Atoi(r.headers.Get("Retry-After")); r.status != http.StatusTooManyRequests || r.body["code"] != "rate_limited" || secs < 1 || secs > 60 {
+		t.Errorf("resend at once: %d %v, Retry-After %q", r.status, r.body, r.headers.Get("Retry-After"))
+	}
+
+	// Three unapproved businesses per user.
+	for _, cr := range []string{"1010000002", "1010000003"} {
+		if r := a.do(t, http.MethodPost, "/v1/businesses", owner, strings.Replace(registration, "١٠١٠ ١٢٣ ٤٥٦", cr, 1)); r.status != http.StatusCreated {
+			t.Fatalf("register %s: %d %v", cr, r.status, r.body)
+		}
+	}
+	if r := a.do(t, http.MethodPost, "/v1/businesses", owner, strings.Replace(registration, "١٠١٠ ١٢٣ ٤٥٦", "1010000004", 1)); r.status != http.StatusConflict || r.body["code"] != "registration_limit_reached" {
+		t.Errorf("fourth registration: %d %v", r.status, r.body)
+	}
+}
+
+// A branch's time zone moves all its hours: only the owner changes it.
+func TestBranchTimeZoneIsTheOwners(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner, biz := a.register(t, "0551234567", "1010000001")
+	branch := biz + "/branches/" + a.do(t, http.MethodPost, biz+"/branches", owner, branchJSON).body["id"].(string)
+	_, token := a.invite(t, biz, owner, "0552222222", "manager", strings.TrimPrefix(branch, biz+"/branches/"))
+	manager := a.signIn(t, "0552222222")
+	a.do(t, http.MethodPost, "/v1/invitations/accept", manager, acceptBody(token))
+
+	if r := a.do(t, http.MethodPatch, branch, manager, `{"timezone":"Asia/Dubai"}`, "If-Match", "1"); r.status != http.StatusForbidden {
+		t.Errorf("manager moves the zone: %d %v", r.status, r.body)
+	}
+	// Sending the same zone is no change: the manager edits the rest.
+	if r := a.do(t, http.MethodPatch, branch, manager, `{"timezone":"Asia/Riyadh","district":"الملقا"}`, "If-Match", "1"); r.status != http.StatusOK {
+		t.Errorf("manager edits: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodPatch, branch, owner, `{"timezone":"Asia/Dubai"}`, "If-Match", "2"); r.status != http.StatusOK || r.body["timezone"] != "Asia/Dubai" {
+		t.Errorf("owner moves the zone: %d %v", r.status, r.body)
 	}
 }
