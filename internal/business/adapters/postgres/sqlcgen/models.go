@@ -19,6 +19,41 @@ type BillingSubscription struct {
 	CreatedAt        time.Time
 }
 
+type BookingAppointment struct {
+	ID            uuid.UUID
+	BusinessID    uuid.UUID
+	BranchID      uuid.UUID
+	StaffID       uuid.UUID
+	CustomerID    uuid.UUID
+	Status        string
+	Source        string
+	Assignment    string
+	StartsAt      time.Time
+	EndsAt        time.Time
+	During        pgtype.Range[pgtype.Timestamptz]
+	PriceAmount   int64
+	PriceCurrency string
+	CustomerNote  string
+	PendingUntil  *time.Time
+	CancelledBy   *string
+	CancelReason  string
+	CancelledAt   *time.Time
+	Version       int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type BookingAppointmentItem struct {
+	AppointmentID   uuid.UUID
+	Position        int16
+	ServiceID       uuid.UUID
+	NameAr          string
+	NameEn          string
+	DurationMinutes int16
+	PriceAmount     int64
+	PriceCurrency   string
+}
+
 type BusinessBranch struct {
 	ID                   uuid.UUID
 	BusinessID           uuid.UUID

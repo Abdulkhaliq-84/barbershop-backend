@@ -54,21 +54,93 @@ type BranchQuery struct {
 	BranchID   shared.BranchID
 }
 
+// BranchStatusChange publishes or unpublishes a branch.
+type BranchStatusChange struct {
+	BranchQuery
+	ExpectedVersion int
+}
+
 // BranchHandlers are the branch use cases. Who may do what:
 //
-//	create         owner, within the plan's branch limit
-//	edit           owner, or a manager of that branch
-//	list, get      any active staff of the business
+//	create              owner, within the plan's branch limit
+//	edit                owner, or a manager of that branch
+//	publish, unpublish  owner
+//	list, get           any active staff of the business
 type BranchHandlers struct {
-	branches domain.Branches
-	staff    domain.Staff
-	plans    Plans
-	clock    clock.Clock
+	branches   domain.Branches
+	businesses domain.Businesses
+	staff      domain.Staff
+	plans      Plans
+	readiness  Readiness
+	clock      clock.Clock
+}
+
+// BranchDeps are the branch use cases' ports.
+type BranchDeps struct {
+	Branches   domain.Branches
+	Businesses domain.Businesses
+	Staff      domain.Staff
+	Plans      Plans
+	Readiness  Readiness
+	Clock      clock.Clock
 }
 
 // NewBranchHandlers wires the branch use cases.
-func NewBranchHandlers(branches domain.Branches, staff domain.Staff, plans Plans, clk clock.Clock) *BranchHandlers {
-	return &BranchHandlers{branches: branches, staff: staff, plans: plans, clock: clk}
+func NewBranchHandlers(d BranchDeps) *BranchHandlers {
+	return &BranchHandlers{
+		branches: d.Branches, businesses: d.Businesses, staff: d.Staff,
+		plans: d.Plans, readiness: d.Readiness, clock: d.Clock,
+	}
+}
+
+// Publish shows the branch to customers, once the business is active and
+// the branch can take a booking (opening hours, a service someone performs,
+// a barber with a schedule).
+//
+// The business status and the readiness are read before the branch is
+// locked: they belong to other aggregates and modules. Publishing is a gate,
+// not a promise — a schedule removed a minute later leaves a published
+// branch with no free slots, which customers simply don't see.
+func (h *BranchHandlers) Publish(ctx context.Context, cmd BranchStatusChange) (*domain.Branch, error) {
+	if _, err := authorize(ctx, h.staff, cmd.Actor, cmd.BusinessID, domain.RoleOwner); err != nil {
+		return nil, err
+	}
+	biz, err := h.businesses.ByID(ctx, cmd.BusinessID)
+	if err != nil {
+		return nil, fmt.Errorf("publish branch: %w", err)
+	}
+	ready, err := h.readiness.BranchReadiness(ctx, cmd.BusinessID, cmd.BranchID)
+	if err != nil {
+		return nil, fmt.Errorf("publish branch: %w", err)
+	}
+	return h.change(ctx, cmd, func(b *domain.Branch) error {
+		return b.Publish(biz.Status(), ready, h.clock.Now())
+	})
+}
+
+// Unpublish hides a published branch from customers.
+func (h *BranchHandlers) Unpublish(ctx context.Context, cmd BranchStatusChange) (*domain.Branch, error) {
+	if _, err := authorize(ctx, h.staff, cmd.Actor, cmd.BusinessID, domain.RoleOwner); err != nil {
+		return nil, err
+	}
+	return h.change(ctx, cmd, func(b *domain.Branch) error {
+		return b.Unpublish(h.clock.Now())
+	})
+}
+
+func (h *BranchHandlers) change(ctx context.Context, cmd BranchStatusChange, fn func(*domain.Branch) error) (*domain.Branch, error) {
+	var changed *domain.Branch
+	err := h.branches.Update(ctx, cmd.BusinessID, cmd.BranchID, cmd.ExpectedVersion, func(b *domain.Branch) error {
+		if err := fn(b); err != nil {
+			return err
+		}
+		changed = b
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("change branch status: %w", err)
+	}
+	return changed, nil
 }
 
 // Create adds a draft branch to the business.

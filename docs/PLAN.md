@@ -154,6 +154,18 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 5. M4.5 — `WorkingWindows(branch, staff, from, to)`: the pure calculation booking will use
    (property tests, time zones), and `GET …/staff/{staff_id}/working-windows` for the dashboard.
 
+**M5 in slices** (one PR each):
+
+1. M5.1 — branch publishing: `POST …/branches/{id}/publish` · `…/unpublish`; readiness from catalog
+   and scheduling, answered in `main` ([ADR-0022](adr/0022-branch-publishing-and-readiness.md)).
+2. M5.2 — `booking` module: the availability calculator (pure; fuzz tests, benchmarks) and
+   `GET /v1/branches/{id}/availability` for customers.
+3. M5.3 — book: `POST /v1/appointments` with `Idempotency-Key`, the exclusion constraint
+   (`409 slot_unavailable`), any-barber assignment, price snapshots.
+4. M5.4 — cancellation policy, shop actions (confirm, reject, complete, no-show) and staff bookings.
+5. M5.5 — pending expiry as a scheduled River job; booking events.
+   *Your turn:* "My appointments" with cursor pagination.
+
 ### Design track (in parallel, in Figma)
 
 | # | Deliverable | Feeds |

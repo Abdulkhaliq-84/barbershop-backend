@@ -124,6 +124,12 @@ on discovery's PostGIS read model (M6). A branch is always loaded by `(business_
 another business's branch ID is "not found". Any staff may read branches; the owner creates them, and
 the owner or a manager of the branch edits them.
 
+**Publishing (M5.1, ADR-0022).** The owner publishes a branch once the business is `Active` and the
+branch can take a booking: it has opening hours, an active service at least one barber performs, and
+one of those barbers has a weekly schedule there. Catalog and scheduling know those parts; `main`
+answers business's `ReadinessChecker` from them, so business imports neither. Publishing and
+unpublishing record `BranchPublished` / `BranchUnpublished`, published in the same transaction.
+
 **Staff and invitations (M3.5, ADR-0018).** The owner invites a phone as a `manager` or `barber` for
 1–50 of the business's branches. The invitee gets an SMS link with a random token (only its hash is
 stored) and accepts it signed in with that same phone; the invitation then becomes an active
@@ -273,6 +279,14 @@ any barber      → union of start times; each keeps the list of barbers free at
 - **Any-barber assignment** (`BarberAssigner` domain service): among barbers free at `t`, pick the one
   with the fewest booked minutes that day (spreads load fairly); tie → stable order by id.
   If the insert hits the constraint, try the next free barber before giving up.
+
+**Live since M5.2 (ADR-0023):** the `booking` module and availability.
+- `domain.Slots` is the pure calculator above, with one change: the grid walks the day's real
+  instants, so the repeated hour when clocks go back offers both of its instants.
+- `GET /v1/branches/{id}/availability` is public. It combines business (the bookable branch, its
+  barbers), catalog (the menu) and scheduling (working windows) through `adapters/acl`, and loads
+  windows and appointments at the same time (`errgroup`).
+- The appointments table (with the exclusion constraint) exists; booking writes to it from M5.3.
 
 ### 3.6 `discovery` — Search read model
 

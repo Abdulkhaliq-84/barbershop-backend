@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
@@ -182,6 +183,13 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		if rate, ok := errors.AsType[*domain.InviteRateError](err); ok {
 			headers.RetryAfter = new(int(math.Ceil(rate.RetryAfter.Seconds())))
 		}
+	case errors.Is(err, domain.ErrBranchNotReady):
+		status, code, detail = http.StatusConflict, "branch_not_ready", "the branch can't take bookings yet"
+		if nr, ok := errors.AsType[*domain.NotReadyError](err); ok {
+			detail = strings.Join(nr.Missing, "; ") // our own words, safe to show
+		}
+	case errors.Is(err, domain.ErrBusinessNotActive):
+		status, code, detail = http.StatusConflict, "business_not_active", "the business must be approved first"
 	case errors.Is(err, domain.ErrTooManyRegistrations):
 		status, code, detail = http.StatusConflict, "registration_limit_reached", "finish, or wait for the review of, an earlier registration first"
 	case errors.Is(err, domain.ErrStaffLimitReached):

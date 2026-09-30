@@ -18,3 +18,24 @@ type BusinessApproved struct {
 	OwnerID    uuid.UUID `json:"owner_id"`
 	ApprovedAt time.Time `json:"approved_at"`
 }
+
+// TypeBranchPublished is published when the owner shows a branch to
+// customers (discovery lists it from then on).
+const TypeBranchPublished = "business.branch_published"
+
+// BranchPublished is the payload of business.branch_published.
+type BranchPublished struct {
+	BusinessID  uuid.UUID `json:"business_id"`
+	BranchID    uuid.UUID `json:"branch_id"`
+	PublishedAt time.Time `json:"published_at"`
+}
+
+// TypeBranchUnpublished is published when the owner hides a branch again.
+const TypeBranchUnpublished = "business.branch_unpublished"
+
+// BranchUnpublished is the payload of business.branch_unpublished.
+type BranchUnpublished struct {
+	BusinessID    uuid.UUID `json:"business_id"`
+	BranchID      uuid.UUID `json:"branch_id"`
+	UnpublishedAt time.Time `json:"unpublished_at"`
+}

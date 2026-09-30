@@ -23,6 +23,11 @@ var (
 	ErrInvalidCityCode = errors.New("branch: unknown city code")
 	ErrAddressRequired = errors.New("branch: address is required")
 	ErrInvalidTimezone = errors.New("branch: not an IANA time zone")
+	// ErrBranchNotReady: the branch can't take a booking yet (see
+	// NotReadyError for what's missing).
+	ErrBranchNotReady = errors.New("branch: not ready to publish")
+	// ErrBusinessNotActive: only an approved, active business trades.
+	ErrBusinessNotActive = errors.New("business: not active")
 
 	ErrUnknownDocumentKind  = errors.New("verification: unknown document kind")
 	ErrDocumentLimitReached = errors.New("verification: too many documents")

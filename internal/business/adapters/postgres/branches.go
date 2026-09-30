@@ -75,6 +75,18 @@ func (r *BranchStore) ByID(ctx context.Context, business shared.BusinessID, id s
 	return toBranch(row)
 }
 
+// Bookable returns a published branch of an active business, or ErrNotFound.
+func (r *BranchStore) Bookable(ctx context.Context, id shared.BranchID) (*domain.Branch, error) {
+	row, err := sqlcgen.New(r.store.pool).BookableBranch(ctx, id.UUID())
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load bookable branch: %w", err)
+	}
+	return toBranch(row)
+}
+
 // List returns the business's branches, oldest first.
 func (r *BranchStore) List(ctx context.Context, business shared.BusinessID) ([]*domain.Branch, error) {
 	rows, err := sqlcgen.New(r.store.pool).BranchesByBusiness(ctx, business.UUID())
@@ -138,7 +150,7 @@ func (r *BranchStore) Update(ctx context.Context, business shared.BusinessID, id
 		if n == 0 {
 			return domain.ErrVersionConflict
 		}
-		return nil
+		return r.store.publish(ctx, tx, b.Events())
 	})
 }
 

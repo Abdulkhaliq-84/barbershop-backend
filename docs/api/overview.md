@@ -102,7 +102,7 @@ Client flow (Flutter):
 
 | Method | Path |
 |---|---|
-| GET | `/v1/branches/{branch_id}/availability?date=&service_ids=&barber_id=` (omit `barber_id` = any barber) |
+| GET | `/v1/branches/{branch_id}/availability?date=&service_ids=&barber_id=` (omit `barber_id` = any barber) — live (M5.2): public; slots `[{starts_at, barber_ids}]` and each barber's total duration and price; `422 service_unavailable` / `barber_unavailable` |
 | POST | `/v1/appointments` (Idempotency-Key) |
 | GET | `/v1/me/appointments?status=upcoming\|past&cursor=` |
 | GET | `/v1/me/appointments/{appointment_id}` |
@@ -118,7 +118,7 @@ Client flow (Flutter):
 | POST | `/v1/businesses/{business_id}/verification/submit` — live (M3.4): needs a CR document and a branch; claims the CR number | owner |
 | GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
 | GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner or a manager of that branch (M3.5) | manager |
-| POST | `…/branches/{branch_id}/publish` · `…/unpublish` | owner |
+| POST | `…/branches/{branch_id}/publish` · `…/unpublish` — live (M5.1): `If-Match`; the business must be active and the branch ready (opening hours, a service someone performs, a barber with a schedule): `409 business_not_active` / `409 branch_not_ready` | owner |
 | GET / PUT | `…/branches/{branch_id}/opening-hours` — live (M4.3): GET anyone working at the branch; PUT owner or a manager of the branch, `If-Match` (`0` the first time) | manager |
 | GET / POST / DELETE | `…/branches/{branch_id}/closures` | manager |
 | GET / POST / PATCH | `…/branches/{branch_id}/services[/{service_id}]` — live (M4.1): GET anyone working at the branch; POST/PATCH owner or a manager of the branch (`If-Match`); deactivate with `"active": false` | manager |

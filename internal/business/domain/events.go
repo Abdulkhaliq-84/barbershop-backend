@@ -19,3 +19,21 @@ type BusinessApproved struct {
 }
 
 func (BusinessApproved) isEvent() {}
+
+// BranchPublishedEvent is recorded when the owner shows a branch to customers.
+type BranchPublishedEvent struct {
+	Business shared.BusinessID
+	Branch   shared.BranchID
+	At       time.Time
+}
+
+func (BranchPublishedEvent) isEvent() {}
+
+// BranchUnpublishedEvent is recorded when the owner hides a branch again.
+type BranchUnpublishedEvent struct {
+	Business shared.BusinessID
+	Branch   shared.BranchID
+	At       time.Time
+}
+
+func (BranchUnpublishedEvent) isEvent() {}

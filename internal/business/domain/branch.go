@@ -119,6 +119,7 @@ type Branch struct {
 	version   int
 	createdAt time.Time
 	updatedAt time.Time
+	events    []Event
 }
 
 // NewBranch creates a draft branch.
@@ -148,9 +149,80 @@ func (b *Branch) Edit(p BranchProfile, policy BookingPolicy, now time.Time) erro
 		return &PolicyError{Rule: "a booking policy is required"}
 	}
 	b.profile, b.policy = p, policy
+	b.touch(now)
+	return nil
+}
+
+// BranchReadiness is whether a customer could book at a branch. Catalog and
+// scheduling know the parts; main puts them together (the business module
+// can't ask them itself: they depend on it).
+type BranchReadiness struct {
+	OpeningHours   bool // the branch has opening hours
+	OfferedService bool // an active service that at least one barber performs
+	BookableBarber bool // one of those barbers has a weekly schedule here
+}
+
+// NotReadyError lists what a branch still needs before it can be published,
+// in words safe to show the owner.
+type NotReadyError struct {
+	Missing []string
+}
+
+func (e *NotReadyError) Error() string {
+	return "branch: not ready to publish: " + strings.Join(e.Missing, "; ")
+}
+
+// Unwrap lets errors.Is(err, ErrBranchNotReady) match.
+func (e *NotReadyError) Unwrap() error { return ErrBranchNotReady }
+
+// Publish shows the branch to customers: the business must be active, and
+// the branch able to take a booking. Publishing again is refused.
+func (b *Branch) Publish(business Status, r BranchReadiness, now time.Time) error {
+	if business != StatusActive {
+		return ErrBusinessNotActive
+	}
+	if b.status == BranchPublished {
+		return ErrInvalidStateTransition
+	}
+	var missing []string
+	if !r.OpeningHours {
+		missing = append(missing, "set the branch's opening hours")
+	}
+	switch {
+	case !r.OfferedService:
+		missing = append(missing, "add a service and choose who performs it")
+	case !r.BookableBarber:
+		missing = append(missing, "give a barber who performs a service a weekly schedule")
+	}
+	if len(missing) > 0 {
+		return &NotReadyError{Missing: missing}
+	}
+	b.status = BranchPublished
+	b.touch(now)
+	b.events = append(b.events, BranchPublishedEvent{Business: b.business, Branch: b.id, At: b.updatedAt})
+	return nil
+}
+
+// Unpublish hides a published branch from customers. Bookings already made
+// stay; nobody can make new ones.
+func (b *Branch) Unpublish(now time.Time) error {
+	if b.status != BranchPublished {
+		return ErrInvalidStateTransition
+	}
+	b.status = BranchUnpublished
+	b.touch(now)
+	b.events = append(b.events, BranchUnpublishedEvent{Business: b.business, Branch: b.id, At: b.updatedAt})
+	return nil
+}
+
+// Events returns what happened to the branch since it was loaded, for the
+// repository to publish together with the change.
+func (b *Branch) Events() []Event { return b.events }
+
+// touch records a saved change: a new version and time.
+func (b *Branch) touch(now time.Time) {
 	b.version++
 	b.updatedAt = dbTime(now)
-	return nil
 }
 
 // RehydrateBranch rebuilds a branch loaded from storage.

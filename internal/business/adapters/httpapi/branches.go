@@ -169,3 +169,58 @@ func toPolicyRules(p apigen.BookingPolicy) domain.PolicyRules {
 }
 
 func minutes(d time.Duration) int { return int(d / time.Minute) }
+
+// PublishBranch handles POST …/branches/{branch_id}/publish.
+func (h *Handlers) PublishBranch(ctx context.Context, req apigen.PublishBranchRequestObject) (apigen.PublishBranchResponseObject, error) {
+	fail := func(err error) (apigen.PublishBranchResponseObject, error) {
+		problem, headers := h.problem(ctx, err)
+		return apigen.PublishBranchdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	cmd, err := statusChange(ctx, req.BusinessId, req.BranchId, req.Params.IfMatch)
+	if err != nil {
+		return fail(err)
+	}
+	b, err := h.uc.Branches.Publish(ctx, cmd)
+	if err != nil {
+		return fail(err)
+	}
+	return apigen.PublishBranch200JSONResponse(toAPIBranch(b)), nil
+}
+
+// UnpublishBranch handles POST …/branches/{branch_id}/unpublish.
+func (h *Handlers) UnpublishBranch(ctx context.Context, req apigen.UnpublishBranchRequestObject) (apigen.UnpublishBranchResponseObject, error) {
+	fail := func(err error) (apigen.UnpublishBranchResponseObject, error) {
+		problem, headers := h.problem(ctx, err)
+		return apigen.UnpublishBranchdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	cmd, err := statusChange(ctx, req.BusinessId, req.BranchId, req.Params.IfMatch)
+	if err != nil {
+		return fail(err)
+	}
+	b, err := h.uc.Branches.Unpublish(ctx, cmd)
+	if err != nil {
+		return fail(err)
+	}
+	return apigen.UnpublishBranch200JSONResponse(toAPIBranch(b)), nil
+}
+
+// statusChange reads the caller, the branch and If-Match of a publish or
+// unpublish request.
+func statusChange(ctx context.Context, business, branch apigen.BusinessID, ifMatch string) (app.BranchStatusChange, error) {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return app.BranchStatusChange{}, httpx.ErrNoPrincipal
+	}
+	version, err := httpx.ParseIfMatch(ifMatch, 1)
+	if err != nil {
+		return app.BranchStatusChange{}, err
+	}
+	return app.BranchStatusChange{
+		BranchQuery: app.BranchQuery{
+			Actor:      p.UserID,
+			BusinessID: shared.IDFromUUID[shared.BusinessTag](business),
+			BranchID:   shared.IDFromUUID[shared.BranchTag](branch),
+		},
+		ExpectedVersion: version,
+	}, nil
+}

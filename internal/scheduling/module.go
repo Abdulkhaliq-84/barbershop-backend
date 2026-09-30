@@ -62,6 +62,13 @@ func (m *Module) WorkingWindows(ctx context.Context, business shared.BusinessID,
 	return w, err
 }
 
+// Readiness says whether the branch has opening hours, and which of staff
+// have a weekly schedule there — part of whether it can take a booking. It
+// authorizes nobody: callers check first.
+func (m *Module) Readiness(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) (openingHours bool, scheduled []shared.StaffID, err error) {
+	return m.windows.Readiness(ctx, business, branch, staff)
+}
+
 // New wires the repositories, use cases and HTTP handlers.
 func New(d Deps) *Module {
 	access := acl.NewBusinessAccess(d.Business)

@@ -56,6 +56,10 @@ func (s *branchStore) ByID(_ context.Context, business shared.BusinessID, id sha
 	return nil, domain.ErrNotFound
 }
 
+func (s *branchStore) Bookable(context.Context, shared.BranchID) (*domain.Branch, error) {
+	panic("not used")
+}
+
 func (s *branchStore) List(_ context.Context, business shared.BusinessID) ([]*domain.Branch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -106,7 +110,7 @@ func newBranchFixture(t *testing.T) *branchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &branchFixture{fixture: f, branchStore: bs, branches: app.NewBranchHandlers(bs, f.store, f.plans, f.clock), owner: owner, business: b.ID()}
+	return &branchFixture{fixture: f, branchStore: bs, branches: app.NewBranchHandlers(app.BranchDeps{Branches: bs, Businesses: f.store, Staff: f.store, Plans: f.plans, Clock: f.clock}), owner: owner, business: b.ID()}
 }
 
 func createCmd(actor shared.UserID, business shared.BusinessID) app.CreateBranch {

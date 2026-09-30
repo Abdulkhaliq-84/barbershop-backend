@@ -23,6 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/billing"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/booking"
+	bookinghttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/booking/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business"
 	businesshttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog"
@@ -39,6 +41,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling"
 	schedulinghttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/adapters/httpapi"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 // version is stamped at build time by the Dockerfile and the Makefile:
@@ -126,6 +129,7 @@ type (
 	mediaAPI      = mediahttp.Handlers
 	catalogAPI    = cataloghttp.Handlers
 	schedulingAPI = schedulinghttp.Handlers
+	bookingAPI    = bookinghttp.Handlers
 )
 
 type apiServer struct {
@@ -134,6 +138,7 @@ type apiServer struct {
 	*mediaAPI      // media: /v1/media/* (signed downloads)
 	*catalogAPI    // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
 	*schedulingAPI // scheduling: /v1/businesses/{id}/branches/{id}/opening-hours
+	*bookingAPI    // booking: /v1/branches/{id}/availability
 }
 
 // application is every module, wired: the API for the api role, the outbox
@@ -170,20 +175,47 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		return nil, err
 	}
 	billingModule := billing.New(billing.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
+	readiness := &branchReadiness{} // filled in below, once catalog and scheduling exist
 	businessModule := business.New(business.Deps{
 		Pool: pool, Clock: clock.System{}, Logger: logger,
-		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus,
+		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus, Readiness: readiness,
 	})
 	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
 	schedulingModule := scheduling.New(scheduling.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
+	readiness.catalog, readiness.scheduling = catalogModule, schedulingModule
+	bookingModule := booking.New(booking.Deps{
+		Pool: pool, Clock: clock.System{}, Logger: logger,
+		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule,
+	})
 	subscribe(bus, billingModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP()}
+	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP(), bookingModule.HTTP()}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
 	return &application{handler: router, bus: bus, close: mediaModule.Close}, nil
+}
+
+// branchReadiness answers business's question "could this branch take a
+// booking?" from catalog and scheduling. business can't ask them itself —
+// they depend on it, and Go forbids import cycles — so main, which sees
+// every module, puts the answer together.
+type branchReadiness struct {
+	catalog    *catalog.Module
+	scheduling *scheduling.Module
+}
+
+func (r *branchReadiness) BranchReadiness(ctx context.Context, biz shared.BusinessID, branch shared.BranchID) (business.Readiness, error) {
+	performers, err := r.catalog.PerformingStaff(ctx, biz, branch)
+	if err != nil {
+		return business.Readiness{}, err
+	}
+	hours, scheduled, err := r.scheduling.Readiness(ctx, biz, branch, performers)
+	if err != nil {
+		return business.Readiness{}, err
+	}
+	return business.Readiness{OpeningHours: hours, OfferedService: len(performers) > 0, BookableBarber: len(scheduled) > 0}, nil
 }
 
 // subscribe wires who reacts to which event. Subscriber names are stored in
