@@ -103,9 +103,9 @@ Client flow (Flutter):
 | Method | Path |
 |---|---|
 | GET | `/v1/branches/{branch_id}/availability?date=&service_ids=&barber_id=` (omit `barber_id` = any barber) — live (M5.2): public; slots `[{starts_at, barber_ids}]` and each barber's total duration and price; `422 service_unavailable` / `barber_unavailable` |
-| POST | `/v1/appointments` (Idempotency-Key) |
+| POST | `/v1/appointments` (Idempotency-Key) — live (M5.3): signed in; `{branch_id, starts_at, service_ids, barber_id?, note?}` → `201` appointment (a retry with the same key: the same one, `Idempotent-Replayed: true`); `409 slot_unavailable` / `booking_limit_reached`; `422 invalid_start` / `idempotency_key_reused` |
 | GET | `/v1/me/appointments?status=upcoming\|past&cursor=` |
-| GET | `/v1/me/appointments/{appointment_id}` |
+| GET | `/v1/me/appointments/{appointment_id}` — live (M5.3): the customer's own; anyone else's is `404` |
 | POST | `/v1/me/appointments/{appointment_id}/cancel` |
 
 ### Business mode — M3 / M4 / M5

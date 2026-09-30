@@ -54,6 +54,14 @@ type BookingAppointmentItem struct {
 	PriceCurrency   string
 }
 
+type BookingIdempotencyKey struct {
+	CustomerID    uuid.UUID
+	Key           uuid.UUID
+	RequestHash   []byte
+	AppointmentID pgtype.UUID
+	CreatedAt     time.Time
+}
+
 type BusinessBranch struct {
 	ID                   uuid.UUID
 	BusinessID           uuid.UUID

@@ -632,6 +632,83 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/appointments:
+    post:
+      operationId: bookAppointment
+      tags: [booking]
+      summary: Book an appointment (signed-in customer)
+      description: |
+        Books the customer in at `starts_at` for `service_ids`, performed
+        back to back by one barber: `barber_id`, or any barber (then the
+        free one with the fewest booked minutes that day). Take the time
+        from `GET …/availability`; the rules are checked again here.
+
+        - `Idempotency-Key` is required: a UUID the app makes per booking
+          attempt and sends again on a retry. A retry gets the appointment
+          the first request made (`201`, with `Idempotent-Replayed: true`);
+          the same key with a different request is
+          `422 idempotency_key_reused`. A failed request doesn't use up
+          its key.
+        - Someone booked the time first, or the barber's hours changed:
+          `409 slot_unavailable` — ask for availability again.
+        - Off the branch's grid, sooner than its lead time, or past its
+          horizon: `422 invalid_start`.
+        - Already holding the most upcoming bookings the branch allows:
+          `409 booking_limit_reached`.
+
+        The appointment is `confirmed`, or `pending` until the shop
+        answers when the branch confirms bookings itself.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppointmentRequest"
+      responses:
+        "201":
+          description: The appointment (or the one this key already made)
+          headers:
+            Idempotent-Replayed:
+              description: "`true` when this is a retry's answer."
+              schema:
+                type: boolean
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/me/appointments/{appointment_id}:
+    parameters:
+      - name: appointment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getMyAppointment
+      tags: [booking]
+      summary: One of my appointments
+      description: Someone else's appointment is `404`, like one that doesn't exist.
+      responses:
+        "200":
+          description: The appointment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/service-categories:
     get:
       operationId: listServiceCategories
@@ -1328,7 +1405,8 @@ components:
             `branch_required`, `cr_number_taken`, `invitation_invalid`,
             `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`,
             `registration_limit_reached`, `branch_not_ready`, `business_not_active`,
-            `service_unavailable`, `barber_unavailable`.
+            `service_unavailable`, `barber_unavailable`, `slot_unavailable`, `invalid_start`,
+            `booking_limit_reached`, `idempotency_key_reused`.
           example: otp_cooldown
         detail:
           type: string
@@ -2027,6 +2105,102 @@ components:
           description: Free start times, in order.
           items:
             $ref: "#/components/schemas/Slot"
+
+    AppointmentRequest:
+      type: object
+      additionalProperties: false
+      required: [branch_id, starts_at, service_ids]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+          description: A start time from availability.
+        service_ids:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            format: uuid
+        barber_id:
+          type: string
+          format: uuid
+          description: Omit for any barber.
+        note:
+          type: string
+          maxLength: 300
+          description: For the barber, e.g. "short on the sides".
+
+    Appointment:
+      type: object
+      required: [id, branch_id, barber, status, assignment, starts_at, ends_at, items, price, note, created_at, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        barber:
+          $ref: "#/components/schemas/AppointmentBarber"
+        status:
+          type: string
+          enum: [pending, confirmed, rejected, expired, cancelled, completed, no_show]
+        assignment:
+          type: string
+          enum: [requested_barber, any_barber]
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+          description: When the services end.
+        pending_until:
+          type: string
+          format: date-time
+          description: A pending booking expires then, unless the shop confirms it.
+        items:
+          type: array
+          description: What was booked, at the price and length of the time of booking.
+          items:
+            $ref: "#/components/schemas/AppointmentItem"
+        price:
+          $ref: "#/components/schemas/Money"
+        note:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+
+    AppointmentBarber:
+      type: object
+      required: [id, display_name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+
+    AppointmentItem:
+      type: object
+      required: [service_id, name, duration_minutes, price]
+      properties:
+        service_id:
+          type: string
+          format: uuid
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        duration_minutes:
+          type: integer
+        price:
+          $ref: "#/components/schemas/Money"
 
     BarberOffer:
       type: object

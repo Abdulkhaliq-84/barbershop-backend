@@ -38,6 +38,8 @@ func (a *Branches) Bookable(ctx context.Context, id shared.BranchID) (app.Branch
 		Policy: app.Policy{
 			MinLead: b.Policy.MinLead, HorizonDays: b.Policy.HorizonDays,
 			SlotInterval: b.Policy.SlotInterval, Buffer: b.Policy.Buffer,
+			AutoConfirm: b.Policy.AutoConfirm, PendingExpiry: b.Policy.PendingExpiry,
+			MaxActiveBookings: b.Policy.MaxActiveBookings,
 		},
 	}, nil
 }

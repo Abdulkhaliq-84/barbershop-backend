@@ -10,7 +10,41 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const appointmentItems = `-- name: AppointmentItems :many
+SELECT appointment_id, position, service_id, name_ar, name_en, duration_minutes, price_amount, price_currency FROM booking.appointment_items WHERE appointment_id = $1 ORDER BY position
+`
+
+func (q *Queries) AppointmentItems(ctx context.Context, appointmentID uuid.UUID) ([]BookingAppointmentItem, error) {
+	rows, err := q.db.Query(ctx, appointmentItems, appointmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BookingAppointmentItem{}
+	for rows.Next() {
+		var i BookingAppointmentItem
+		if err := rows.Scan(
+			&i.AppointmentID,
+			&i.Position,
+			&i.ServiceID,
+			&i.NameAr,
+			&i.NameEn,
+			&i.DurationMinutes,
+			&i.PriceAmount,
+			&i.PriceCurrency,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const busyIntervals = `-- name: BusyIntervals :many
 
@@ -56,4 +90,251 @@ func (q *Queries) BusyIntervals(ctx context.Context, arg BusyIntervalsParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const claimIdempotencyKey = `-- name: ClaimIdempotencyKey :execrows
+INSERT INTO booking.idempotency_keys (customer_id, key, request_hash, created_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+`
+
+type ClaimIdempotencyKeyParams struct {
+	CustomerID  uuid.UUID
+	Key         uuid.UUID
+	RequestHash []byte
+	CreatedAt   time.Time
+}
+
+// 1 row: this request is the first with the key. 0 rows: another request
+// has it; if that one is still running, this waits for it to finish.
+func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimIdempotencyKey,
+		arg.CustomerID,
+		arg.Key,
+		arg.RequestHash,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countActiveBookings = `-- name: CountActiveBookings :one
+SELECT count(*) FROM booking.appointments
+WHERE customer_id = $1 AND branch_id = $2
+  AND status IN ('pending', 'confirmed') AND starts_at > $3
+`
+
+type CountActiveBookingsParams struct {
+	CustomerID uuid.UUID
+	BranchID   uuid.UUID
+	Now        time.Time
+}
+
+// The customer's upcoming active bookings at the branch.
+func (q *Queries) CountActiveBookings(ctx context.Context, arg CountActiveBookingsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveBookings, arg.CustomerID, arg.BranchID, arg.Now)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const customerAppointment = `-- name: CustomerAppointment :one
+SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+       upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
+       version, created_at, updated_at
+FROM booking.appointments WHERE customer_id = $1 AND id = $2
+`
+
+type CustomerAppointmentParams struct {
+	CustomerID uuid.UUID
+	ID         uuid.UUID
+}
+
+type CustomerAppointmentRow struct {
+	ID            uuid.UUID
+	BusinessID    uuid.UUID
+	BranchID      uuid.UUID
+	StaffID       uuid.UUID
+	CustomerID    uuid.UUID
+	Status        string
+	Source        string
+	Assignment    string
+	StartsAt      time.Time
+	EndsAt        time.Time
+	BusyUntil     time.Time
+	PriceAmount   int64
+	PriceCurrency string
+	CustomerNote  string
+	PendingUntil  *time.Time
+	Version       int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// Always by (customer_id, id): someone else's appointment ID finds nothing.
+func (q *Queries) CustomerAppointment(ctx context.Context, arg CustomerAppointmentParams) (CustomerAppointmentRow, error) {
+	row := q.db.QueryRow(ctx, customerAppointment, arg.CustomerID, arg.ID)
+	var i CustomerAppointmentRow
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.BranchID,
+		&i.StaffID,
+		&i.CustomerID,
+		&i.Status,
+		&i.Source,
+		&i.Assignment,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.BusyUntil,
+		&i.PriceAmount,
+		&i.PriceCurrency,
+		&i.CustomerNote,
+		&i.PendingUntil,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const idempotencyKey = `-- name: IdempotencyKey :one
+SELECT request_hash, appointment_id FROM booking.idempotency_keys WHERE customer_id = $1 AND key = $2
+`
+
+type IdempotencyKeyParams struct {
+	CustomerID uuid.UUID
+	Key        uuid.UUID
+}
+
+type IdempotencyKeyRow struct {
+	RequestHash   []byte
+	AppointmentID pgtype.UUID
+}
+
+func (q *Queries) IdempotencyKey(ctx context.Context, arg IdempotencyKeyParams) (IdempotencyKeyRow, error) {
+	row := q.db.QueryRow(ctx, idempotencyKey, arg.CustomerID, arg.Key)
+	var i IdempotencyKeyRow
+	err := row.Scan(&i.RequestHash, &i.AppointmentID)
+	return i, err
+}
+
+const insertAppointment = `-- name: InsertAppointment :exec
+INSERT INTO booking.appointments (
+    id, business_id, branch_id, staff_id, customer_id, status, source, assignment,
+    starts_at, ends_at, during, price_amount, price_currency, customer_note, pending_until,
+    version, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, tstzrange($9, $11::timestamptz, '[)'), $12, $13,
+    $14, $15, $16, $17, $18
+)
+`
+
+type InsertAppointmentParams struct {
+	ID            uuid.UUID
+	BusinessID    uuid.UUID
+	BranchID      uuid.UUID
+	StaffID       uuid.UUID
+	CustomerID    uuid.UUID
+	Status        string
+	Source        string
+	Assignment    string
+	StartsAt      time.Time
+	EndsAt        time.Time
+	BusyUntil     time.Time
+	PriceAmount   int64
+	PriceCurrency string
+	CustomerNote  string
+	PendingUntil  *time.Time
+	Version       int32
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+func (q *Queries) InsertAppointment(ctx context.Context, arg InsertAppointmentParams) error {
+	_, err := q.db.Exec(ctx, insertAppointment,
+		arg.ID,
+		arg.BusinessID,
+		arg.BranchID,
+		arg.StaffID,
+		arg.CustomerID,
+		arg.Status,
+		arg.Source,
+		arg.Assignment,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.BusyUntil,
+		arg.PriceAmount,
+		arg.PriceCurrency,
+		arg.CustomerNote,
+		arg.PendingUntil,
+		arg.Version,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const insertAppointmentItem = `-- name: InsertAppointmentItem :exec
+INSERT INTO booking.appointment_items (appointment_id, position, service_id, name_ar, name_en, duration_minutes, price_amount, price_currency)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertAppointmentItemParams struct {
+	AppointmentID   uuid.UUID
+	Position        int16
+	ServiceID       uuid.UUID
+	NameAr          string
+	NameEn          string
+	DurationMinutes int16
+	PriceAmount     int64
+	PriceCurrency   string
+}
+
+func (q *Queries) InsertAppointmentItem(ctx context.Context, arg InsertAppointmentItemParams) error {
+	_, err := q.db.Exec(ctx, insertAppointmentItem,
+		arg.AppointmentID,
+		arg.Position,
+		arg.ServiceID,
+		arg.NameAr,
+		arg.NameEn,
+		arg.DurationMinutes,
+		arg.PriceAmount,
+		arg.PriceCurrency,
+	)
+	return err
+}
+
+const lockCustomerAtBranch = `-- name: LockCustomerAtBranch :exec
+SELECT pg_advisory_xact_lock(hashtextextended('booking.customer:' || $1::text || ':' || $2::text, 0))
+`
+
+type LockCustomerAtBranchParams struct {
+	CustomerID string
+	BranchID   string
+}
+
+// One booking at a time per customer and branch, so two at once can't both
+// pass the limit on upcoming bookings.
+func (q *Queries) LockCustomerAtBranch(ctx context.Context, arg LockCustomerAtBranchParams) error {
+	_, err := q.db.Exec(ctx, lockCustomerAtBranch, arg.CustomerID, arg.BranchID)
+	return err
+}
+
+const settleIdempotencyKey = `-- name: SettleIdempotencyKey :exec
+UPDATE booking.idempotency_keys SET appointment_id = $1 WHERE customer_id = $2 AND key = $3
+`
+
+type SettleIdempotencyKeyParams struct {
+	AppointmentID pgtype.UUID
+	CustomerID    uuid.UUID
+	Key           uuid.UUID
+}
+
+func (q *Queries) SettleIdempotencyKey(ctx context.Context, arg SettleIdempotencyKeyParams) error {
+	_, err := q.db.Exec(ctx, settleIdempotencyKey, arg.AppointmentID, arg.CustomerID, arg.Key)
+	return err
 }

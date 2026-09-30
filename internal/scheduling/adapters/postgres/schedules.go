@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/adapters/postgres/sqlcgen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -61,7 +62,10 @@ func (r *Schedules) Update(ctx context.Context, business shared.BusinessID, bran
 	k := keyOf(business, branch, staff)
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		if err := q.LockStaffSchedules(ctx, k.staff.String()); err != nil {
+		// One person's schedules change one at a time across branches (two
+		// branches can't both give them the same hours), and never while
+		// they are being booked (database.LockStaff).
+		if err := database.LockStaff(ctx, tx, k.staff); err != nil {
 			return fmt.Errorf("lock schedules: %w", err)
 		}
 		s := domain.NewBarberSchedule(business, branch, staff)
@@ -227,9 +231,16 @@ const exclusionViolation = "23P01"
 
 // Add saves time off; the exclusion constraint refuses an overlap.
 func (r *TimeOffs) Add(ctx context.Context, t *domain.TimeOff) error {
-	err := sqlcgen.New(r.pool).InsertTimeOff(ctx, sqlcgen.InsertTimeOffParams{
-		ID: t.ID().UUID(), BusinessID: t.BusinessID().UUID(), StaffID: t.StaffID().UUID(),
-		StartsAt: t.Span().Start(), EndsAt: t.Span().End(), Reason: t.Reason(), CreatedAt: t.CreatedAt(),
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		// Not while they are being booked: a booking checks their hours
+		// under the same lock (database.LockStaff).
+		if err := database.LockStaff(ctx, tx, t.StaffID().UUID()); err != nil {
+			return err
+		}
+		return sqlcgen.New(tx).InsertTimeOff(ctx, sqlcgen.InsertTimeOffParams{
+			ID: t.ID().UUID(), BusinessID: t.BusinessID().UUID(), StaffID: t.StaffID().UUID(),
+			StartsAt: t.Span().Start(), EndsAt: t.Span().End(), Reason: t.Reason(), CreatedAt: t.CreatedAt(),
+		})
 	})
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == exclusionViolation && pgErr.ConstraintName == "time_off_no_overlap" {
 		return domain.ErrTimeOffOverlaps

@@ -20,10 +20,13 @@ import (
 
 // Policy is how a branch takes bookings, as far as booking needs it.
 type Policy struct {
-	MinLead      time.Duration // earliest start: now + MinLead
-	HorizonDays  int           // latest start: on today + HorizonDays
-	SlotInterval time.Duration // starts every SlotInterval on the clock
-	Buffer       time.Duration // after each appointment, before the next
+	MinLead           time.Duration // earliest start: now + MinLead
+	HorizonDays       int           // latest start: on today + HorizonDays
+	SlotInterval      time.Duration // starts every SlotInterval on the clock
+	Buffer            time.Duration // after each appointment, before the next
+	AutoConfirm       bool          // false: the shop confirms each booking
+	PendingExpiry     time.Duration // an unconfirmed booking expires after this
+	MaxActiveBookings int           // upcoming bookings one customer may hold here
 }
 
 // Branch is a bookable branch: published, of an active business.

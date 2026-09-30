@@ -19,6 +19,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling"
 )
 
@@ -30,6 +31,7 @@ type Deps struct {
 	Business   *business.Module   // bookable branches and their barbers
 	Catalog    *catalog.Module    // the menu: who performs what, for how long, at what price
 	Scheduling *scheduling.Module // working windows
+	Events     *outbox.Bus        // where booking's events are published
 }
 
 // Module is the wired booking module.
@@ -39,11 +41,13 @@ type Module struct {
 
 // New wires the repositories, use cases and HTTP handlers.
 func New(d Deps) *Module {
+	appointments := postgres.NewAppointments(d.Pool)
 	availability := app.NewAvailabilityHandlers(
 		acl.NewBranches(d.Business), acl.NewMenus(d.Catalog), acl.NewSchedules(d.Scheduling),
-		postgres.NewAppointments(d.Pool), d.Clock,
+		appointments, d.Clock,
 	)
-	return &Module{http: httpapi.NewHandlers(availability, d.Logger)}
+	book := app.NewBookHandlers(availability, postgres.NewStore(appointments, d.Events))
+	return &Module{http: httpapi.NewHandlers(availability, book, d.Logger)}
 }
 
 // HTTP returns the handlers for the booking API operations.

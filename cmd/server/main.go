@@ -185,7 +185,7 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 	readiness.catalog, readiness.scheduling = catalogModule, schedulingModule
 	bookingModule := booking.New(booking.Deps{
 		Pool: pool, Clock: clock.System{}, Logger: logger,
-		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule,
+		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule, Events: bus,
 	})
 	subscribe(bus, billingModule)
 
