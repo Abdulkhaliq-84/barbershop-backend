@@ -26,6 +26,8 @@ tags:
     description: Business mode — register and run a barbershop business (tenant)
   - name: branches
     description: Business mode — a business's shops, with location and booking policy
+  - name: staff
+    description: Business mode — a business's team, and inviting people to it
   - name: media
     description: Stored files, served through short-lived signed links
   - name: admin
@@ -341,15 +343,15 @@ paths:
     patch:
       operationId: updateBranch
       tags: [branches]
-      summary: Edit a branch (owner)
+      summary: Edit a branch (owner, or a manager of the branch)
       description: |
         Send only the fields that change. `name`, `location` and
         `booking_policy` are replaced as a whole; an empty `district` or
         `phone` clears it. `If-Match` carries the `version` you last read
         (`412 version_conflict` if the branch changed since).
 
-        Owners only for now: managers will edit the branches they are
-        assigned to once staff invitations exist (M3.5).
+        The owner may edit every branch; a manager only the branches they
+        work at (`403 forbidden` for the others). Barbers can't edit.
       parameters:
         - $ref: "#/components/parameters/IfMatchVersion"
       requestBody:
@@ -365,6 +367,117 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/staff:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: listStaff
+      tags: [staff]
+      summary: The business's team (owner and managers)
+      description: |
+        Everyone who works at the business, with their role and branches.
+        People who haven't accepted their invitation yet are listed under
+        `/staff/invitations` instead. A shop's team is small, so the list is
+        not paginated.
+      responses:
+        "200":
+          description: The staff, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMemberList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/staff/invitations:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: listStaffInvitations
+      tags: [staff]
+      summary: Invitations waiting for an answer (owner)
+      description: Pending invitations, including ones past `expires_at` (revoke or resend those).
+      responses:
+        "200":
+          description: The pending invitations, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffInvitationList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: inviteStaff
+      tags: [staff]
+      summary: Invite a manager or barber by phone (owner)
+      description: |
+        Texts the phone a link that works for 7 days. The invitee opens it,
+        signs in with that same phone number and accepts
+        (`POST /v1/invitations/accept`). The link itself is never returned
+        here: only the invited phone receives it.
+
+        Inviting a phone that already has a pending invitation replaces it
+        (the old link stops working) — that is how to resend one. Every
+        branch in `branch_ids` must belong to the business
+        (`422 validation_failed` otherwise).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffInvitationCreate"
+      responses:
+        "201":
+          description: Invited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffInvitation"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/staff/invitations/{invitation_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/InvitationID"
+    delete:
+      operationId: revokeStaffInvitation
+      tags: [staff]
+      summary: Revoke a pending invitation (owner)
+      description: Its link stops working. An accepted or already revoked invitation gets `409 invitation_closed`.
+      responses:
+        "204":
+          description: Revoked
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/invitations/accept:
+    post:
+      operationId: acceptStaffInvitation
+      tags: [staff]
+      summary: Join a business with an invitation token
+      description: |
+        The caller must be signed in with the phone number that was invited:
+        the token alone is not enough. An unknown, expired, revoked or used
+        token, or the wrong phone, all get the same `404 invitation_invalid`.
+        Someone already on the business's staff gets `409 already_staff`.
+        On success the business appears in `/v1/me/memberships`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationAccept"
+      responses:
+        "200":
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Membership"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -643,6 +756,14 @@ components:
         type: string
         format: uuid
 
+    InvitationID:
+      name: invitation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
     IfMatchVersion:
       name: If-Match
       in: header
@@ -696,7 +817,8 @@ components:
             `forbidden`, `business_already_registered`, `invalid_state_transition`,
             `version_conflict`, `unsupported_media_type`, `payload_too_large`,
             `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
-            `branch_required`, `cr_number_taken`.
+            `branch_required`, `cr_number_taken`, `invitation_invalid`,
+            `invitation_closed`, `already_staff`.
           example: otp_cooldown
         detail:
           type: string
@@ -1223,3 +1345,115 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Branch"
+
+    StaffInvitationCreate:
+      type: object
+      additionalProperties: false
+      required: [phone, display_name, role, branch_ids]
+      properties:
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Saudi mobile number in any common format.
+          example: "0551234567"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: How customers and colleagues will see them.
+          example: أحمد
+        role:
+          type: string
+          enum: [manager, barber]
+          description: A business has one owner, from registration; it can't be invited.
+        branch_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: The branches they will work at (managers run these branches).
+          items:
+            type: string
+            format: uuid
+
+    StaffInvitation:
+      type: object
+      required: [id, phone, display_name, role, branch_ids, status, created_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+          example: "+966551234567"
+        display_name:
+          type: string
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        branch_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        status:
+          type: string
+          enum: [pending, accepted, revoked]
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    StaffInvitationList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffInvitation"
+
+    InvitationAccept:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The `token` from the invitation link.
+
+    StaffMember:
+      type: object
+      required: [id, display_name, role, branch_ids, active, joined_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+          description: Empty for the owner until profiles exist.
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        branch_ids:
+          type: array
+          description: Where they work. Empty for the owner, who runs every branch.
+          items:
+            type: string
+            format: uuid
+        active:
+          type: boolean
+        joined_at:
+          type: string
+          format: date-time
+
+    StaffMemberList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffMember"

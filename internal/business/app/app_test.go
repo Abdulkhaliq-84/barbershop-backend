@@ -114,6 +114,18 @@ func (s *store) Membership(_ context.Context, business shared.BusinessID, user s
 	return nil, domain.ErrNotFound
 }
 
+func (s *store) List(_ context.Context, business shared.BusinessID) ([]*domain.StaffMember, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*domain.StaffMember
+	for _, m := range s.staff {
+		if m.BusinessID() == business {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
 func (s *store) ForUser(_ context.Context, user shared.UserID) ([]app.MembershipView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -128,11 +140,11 @@ func (s *store) ForUser(_ context.Context, user shared.UserID) ([]app.Membership
 	return views, nil
 }
 
-// addStaff puts user into business with role.
-func (s *store) addStaff(business shared.BusinessID, user shared.UserID, role domain.Role, active bool) {
+// addStaff puts user into business with role, working at branches.
+func (s *store) addStaff(business shared.BusinessID, user shared.UserID, role domain.Role, active bool, branches ...shared.BranchID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.staff = append(s.staff, domain.RehydrateStaffMember(shared.NewID[shared.StaffTag](), business, user, role, active, t0))
+	s.staff = append(s.staff, domain.RehydrateStaffMember(shared.NewID[shared.StaffTag](), business, user, role, active, t0, "", branches))
 }
 
 type fixture struct {

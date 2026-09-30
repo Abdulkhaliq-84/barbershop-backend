@@ -6,14 +6,33 @@ INSERT INTO business.businesses (id, owner_user_id, display_name_ar, display_nam
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: InsertStaffMember :exec
-INSERT INTO business.staff_members (id, business_id, user_id, role, active, created_at)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO business.staff_members (id, business_id, user_id, role, active, created_at, display_name)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: InsertStaffBranch :exec
+INSERT INTO business.staff_branches (staff_id, branch_id, business_id) VALUES ($1, $2, $3);
 
 -- name: BusinessByID :one
 SELECT * FROM business.businesses WHERE id = $1;
 
 -- name: StaffMembership :one
-SELECT * FROM business.staff_members WHERE business_id = $1 AND user_id = $2;
+-- The caller's staff record with the branches they work at: the first query
+-- of every business-mode request.
+SELECT s.id, s.business_id, s.user_id, s.role, s.active, s.created_at, s.display_name,
+       coalesce(array_agg(sb.branch_id) FILTER (WHERE sb.branch_id IS NOT NULL), '{}')::uuid[] AS branch_ids
+FROM business.staff_members s
+LEFT JOIN business.staff_branches sb ON sb.staff_id = s.id
+WHERE s.business_id = $1 AND s.user_id = $2
+GROUP BY s.id;
+
+-- name: StaffByBusiness :many
+SELECT s.id, s.business_id, s.user_id, s.role, s.active, s.created_at, s.display_name,
+       coalesce(array_agg(sb.branch_id) FILTER (WHERE sb.branch_id IS NOT NULL), '{}')::uuid[] AS branch_ids
+FROM business.staff_members s
+LEFT JOIN business.staff_branches sb ON sb.staff_id = s.id
+WHERE s.business_id = $1
+GROUP BY s.id
+ORDER BY s.created_at, s.id;
 
 -- name: MembershipsForUser :many
 SELECT s.id AS staff_id, s.role, b.id AS business_id, b.display_name_ar, b.display_name_en, b.status
@@ -89,3 +108,33 @@ WHERE status = @status
        OR (submitted_at, id) > (sqlc.narg('after_submitted_at')::timestamptz, sqlc.narg('after_id')::uuid))
 ORDER BY submitted_at, id
 LIMIT @page_size;
+
+-- name: CountBranchesIn :one
+SELECT count(*) FROM business.branches WHERE business_id = @business_id AND id = ANY(@ids::uuid[]);
+
+-- name: LockBusinessForInvite :one
+-- Takes turns between invitations of one business, so two at once for the
+-- same phone can't both be pending. NO KEY UPDATE doesn't block rows that
+-- merely reference the business (branches, documents).
+SELECT id FROM business.businesses WHERE id = $1 FOR NO KEY UPDATE;
+
+-- name: RevokePendingInvitations :exec
+UPDATE business.invitations SET status = 'revoked'
+WHERE business_id = $1 AND phone = $2 AND status = 'pending';
+
+-- name: InsertInvitation :exec
+INSERT INTO business.invitations (id, business_id, phone, display_name, role, branch_ids, token_hash, status, invited_by, created_at, expires_at)
+VALUES (@id, @business_id, @phone, @display_name, @role, @branch_ids, @token_hash, @status, @invited_by, @created_at, @expires_at);
+
+-- name: PendingInvitations :many
+SELECT * FROM business.invitations WHERE business_id = $1 AND status = 'pending' ORDER BY created_at DESC, id;
+
+-- name: InvitationForUpdate :one
+SELECT * FROM business.invitations WHERE business_id = $1 AND id = $2 FOR UPDATE;
+
+-- name: InvitationByTokenForUpdate :one
+SELECT * FROM business.invitations WHERE token_hash = $1 FOR UPDATE;
+
+-- name: SaveInvitation :exec
+UPDATE business.invitations SET status = @status, accepted_at = @accepted_at, accepted_by = @accepted_by
+WHERE id = @id;

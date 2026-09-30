@@ -180,6 +180,11 @@ watch the second call end the session (`refresh_token_reused`).
 | A local closure `fail := func(err error) (…)` to keep every error return one line | `adapters/httpapi/review.go` | a small `sendError(res, err)` helper |
 | A **state machine** as methods on the aggregate (`Submit`, `Approve`, `Reject`) that refuse illegal moves | `domain/review.go` | xstate guards |
 
+| **Random tokens, stored as a hash**: `crypto/rand` → base64url, keep only `sha256` | `business/adapters/invites` | `crypto.randomBytes(32).toString('base64url')` + `createHash('sha256')` |
+| A **method value** as a callback: `(*domain.Invitation).Revoke` is a `func(*Invitation) error` | `app.StaffHandlers.Revoke` | passing `Invitation.prototype.revoke.call` — but type-checked |
+| **Postgres arrays** (`uuid[]`) and `array_agg(...) FILTER (WHERE ...)` mapped to `[]uuid.UUID` by sqlc | `queries.sql` `StaffByBusiness` | `pg` returning arrays; no ORM join table needed to *read* |
+| **Composite foreign keys** `(business_id, branch_id)` so the database refuses cross-tenant rows | `migrations/00010` | a check you would otherwise write in every service |
+
 Try this: register a business, then call `GET /v1/businesses/{id}` with another user's token and
 compare the answer with an ID that doesn't exist. They should be identical.
 

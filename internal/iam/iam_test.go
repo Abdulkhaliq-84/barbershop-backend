@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
@@ -60,6 +64,7 @@ type env struct {
 	server *httptest.Server
 	inbox  *inbox
 	clock  *clock.Fake
+	mod    *iam.Module
 }
 
 func newEnv(t *testing.T) *env {
@@ -78,6 +83,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.mod = mod
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
 	if err := httpx.MountAPI(router, apiServer{Handlers: mod.HTTP()}, logger, mod.Authenticate); err != nil {
 		t.Fatal(err)
@@ -378,5 +384,25 @@ func TestProtectedOperationsNeedAValidToken(t *testing.T) {
 	// Public operations ignore a bad token instead of failing.
 	if r := e.post(t, "/v1/auth/otp/request", `{"phone":"0559998888"}`, bearer("garbage")...); r.status != http.StatusAccepted {
 		t.Errorf("public operation with a bad token: %d %v", r.status, r.body)
+	}
+}
+
+// PhoneOf is how other modules tie something sent to a phone (a staff
+// invitation) to the account signed in with it.
+func TestPhoneOf(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	access, _ := e.signIn(t, "0551234567")
+	r := e.get(t, "/v1/me", bearer(access)...)
+	id, err := uuid.Parse(fmt.Sprint(r.body["id"]))
+	if err != nil {
+		t.Fatalf("me: %d %v", r.status, r.body)
+	}
+	phone, err := e.mod.PhoneOf(t.Context(), shared.IDFromUUID[shared.UserTag](id))
+	if err != nil || phone.String() != "+966551234567" {
+		t.Errorf("PhoneOf = %v, %v", phone, err)
+	}
+	if _, err := e.mod.PhoneOf(t.Context(), shared.NewID[shared.UserTag]()); !errors.Is(err, iam.ErrUnknownUser) {
+		t.Errorf("unknown user: error = %v, want ErrUnknownUser", err)
 	}
 }

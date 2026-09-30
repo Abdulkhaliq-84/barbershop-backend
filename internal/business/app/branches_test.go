@@ -148,8 +148,15 @@ func TestBranchAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	other, err := f.branches.Create(ctx, createCmd(f.owner, f.business))
+	if err != nil {
+		t.Fatal(err)
+	}
 	barber, stranger := shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag]()
-	f.store.addStaff(f.business, barber, domain.RoleBarber, true)
+	manager, otherManager := shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag]()
+	f.store.addStaff(f.business, barber, domain.RoleBarber, true, branch.ID())
+	f.store.addStaff(f.business, manager, domain.RoleManager, true, branch.ID())
+	f.store.addStaff(f.business, otherManager, domain.RoleManager, true, other.ID())
 	q := func(actor shared.UserID) app.BranchQuery {
 		return app.BranchQuery{Actor: actor, BusinessID: f.business, BranchID: branch.ID()}
 	}
@@ -158,12 +165,16 @@ func TestBranchAuthorization(t *testing.T) {
 		return app.UpdateBranch{Actor: actor, BusinessID: f.business, BranchID: branch.ID(), ExpectedVersion: 1, Address: &address}
 	}
 
-	// Staff read; only the owner writes; strangers see nothing.
+	// Staff read; the owner and the branch's managers write; strangers see nothing.
 	if _, err := f.branches.Get(ctx, q(barber)); err != nil {
 		t.Errorf("barber get: %v", err)
 	}
-	if list, err := f.branches.List(ctx, barber, f.business); err != nil || len(list) != 1 {
+	if list, err := f.branches.List(ctx, barber, f.business); err != nil || len(list) != 2 {
 		t.Errorf("barber list: %d, %v", len(list), err)
+	}
+	// A manager edits the branch they work at.
+	if b, err := f.branches.Update(ctx, update(manager)); err != nil || b.Profile().Address != address {
+		t.Fatalf("manager update own branch: %v", err)
 	}
 
 	f.branchStore.calls = 0
@@ -174,6 +185,8 @@ func TestBranchAuthorization(t *testing.T) {
 	}{
 		{"barber create", func() error { _, err := f.branches.Create(ctx, createCmd(barber, f.business)); return err }, domain.ErrForbidden},
 		{"barber update", func() error { _, err := f.branches.Update(ctx, update(barber)); return err }, domain.ErrForbidden},
+		{"manager create", func() error { _, err := f.branches.Create(ctx, createCmd(manager, f.business)); return err }, domain.ErrForbidden},
+		{"manager of another branch", func() error { _, err := f.branches.Update(ctx, update(otherManager)); return err }, domain.ErrForbidden},
 		{"stranger get", func() error { _, err := f.branches.Get(ctx, q(stranger)); return err }, domain.ErrNotFound},
 		{"stranger list", func() error { _, err := f.branches.List(ctx, stranger, f.business); return err }, domain.ErrNotFound},
 		{"stranger create", func() error { _, err := f.branches.Create(ctx, createCmd(stranger, f.business)); return err }, domain.ErrNotFound},

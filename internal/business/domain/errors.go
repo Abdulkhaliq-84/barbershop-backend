@@ -36,4 +36,12 @@ var (
 	ErrCRNumberClaimed         = errors.New("review: another business already uses this CR number")
 	ErrNotPlatformAdmin        = errors.New("platform admins only")
 	ErrSelfReview              = errors.New("review: nobody reviews their own business")
+
+	ErrInvalidInviteRole   = errors.New("staff: invite a manager or a barber")
+	ErrStaffNameRequired   = errors.New("staff: a name is required")
+	ErrStaffBranchRequired = errors.New("staff: choose 1 to 50 branches")
+	ErrUnknownBranch       = errors.New("staff: a branch is not in this business")
+	ErrInvitationInvalid   = errors.New("staff: invitation invalid, expired or already used")
+	ErrAlreadyStaff        = errors.New("staff: already works at this business")
+	ErrInvitationClosed    = errors.New("staff: invitation already accepted or revoked")
 )

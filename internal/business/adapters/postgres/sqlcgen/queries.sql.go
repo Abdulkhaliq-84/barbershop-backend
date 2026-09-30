@@ -265,6 +265,22 @@ func (q *Queries) CountBranches(ctx context.Context, businessID uuid.UUID) (int6
 	return count, err
 }
 
+const countBranchesIn = `-- name: CountBranchesIn :one
+SELECT count(*) FROM business.branches WHERE business_id = $1 AND id = ANY($2::uuid[])
+`
+
+type CountBranchesInParams struct {
+	BusinessID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) CountBranchesIn(ctx context.Context, arg CountBranchesInParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countBranchesIn, arg.BusinessID, arg.Ids)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countVerificationDocuments = `-- name: CountVerificationDocuments :one
 SELECT count(*) FROM business.verification_documents WHERE business_id = $1
 `
@@ -380,18 +396,70 @@ func (q *Queries) InsertBusiness(ctx context.Context, arg InsertBusinessParams) 
 	return err
 }
 
+const insertInvitation = `-- name: InsertInvitation :exec
+INSERT INTO business.invitations (id, business_id, phone, display_name, role, branch_ids, token_hash, status, invited_by, created_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+`
+
+type InsertInvitationParams struct {
+	ID          uuid.UUID
+	BusinessID  uuid.UUID
+	Phone       string
+	DisplayName string
+	Role        string
+	BranchIds   []uuid.UUID
+	TokenHash   []byte
+	Status      string
+	InvitedBy   uuid.UUID
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}
+
+func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationParams) error {
+	_, err := q.db.Exec(ctx, insertInvitation,
+		arg.ID,
+		arg.BusinessID,
+		arg.Phone,
+		arg.DisplayName,
+		arg.Role,
+		arg.BranchIds,
+		arg.TokenHash,
+		arg.Status,
+		arg.InvitedBy,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const insertStaffBranch = `-- name: InsertStaffBranch :exec
+INSERT INTO business.staff_branches (staff_id, branch_id, business_id) VALUES ($1, $2, $3)
+`
+
+type InsertStaffBranchParams struct {
+	StaffID    uuid.UUID
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+}
+
+func (q *Queries) InsertStaffBranch(ctx context.Context, arg InsertStaffBranchParams) error {
+	_, err := q.db.Exec(ctx, insertStaffBranch, arg.StaffID, arg.BranchID, arg.BusinessID)
+	return err
+}
+
 const insertStaffMember = `-- name: InsertStaffMember :exec
-INSERT INTO business.staff_members (id, business_id, user_id, role, active, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO business.staff_members (id, business_id, user_id, role, active, created_at, display_name)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertStaffMemberParams struct {
-	ID         uuid.UUID
-	BusinessID uuid.UUID
-	UserID     *uuid.UUID
-	Role       string
-	Active     bool
-	CreatedAt  time.Time
+	ID          uuid.UUID
+	BusinessID  uuid.UUID
+	UserID      *uuid.UUID
+	Role        string
+	Active      bool
+	CreatedAt   time.Time
+	DisplayName string
 }
 
 func (q *Queries) InsertStaffMember(ctx context.Context, arg InsertStaffMemberParams) error {
@@ -402,6 +470,7 @@ func (q *Queries) InsertStaffMember(ctx context.Context, arg InsertStaffMemberPa
 		arg.Role,
 		arg.Active,
 		arg.CreatedAt,
+		arg.DisplayName,
 	)
 	return err
 }
@@ -432,6 +501,75 @@ func (q *Queries) InsertVerificationDocument(ctx context.Context, arg InsertVeri
 		arg.UploadedAt,
 	)
 	return err
+}
+
+const invitationByTokenForUpdate = `-- name: InvitationByTokenForUpdate :one
+SELECT id, business_id, phone, display_name, role, branch_ids, token_hash, status, invited_by, created_at, expires_at, accepted_at, accepted_by FROM business.invitations WHERE token_hash = $1 FOR UPDATE
+`
+
+func (q *Queries) InvitationByTokenForUpdate(ctx context.Context, tokenHash []byte) (BusinessInvitation, error) {
+	row := q.db.QueryRow(ctx, invitationByTokenForUpdate, tokenHash)
+	var i BusinessInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.Phone,
+		&i.DisplayName,
+		&i.Role,
+		&i.BranchIds,
+		&i.TokenHash,
+		&i.Status,
+		&i.InvitedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.AcceptedBy,
+	)
+	return i, err
+}
+
+const invitationForUpdate = `-- name: InvitationForUpdate :one
+SELECT id, business_id, phone, display_name, role, branch_ids, token_hash, status, invited_by, created_at, expires_at, accepted_at, accepted_by FROM business.invitations WHERE business_id = $1 AND id = $2 FOR UPDATE
+`
+
+type InvitationForUpdateParams struct {
+	BusinessID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) InvitationForUpdate(ctx context.Context, arg InvitationForUpdateParams) (BusinessInvitation, error) {
+	row := q.db.QueryRow(ctx, invitationForUpdate, arg.BusinessID, arg.ID)
+	var i BusinessInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.Phone,
+		&i.DisplayName,
+		&i.Role,
+		&i.BranchIds,
+		&i.TokenHash,
+		&i.Status,
+		&i.InvitedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.AcceptedBy,
+	)
+	return i, err
+}
+
+const lockBusinessForInvite = `-- name: LockBusinessForInvite :one
+SELECT id FROM business.businesses WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Takes turns between invitations of one business, so two at once for the
+// same phone can't both be pending. NO KEY UPDATE doesn't block rows that
+// merely reference the business (branches, documents).
+func (q *Queries) LockBusinessForInvite(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockBusinessForInvite, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const membershipsForUser = `-- name: MembershipsForUser :many
@@ -478,8 +616,138 @@ func (q *Queries) MembershipsForUser(ctx context.Context, userID *uuid.UUID) ([]
 	return items, nil
 }
 
+const pendingInvitations = `-- name: PendingInvitations :many
+SELECT id, business_id, phone, display_name, role, branch_ids, token_hash, status, invited_by, created_at, expires_at, accepted_at, accepted_by FROM business.invitations WHERE business_id = $1 AND status = 'pending' ORDER BY created_at DESC, id
+`
+
+func (q *Queries) PendingInvitations(ctx context.Context, businessID uuid.UUID) ([]BusinessInvitation, error) {
+	rows, err := q.db.Query(ctx, pendingInvitations, businessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BusinessInvitation{}
+	for rows.Next() {
+		var i BusinessInvitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.BusinessID,
+			&i.Phone,
+			&i.DisplayName,
+			&i.Role,
+			&i.BranchIds,
+			&i.TokenHash,
+			&i.Status,
+			&i.InvitedBy,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.AcceptedAt,
+			&i.AcceptedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokePendingInvitations = `-- name: RevokePendingInvitations :exec
+UPDATE business.invitations SET status = 'revoked'
+WHERE business_id = $1 AND phone = $2 AND status = 'pending'
+`
+
+type RevokePendingInvitationsParams struct {
+	BusinessID uuid.UUID
+	Phone      string
+}
+
+func (q *Queries) RevokePendingInvitations(ctx context.Context, arg RevokePendingInvitationsParams) error {
+	_, err := q.db.Exec(ctx, revokePendingInvitations, arg.BusinessID, arg.Phone)
+	return err
+}
+
+const saveInvitation = `-- name: SaveInvitation :exec
+UPDATE business.invitations SET status = $1, accepted_at = $2, accepted_by = $3
+WHERE id = $4
+`
+
+type SaveInvitationParams struct {
+	Status     string
+	AcceptedAt *time.Time
+	AcceptedBy *uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) SaveInvitation(ctx context.Context, arg SaveInvitationParams) error {
+	_, err := q.db.Exec(ctx, saveInvitation,
+		arg.Status,
+		arg.AcceptedAt,
+		arg.AcceptedBy,
+		arg.ID,
+	)
+	return err
+}
+
+const staffByBusiness = `-- name: StaffByBusiness :many
+SELECT s.id, s.business_id, s.user_id, s.role, s.active, s.created_at, s.display_name,
+       coalesce(array_agg(sb.branch_id) FILTER (WHERE sb.branch_id IS NOT NULL), '{}')::uuid[] AS branch_ids
+FROM business.staff_members s
+LEFT JOIN business.staff_branches sb ON sb.staff_id = s.id
+WHERE s.business_id = $1
+GROUP BY s.id
+ORDER BY s.created_at, s.id
+`
+
+type StaffByBusinessRow struct {
+	ID          uuid.UUID
+	BusinessID  uuid.UUID
+	UserID      *uuid.UUID
+	Role        string
+	Active      bool
+	CreatedAt   time.Time
+	DisplayName string
+	BranchIds   []uuid.UUID
+}
+
+func (q *Queries) StaffByBusiness(ctx context.Context, businessID uuid.UUID) ([]StaffByBusinessRow, error) {
+	rows, err := q.db.Query(ctx, staffByBusiness, businessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StaffByBusinessRow{}
+	for rows.Next() {
+		var i StaffByBusinessRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BusinessID,
+			&i.UserID,
+			&i.Role,
+			&i.Active,
+			&i.CreatedAt,
+			&i.DisplayName,
+			&i.BranchIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const staffMembership = `-- name: StaffMembership :one
-SELECT id, business_id, user_id, role, active, created_at FROM business.staff_members WHERE business_id = $1 AND user_id = $2
+SELECT s.id, s.business_id, s.user_id, s.role, s.active, s.created_at, s.display_name,
+       coalesce(array_agg(sb.branch_id) FILTER (WHERE sb.branch_id IS NOT NULL), '{}')::uuid[] AS branch_ids
+FROM business.staff_members s
+LEFT JOIN business.staff_branches sb ON sb.staff_id = s.id
+WHERE s.business_id = $1 AND s.user_id = $2
+GROUP BY s.id
 `
 
 type StaffMembershipParams struct {
@@ -487,9 +755,22 @@ type StaffMembershipParams struct {
 	UserID     *uuid.UUID
 }
 
-func (q *Queries) StaffMembership(ctx context.Context, arg StaffMembershipParams) (BusinessStaffMember, error) {
+type StaffMembershipRow struct {
+	ID          uuid.UUID
+	BusinessID  uuid.UUID
+	UserID      *uuid.UUID
+	Role        string
+	Active      bool
+	CreatedAt   time.Time
+	DisplayName string
+	BranchIds   []uuid.UUID
+}
+
+// The caller's staff record with the branches they work at: the first query
+// of every business-mode request.
+func (q *Queries) StaffMembership(ctx context.Context, arg StaffMembershipParams) (StaffMembershipRow, error) {
 	row := q.db.QueryRow(ctx, staffMembership, arg.BusinessID, arg.UserID)
-	var i BusinessStaffMember
+	var i StaffMembershipRow
 	err := row.Scan(
 		&i.ID,
 		&i.BusinessID,
@@ -497,6 +778,8 @@ func (q *Queries) StaffMembership(ctx context.Context, arg StaffMembershipParams
 		&i.Role,
 		&i.Active,
 		&i.CreatedAt,
+		&i.DisplayName,
+		&i.BranchIds,
 	)
 	return i, err
 }
