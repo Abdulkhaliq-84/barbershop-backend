@@ -176,6 +176,10 @@ watch the second call end the session (`refresh_token_reused`).
 | **HMAC-signed links** checked with `hmac.Equal` (constant time) | `internal/media/adapters/signer` | `crypto.timingSafeEqual` |
 | An **anti-corruption layer**: business's own port, implemented over another module's public API | `internal/business/adapters/acl/media.go` | a wrapper service that maps another team's SDK to your types |
 
+| **Keyset pagination**: `WHERE (submitted_at, id) > ($1, $2) ORDER BY submitted_at, id LIMIT n+1` and an opaque cursor | `adapters/postgres` `ReviewPage`, `app.ReviewHandlers.Queue` | cursor pagination in a GraphQL connection; never `OFFSET` |
+| A local closure `fail := func(err error) (…)` to keep every error return one line | `adapters/httpapi/review.go` | a small `sendError(res, err)` helper |
+| A **state machine** as methods on the aggregate (`Submit`, `Approve`, `Reject`) that refuse illegal moves | `domain/review.go` | xstate guards |
+
 Try this: register a business, then call `GET /v1/businesses/{id}` with another user's token and
 compare the answer with an ID that doesn't exist. They should be identical.
 

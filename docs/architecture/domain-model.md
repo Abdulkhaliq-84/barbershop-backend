@@ -124,6 +124,12 @@ on discovery's PostGIS read model (M6). A branch is always loaded by `(business_
 another business's branch ID is "not found". Any staff may read branches; only the owner creates or
 edits them until managers are assigned branches (M3.5).
 
+**Review (M3.4, ADR-0017).** Submit (owner) needs ≥ 1 CR document and ≥ 1 branch, counted under the
+business row lock, and claims the CR number platform-wide. Approve / reject (platform admin, never the
+business's own owner) record `reviewed_at`, `reviewed_by` and, for a rejection, a reason (≤ 500
+characters) the owner sees. A rejected business can be edited and resubmitted; rejecting releases the CR
+claim.
+
 **Booking policy** (value object on `Branch`, defaults in brackets): minimum lead time [30 min],
 booking horizon [30 days], slot interval [15 min], buffer between appointments [0 min], customer
 cancellation window [2 h before start], auto-confirm [yes], pending expiry if not auto-confirm [15 min],

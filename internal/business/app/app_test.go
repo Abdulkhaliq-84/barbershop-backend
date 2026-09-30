@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +22,8 @@ type store struct {
 	mu         sync.Mutex
 	businesses map[shared.BusinessID]*domain.Business
 	staff      []*domain.StaffMember
-	loads      int // ByID calls, to prove authorization runs first
+	loads      int              // ByID calls, to prove authorization runs first
+	readiness  domain.Readiness // what UpdateWithReadiness reports
 }
 
 func newStore() *store {
@@ -63,12 +65,42 @@ func (s *store) Update(_ context.Context, id shared.BusinessID, expectedVersion 
 	if b.Version() != expectedVersion {
 		return domain.ErrVersionConflict
 	}
-	c := domain.RehydrateBusiness(b.ID(), b.OwnerID(), b.DisplayName(), b.LegalName(), b.CRNumber(), b.Status(), b.Version(), b.CreatedAt(), b.UpdatedAt())
+	c := domain.RehydrateBusiness(b.ID(), b.OwnerID(), b.DisplayName(), b.LegalName(), b.CRNumber(), b.Status(), b.Version(), b.CreatedAt(), b.UpdatedAt(), b.Review())
 	if err := fn(c); err != nil {
 		return err
 	}
 	s.businesses[id] = c
 	return nil
+}
+
+func (s *store) UpdateWithReadiness(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*domain.Business, domain.Readiness) error) error {
+	r := s.readiness
+	return s.Update(ctx, id, expectedVersion, func(b *domain.Business) error { return fn(b, r) })
+}
+
+func (s *store) ReviewPage(_ context.Context, status domain.Status, after *app.QueuePosition, limit int) ([]*domain.Business, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var page []*domain.Business
+	for _, b := range s.businesses {
+		if b.Status() == status {
+			page = append(page, b)
+		}
+	}
+	key := func(b *domain.Business) string {
+		return b.Review().SubmittedAt.Format(time.RFC3339Nano) + b.ID().String()
+	}
+	sort.Slice(page, func(i, j int) bool { return key(page[i]) < key(page[j]) })
+	if after != nil {
+		cut := after.SubmittedAt.Format(time.RFC3339Nano) + after.ID.String()
+		for len(page) > 0 && key(page[0]) <= cut {
+			page = page[1:]
+		}
+	}
+	if len(page) > limit {
+		page = page[:limit]
+	}
+	return page, nil
 }
 
 func (s *store) Membership(_ context.Context, business shared.BusinessID, user shared.UserID) (*domain.StaffMember, error) {

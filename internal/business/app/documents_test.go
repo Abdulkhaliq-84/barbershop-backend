@@ -194,7 +194,7 @@ func TestUploadDocumentLimitAndStatus(t *testing.T) {
 	// Once submitted, documents are frozen for the reviewer.
 	g := newDocFixture(t)
 	b := g.store.businesses[g.business]
-	g.store.businesses[g.business] = domain.RehydrateBusiness(b.ID(), b.OwnerID(), b.DisplayName(), b.LegalName(), b.CRNumber(), domain.StatusPendingReview, b.Version(), b.CreatedAt(), b.UpdatedAt())
+	g.store.businesses[g.business] = domain.RehydrateBusiness(b.ID(), b.OwnerID(), b.DisplayName(), b.LegalName(), b.CRNumber(), domain.StatusPendingReview, b.Version(), b.CreatedAt(), b.UpdatedAt(), domain.Review{})
 	if _, err := g.upload(g.owner, "%PDF-"); !errors.Is(err, domain.ErrInvalidStateTransition) {
 		t.Fatalf("submitted business: error = %v", err)
 	}

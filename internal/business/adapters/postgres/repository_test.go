@@ -211,11 +211,17 @@ func TestSchemaConstraints(t *testing.T) {
 	wantViolation("same user twice", "staff_members_user_business_key", err)
 
 	// Two drafts may share a CR number; two submitted businesses may not.
-	if _, err := pool.Exec(ctx, `UPDATE business.businesses SET status = 'pending_review' WHERE id = $1`, a.ID().UUID()); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE business.businesses SET status = 'pending_review', submitted_at = now() WHERE id = $1`, a.ID().UUID()); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
-	_, err = pool.Exec(ctx, `UPDATE business.businesses SET status = 'active' WHERE id = $1`, b.ID().UUID())
+	_, err = pool.Exec(ctx, `UPDATE business.businesses SET status = 'active', submitted_at = now() WHERE id = $1`, b.ID().UUID())
 	wantViolation("claimed cr number", "businesses_claimed_cr_number_key", err)
+
+	// A business past draft has a submission time, and a decision has a reviewer.
+	_, err = pool.Exec(ctx, `UPDATE business.businesses SET status = 'active', submitted_at = NULL WHERE id = $1`, a.ID().UUID())
+	wantViolation("under review without submitted_at", "businesses_submitted_check", err)
+	_, err = pool.Exec(ctx, `UPDATE business.businesses SET reviewed_at = now() WHERE id = $1`, a.ID().UUID())
+	wantViolation("reviewed without a reviewer", "businesses_reviewed_check", err)
 
 	// Only 10-digit CR numbers are stored.
 	_, err = pool.Exec(ctx, `UPDATE business.businesses SET cr_number = '12345' WHERE id = $1`, b.ID().UUID())
@@ -255,7 +261,7 @@ func TestStoreUpdate(t *testing.T) {
 	if err := rename(t, store, shared.NewID[shared.BusinessTag](), 1, "x"); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("unknown business: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE business.businesses SET status = 'pending_review' WHERE id = $1`, b.ID().UUID()); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE business.businesses SET status = 'pending_review', submitted_at = now() WHERE id = $1`, b.ID().UUID()); err != nil {
 		t.Fatal(err)
 	}
 	if err := rename(t, store, b.ID(), 2, "x"); !errors.Is(err, domain.ErrInvalidStateTransition) {

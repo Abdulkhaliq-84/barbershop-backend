@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/config"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
@@ -58,6 +61,7 @@ func (b *logBuffer) lastCode(t *testing.T) string {
 type api struct {
 	url  string
 	logs *logBuffer
+	pool *pgxpool.Pool
 }
 
 func newAPI(t *testing.T) *api {
@@ -81,7 +85,7 @@ func newAPI(t *testing.T) *api {
 	}
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return &api{url: srv.URL, logs: logs}
+	return &api{url: srv.URL, logs: logs, pool: pool}
 }
 
 type response struct {
@@ -123,6 +127,13 @@ func (a *api) do(t *testing.T, method, path, token, body string, headers ...stri
 // signIn logs phone in and returns an access token.
 func (a *api) signIn(t *testing.T, phone string) string {
 	t.Helper()
+	access, _ := a.signInTokens(t, phone)
+	return access
+}
+
+// signInTokens logs phone in and returns the access and refresh tokens.
+func (a *api) signInTokens(t *testing.T, phone string) (access, refresh string) {
+	t.Helper()
 	if r := a.do(t, http.MethodPost, "/v1/auth/otp/request", "", `{"phone":"`+phone+`"}`); r.status != http.StatusAccepted {
 		t.Fatalf("otp request: %d %v", r.status, r.body)
 	}
@@ -131,8 +142,25 @@ func (a *api) signIn(t *testing.T, phone string) string {
 		t.Fatalf("otp verify: %d %v", r.status, r.body)
 	}
 	tokens, _ := r.body["tokens"].(map[string]any)
-	token, _ := tokens["access_token"].(string)
-	return token
+	access, _ = tokens["access_token"].(string)
+	refresh, _ = tokens["refresh_token"].(string)
+	return access, refresh
+}
+
+// admin signs phone in as a platform admin. There is no API to make one:
+// an operator sets the role in the database, and the next refresh carries it.
+func (a *api) admin(t *testing.T, phone string) string {
+	t.Helper()
+	_, refresh := a.signInTokens(t, phone)
+	if _, err := a.pool.Exec(t.Context(), `UPDATE iam.users SET platform_role = 'admin' WHERE phone = $1`, "+966"+phone[1:]); err != nil {
+		t.Fatal(err)
+	}
+	r := a.do(t, http.MethodPost, "/v1/auth/refresh", "", `{"refresh_token":"`+refresh+`"}`)
+	tokens, _ := r.body["access_token"].(string)
+	if r.status != http.StatusOK || tokens == "" {
+		t.Fatalf("refresh: %d %v", r.status, r.body)
+	}
+	return tokens
 }
 
 func memberships(t *testing.T, r response) []any {
@@ -542,5 +570,175 @@ func TestVerificationDocumentUploadRejects(t *testing.T) {
 	// JSON is not a file.
 	if status, _, data := a.raw(t, http.MethodPost, biz+"/verification/documents?kind=cr_certificate", owner, "application/json", []byte(`{}`)); status != http.StatusBadRequest {
 		t.Errorf("json body: %d %s", status, data)
+	}
+}
+
+// ifMatch reads the "version" field of a response as the If-Match value.
+func ifMatch(body map[string]any) string {
+	v, _ := body["version"].(float64)
+	return strconv.Itoa(int(v))
+}
+
+func TestReviewAPI(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner, biz := a.register(t, "0551234567", "1010000001")
+	admin := a.admin(t, "0500000001")
+	id := strings.TrimPrefix(biz, "/v1/businesses/")
+	adminBiz := "/v1/admin/businesses/" + id
+
+	// Not ready: the reviewer needs the CR document and a branch.
+	if r := a.do(t, http.MethodPost, biz+"/verification/submit", owner, "", "If-Match", "1"); r.status != http.StatusConflict || r.body["code"] != "cr_document_required" {
+		t.Fatalf("submit without document: %d %v", r.status, r.body)
+	}
+	if r := a.upload(t, biz, owner, pdfFile(1000)); r.status != http.StatusCreated {
+		t.Fatalf("upload: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodPost, biz+"/verification/submit", owner, "", "If-Match", "1"); r.status != http.StatusConflict || r.body["code"] != "branch_required" {
+		t.Fatalf("submit without branch: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodPost, biz+"/branches", owner, branchJSON); r.status != http.StatusCreated {
+		t.Fatalf("branch: %d %v", r.status, r.body)
+	}
+
+	// Drafts are invisible to reviewers.
+	if r := a.do(t, http.MethodGet, adminBiz, admin, ""); r.status != http.StatusNotFound {
+		t.Fatalf("admin sees a draft: %d %v", r.status, r.body)
+	}
+
+	// Submit.
+	r := a.do(t, http.MethodPost, biz+"/verification/submit", owner, "", "If-Match", "1")
+	if r.status != http.StatusOK || r.body["status"] != "pending_review" || r.body["submitted_at"] == nil {
+		t.Fatalf("submit: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodPatch, biz, owner, `{"legal_name":"تعديل"}`, "If-Match", ifMatch(r.body)); r.status != http.StatusConflict {
+		t.Errorf("edit while under review: %d %v", r.status, r.body)
+	}
+
+	// Only platform admins review — not even the owner of the business.
+	for _, path := range []string{"/v1/admin/businesses", adminBiz} {
+		if r := a.do(t, http.MethodGet, path, owner, ""); r.status != http.StatusForbidden || r.body["code"] != "forbidden" {
+			t.Errorf("owner GET %s: %d %v", path, r.status, r.body)
+		}
+	}
+	if r := a.do(t, http.MethodPost, adminBiz+"/approve", owner, "", "If-Match", "2"); r.status != http.StatusForbidden {
+		t.Errorf("owner approves own business: %d %v", r.status, r.body)
+	}
+
+	// The reviewer finds it in the queue and opens the CR document.
+	r = a.do(t, http.MethodGet, "/v1/admin/businesses", admin, "")
+	data, _ := r.body["data"].([]any)
+	if r.status != http.StatusOK || len(data) != 1 || r.body["next_cursor"] != nil {
+		t.Fatalf("queue: %d %v", r.status, r.body)
+	}
+	r = a.do(t, http.MethodGet, adminBiz, admin, "")
+	docs, _ := r.body["documents"].([]any)
+	branches, _ := r.body["branches"].([]any)
+	if r.status != http.StatusOK || len(docs) != 1 || len(branches) != 1 {
+		t.Fatalf("detail: %d %v", r.status, r.body)
+	}
+	link, _ := docs[0].(map[string]any)["download_url"].(string)
+	if status, _, file := a.raw(t, http.MethodGet, link, "", "", nil); status != http.StatusOK || len(file) != 1000 {
+		t.Fatalf("reviewer download: %d, %d bytes", status, len(file))
+	}
+
+	// Reject with a reason: the owner sees it, fixes and resubmits.
+	if r := a.do(t, http.MethodPost, adminBiz+"/reject", admin, `{"reason":""}`, "If-Match", "2"); r.status != http.StatusBadRequest {
+		t.Errorf("empty reason: %d %v", r.status, r.body)
+	}
+	r = a.do(t, http.MethodPost, adminBiz+"/reject", admin, `{"reason":"صورة السجل غير واضحة"}`, "If-Match", "2")
+	business, _ := r.body["business"].(map[string]any)
+	if r.status != http.StatusOK || business["status"] != "rejected" || r.body["reviewed_by"] == nil {
+		t.Fatalf("reject: %d %v", r.status, r.body)
+	}
+	r = a.do(t, http.MethodGet, biz, owner, "")
+	if r.body["status"] != "rejected" || r.body["rejection_reason"] != "صورة السجل غير واضحة" {
+		t.Fatalf("owner after rejection: %v", r.body)
+	}
+	if r := a.upload(t, biz, owner, pdfFile(2000)); r.status != http.StatusCreated {
+		t.Fatalf("upload a clearer copy: %d %v", r.status, r.body)
+	}
+	r = a.do(t, http.MethodPost, biz+"/verification/submit", owner, "", "If-Match", "3")
+	if r.status != http.StatusOK || r.body["rejection_reason"] != nil {
+		t.Fatalf("resubmit: %d %v", r.status, r.body)
+	}
+
+	// An admin who owns a business can't approve it themselves.
+	selfAdmin := a.admin(t, "0500000002")
+	r = a.do(t, http.MethodPost, "/v1/businesses", selfAdmin, strings.Replace(registration, "١٠١٠ ١٢٣ ٤٥٦", "1010000077", 1))
+	selfBiz := "/v1/businesses/" + r.body["id"].(string)
+	a.upload(t, selfBiz, selfAdmin, pdfFile(100))
+	a.do(t, http.MethodPost, selfBiz+"/branches", selfAdmin, branchJSON)
+	if r := a.do(t, http.MethodPost, selfBiz+"/verification/submit", selfAdmin, "", "If-Match", "1"); r.status != http.StatusOK {
+		t.Fatalf("admin submits own business: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodPost, "/v1/admin/businesses/"+strings.TrimPrefix(selfBiz, "/v1/businesses/")+"/approve", selfAdmin, "", "If-Match", "2"); r.status != http.StatusForbidden {
+		t.Errorf("admin approves own business: %d %v", r.status, r.body)
+	}
+
+	// Approve; a second decision is refused.
+	r = a.do(t, http.MethodPost, adminBiz+"/approve", admin, "", "If-Match", "4")
+	business, _ = r.body["business"].(map[string]any)
+	if r.status != http.StatusOK || business["status"] != "active" {
+		t.Fatalf("approve: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodPost, adminBiz+"/approve", admin, "", "If-Match", "5"); r.status != http.StatusConflict || r.body["code"] != "invalid_state_transition" {
+		t.Errorf("approve twice: %d %v", r.status, r.body)
+	}
+
+	// The CR number now belongs to this business: another owner can register
+	// it as a draft but can't submit it.
+	other, otherBiz := a.register(t, "0559876543", "1010000001")
+	if r := a.upload(t, otherBiz, other, pdfFile(100)); r.status != http.StatusCreated {
+		t.Fatal(r.body)
+	}
+	if r := a.do(t, http.MethodPost, otherBiz+"/branches", other, branchJSON); r.status != http.StatusCreated {
+		t.Fatal(r.body)
+	}
+	if r := a.do(t, http.MethodPost, otherBiz+"/verification/submit", other, "", "If-Match", "1"); r.status != http.StatusConflict || r.body["code"] != "cr_number_taken" {
+		t.Errorf("claimed CR number: %d %v", r.status, r.body)
+	}
+}
+
+func TestReviewQueuePagination(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	admin := a.admin(t, "0500000001")
+	for i := range 3 {
+		phone := "055000000" + strconv.Itoa(i)
+		owner, biz := a.register(t, phone, "101000000"+strconv.Itoa(i))
+		a.upload(t, biz, owner, pdfFile(100))
+		a.do(t, http.MethodPost, biz+"/branches", owner, branchJSON)
+		if r := a.do(t, http.MethodPost, biz+"/verification/submit", owner, "", "If-Match", "1"); r.status != http.StatusOK {
+			t.Fatalf("submit %d: %d %v", i, r.status, r.body)
+		}
+	}
+
+	seen := map[string]bool{}
+	path := "/v1/admin/businesses?limit=2"
+	for pages := 1; ; pages++ {
+		r := a.do(t, http.MethodGet, path, admin, "")
+		data, _ := r.body["data"].([]any)
+		for _, row := range data {
+			b, _ := row.(map[string]any)["business"].(map[string]any)
+			seen[b["id"].(string)] = true
+		}
+		next, _ := r.body["next_cursor"].(string)
+		if next == "" {
+			if pages != 2 {
+				t.Fatalf("%d pages, want 2", pages)
+			}
+			break
+		}
+		path = "/v1/admin/businesses?limit=2&cursor=" + url.QueryEscape(next)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("paged through %d businesses, want 3", len(seen))
+	}
+	if r := a.do(t, http.MethodGet, "/v1/admin/businesses?cursor=not-ours", admin, ""); r.status != http.StatusBadRequest {
+		t.Errorf("bad cursor: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodGet, "/v1/admin/businesses?status=draft", admin, ""); r.status != http.StatusBadRequest {
+		t.Errorf("draft queue: %d %v", r.status, r.body)
 	}
 }

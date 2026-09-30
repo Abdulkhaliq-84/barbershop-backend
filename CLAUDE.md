@@ -18,7 +18,8 @@ shared kernel and IAM (phone OTP login, access + rotating refresh tokens, `GET /
 onboarding) is in progress: M3.1 added the `business` module — register a draft business, owner
 membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the membership-first
 `authorize` policy (ADR-0015); M3.2 branches (location, city, time zone, booking policy); M3.3 the
-`media` module (private uploads, signed download links — ADR-0016) and CR document upload.
+`media` module (private uploads, signed download links — ADR-0016) and CR document upload; M3.4 submit for
+review and the platform-admin review queue (approve / reject, keyset pagination — ADR-0017).
 
 ## 2. Where things are
 
@@ -30,7 +31,7 @@ membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the 
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0016) |
+| Why a decision was made | `docs/adr/` (0001–0017) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
@@ -148,7 +149,8 @@ Database tests skip unless `TEST_DATABASE_URL` is set (in CI a missing URL fails
 Login locally: `make run`, `POST /v1/auth/otp/request`, read the code from the API log (`SMS_PROVIDER=console`), `POST /v1/auth/otp/verify`
 → `tokens.access_token` opens `GET /v1/me` (`Authorization: Bearer …`). `TOKEN_SIGNING_SECRET`, `OTP_SECRET` and `MEDIA_SIGNING_SECRET` have
 public dev values in the Makefile/compose; they are refused when `APP_ENV` is staging or production. Uploaded files go to
-`MEDIA_DIR` (default `var/media`, git-ignored; absolute path required outside development).
+`MEDIA_DIR` (default `var/media`, git-ignored; absolute path required outside development). Make a platform admin locally:
+`UPDATE iam.users SET platform_role = 'admin' WHERE phone = '+9665…'`, then refresh the token.
 
 ## 12. Don'ts
 

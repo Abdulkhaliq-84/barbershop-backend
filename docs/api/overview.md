@@ -40,7 +40,8 @@ Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `
 `otp_cooldown`, `user_blocked`, `refresh_token_reused`, `business_already_registered`, `business_not_active`, `plan_limit_reached`, `slot_unavailable`,
 `outside_booking_window`, `outside_cancellation_window`, `too_many_active_bookings`,
 `invalid_state_transition`, `version_conflict` (412: the resource changed since you read it),
-`unsupported_media_type` (415), `payload_too_large` (413), `document_limit_reached`, `download_link_invalid` (403).
+`unsupported_media_type` (415), `payload_too_large` (413), `document_limit_reached`, `download_link_invalid` (403),
+`cr_document_required`, `branch_required`, `cr_number_taken`.
 
 ## 2. Endpoint inventory
 
@@ -114,7 +115,7 @@ Client flow (Flutter):
 | POST | `/v1/businesses` (register → Draft) — live (M3.1) | user |
 | GET / PATCH | `/v1/businesses/{business_id}` — live (M3.1); PATCH edits names while draft/rejected, needs `If-Match: <version>` | owner |
 | GET / POST | `/v1/businesses/{business_id}/verification/documents` (CR upload, `application/octet-stream`, ≤ 10 MiB, PDF/JPEG/PNG) — live (M3.3) | owner |
-| POST | `/v1/businesses/{business_id}/verification/submit` | owner |
+| POST | `/v1/businesses/{business_id}/verification/submit` — live (M3.4): needs a CR document and a branch; claims the CR number | owner |
 | GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
 | GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner until managers get branches (M3.5) | manager |
 | POST | `…/branches/{branch_id}/publish` · `…/unpublish` | owner |
@@ -141,9 +142,9 @@ CR number twice as the same owner gets `409 business_already_registered`.
 
 | Method | Path |
 |---|---|
-| GET | `/v1/admin/businesses?status=pending_review&cursor=` |
-| GET | `/v1/admin/businesses/{business_id}` (incl. signed URLs to CR documents) |
-| POST | `/v1/admin/businesses/{business_id}/{approve\|reject\|suspend\|reactivate}` |
+| GET | `/v1/admin/businesses?status=pending_review&limit=&cursor=` — live (M3.4), oldest submission first |
+| GET | `/v1/admin/businesses/{business_id}` (incl. signed URLs to CR documents, branches) — live (M3.4) |
+| POST | `/v1/admin/businesses/{business_id}/{approve\|reject}` — live (M3.4), `If-Match`; `suspend\|reactivate` is the owner's exercise |
 | PUT | `/v1/admin/businesses/{business_id}/subscription` (assign plan) |
 | CRUD | `/v1/admin/categories`, `/v1/admin/plans`, `/v1/admin/cities` |
 
@@ -155,6 +156,14 @@ CR number twice as the same owner gets `409 business_already_registered`.
 
 Private files (CR documents) are never in a JSON body: responses carry a relative `download_url`
 signed for 5 minutes, and the use case that returns it decides who may have it (ADR-0016).
+
+**Platform admins (M3.4, ADR-0017).** The role comes from the access token (`platform_role`);
+non-admins get `403 forbidden`, and nobody reviews their own business. There is no API to create an
+admin: an operator runs `UPDATE iam.users SET platform_role = 'admin' WHERE phone = '+9665…'`, and the
+user's next token refresh carries the role.
+
+**Pagination.** Lists that can grow take `?limit=` (1–100, default 20) and `?cursor=`, and return
+`next_cursor` while more rows follow (keyset pagination: pages don't shift as rows change).
 
 ### Operations
 

@@ -55,6 +55,7 @@ type Business struct {
 	version     int
 	createdAt   time.Time
 	updatedAt   time.Time
+	review      Review
 }
 
 // Registration is what an owner provides to register a business.
@@ -103,8 +104,7 @@ func (b *Business) Rename(displayName shared.LocalizedText, legalName string, no
 		return err
 	}
 	b.displayName, b.legalName = displayName, legal
-	b.version++
-	b.updatedAt = dbTime(now)
+	b.touch(dbTime(now))
 	return nil
 }
 
@@ -131,10 +131,10 @@ func validateNames(displayName shared.LocalizedText, legalName string) (string, 
 func dbTime(t time.Time) time.Time { return t.UTC().Truncate(time.Microsecond) }
 
 // RehydrateBusiness rebuilds a business loaded from storage.
-func RehydrateBusiness(id shared.BusinessID, owner shared.UserID, displayName shared.LocalizedText, legalName string, cr CRNumber, status Status, version int, createdAt, updatedAt time.Time) *Business {
+func RehydrateBusiness(id shared.BusinessID, owner shared.UserID, displayName shared.LocalizedText, legalName string, cr CRNumber, status Status, version int, createdAt, updatedAt time.Time, review Review) *Business {
 	return &Business{
 		id: id, owner: owner, displayName: displayName, legalName: legalName, cr: cr,
-		status: status, version: version, createdAt: createdAt, updatedAt: updatedAt,
+		status: status, version: version, createdAt: createdAt, updatedAt: updatedAt, review: review,
 	}
 }
 
