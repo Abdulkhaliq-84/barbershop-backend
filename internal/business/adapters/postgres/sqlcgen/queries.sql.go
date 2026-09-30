@@ -142,7 +142,7 @@ func (q *Queries) BranchesByBusiness(ctx context.Context, businessID uuid.UUID) 
 }
 
 const businessByID = `-- name: BusinessByID :one
-SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at FROM business.businesses WHERE id = $1
+SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at, submitted_at, reviewed_at, reviewed_by, rejection_reason FROM business.businesses WHERE id = $1
 `
 
 func (q *Queries) BusinessByID(ctx context.Context, id uuid.UUID) (BusinessBusiness, error) {
@@ -159,13 +159,17 @@ func (q *Queries) BusinessByID(ctx context.Context, id uuid.UUID) (BusinessBusin
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SubmittedAt,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
+		&i.RejectionReason,
 	)
 	return i, err
 }
 
 const businessByIDForUpdate = `-- name: BusinessByIDForUpdate :one
 
-SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at FROM business.businesses WHERE id = $1 FOR UPDATE
+SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at, submitted_at, reviewed_at, reviewed_by, rejection_reason FROM business.businesses WHERE id = $1 FOR UPDATE
 `
 
 // UUIDv7: newest first
@@ -184,8 +188,81 @@ func (q *Queries) BusinessByIDForUpdate(ctx context.Context, id uuid.UUID) (Busi
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SubmittedAt,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
+		&i.RejectionReason,
 	)
 	return i, err
+}
+
+const businessesForReview = `-- name: BusinessesForReview :many
+SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at, submitted_at, reviewed_at, reviewed_by, rejection_reason FROM business.businesses
+WHERE status = $1
+  AND ($2::timestamptz IS NULL
+       OR (submitted_at, id) > ($2::timestamptz, $3::uuid))
+ORDER BY submitted_at, id
+LIMIT $4
+`
+
+type BusinessesForReviewParams struct {
+	Status           string
+	AfterSubmittedAt *time.Time
+	AfterID          *uuid.UUID
+	PageSize         int32
+}
+
+// One page of the admin queue: one status, oldest submission first. The
+// cursor is the (submitted_at, id) of the last row of the previous page.
+func (q *Queries) BusinessesForReview(ctx context.Context, arg BusinessesForReviewParams) ([]BusinessBusiness, error) {
+	rows, err := q.db.Query(ctx, businessesForReview,
+		arg.Status,
+		arg.AfterSubmittedAt,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BusinessBusiness{}
+	for rows.Next() {
+		var i BusinessBusiness
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.DisplayNameAr,
+			&i.DisplayNameEn,
+			&i.LegalName,
+			&i.CrNumber,
+			&i.Status,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SubmittedAt,
+			&i.ReviewedAt,
+			&i.ReviewedBy,
+			&i.RejectionReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countBranches = `-- name: CountBranches :one
+SELECT count(*) FROM business.branches WHERE business_id = $1
+`
+
+func (q *Queries) CountBranches(ctx context.Context, businessID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countBranches, businessID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countVerificationDocuments = `-- name: CountVerificationDocuments :one
@@ -498,8 +575,10 @@ func (q *Queries) UpdateBranch(ctx context.Context, arg UpdateBranchParams) (int
 const updateBusiness = `-- name: UpdateBusiness :execrows
 UPDATE business.businesses
 SET display_name_ar = $1, display_name_en = $2, legal_name = $3,
-    status = $4, version = $5, updated_at = $6
-WHERE id = $7 AND version = $8
+    status = $4, version = $5, updated_at = $6,
+    submitted_at = $7, reviewed_at = $8, reviewed_by = $9,
+    rejection_reason = $10
+WHERE id = $11 AND version = $12
 `
 
 type UpdateBusinessParams struct {
@@ -509,6 +588,10 @@ type UpdateBusinessParams struct {
 	Status          string
 	Version         int32
 	UpdatedAt       time.Time
+	SubmittedAt     *time.Time
+	ReviewedAt      *time.Time
+	ReviewedBy      *uuid.UUID
+	RejectionReason string
 	ID              uuid.UUID
 	ExpectedVersion int32
 }
@@ -523,6 +606,10 @@ func (q *Queries) UpdateBusiness(ctx context.Context, arg UpdateBusinessParams) 
 		arg.Status,
 		arg.Version,
 		arg.UpdatedAt,
+		arg.SubmittedAt,
+		arg.ReviewedAt,
+		arg.ReviewedBy,
+		arg.RejectionReason,
 		arg.ID,
 		arg.ExpectedVersion,
 	)

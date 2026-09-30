@@ -29,4 +29,11 @@ var (
 	ErrEmptyFile            = errors.New("verification: the file is empty")
 	ErrFileTooLarge         = errors.New("verification: the file is too large")
 	ErrUnsupportedFile      = errors.New("verification: only PDF, JPEG and PNG files are accepted")
+
+	ErrCRDocumentRequired      = errors.New("review: upload the CR certificate before submitting")
+	ErrBranchRequired          = errors.New("review: add a branch before submitting")
+	ErrRejectionReasonRequired = errors.New("review: a rejection needs a reason")
+	ErrCRNumberClaimed         = errors.New("review: another business already uses this CR number")
+	ErrNotPlatformAdmin        = errors.New("platform admins only")
+	ErrSelfReview              = errors.New("review: nobody reviews their own business")
 )

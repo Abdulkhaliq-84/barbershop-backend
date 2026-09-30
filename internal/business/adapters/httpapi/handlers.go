@@ -29,6 +29,8 @@ type UseCases struct {
 	Update      *app.UpdateBusinessHandler
 	Branches    *app.BranchHandlers
 	Documents   *app.DocumentHandlers
+	Submit      *app.SubmitHandler
+	Review      *app.ReviewHandlers
 	Memberships *app.ListMyMembershipsHandler
 }
 
@@ -171,6 +173,22 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnauthorized, "unauthorized", "a valid access token is required"
 		challenge := httpx.BearerChallenge
 		headers.WWWAuthenticate = &challenge
+	case errors.Is(err, errBadCursor):
+		status, code, detail = http.StatusBadRequest, "validation_failed", "cursor: pass next_cursor from the previous page"
+	case errors.Is(err, domain.ErrNotPlatformAdmin):
+		status, code = http.StatusForbidden, "forbidden"
+	case errors.Is(err, domain.ErrSelfReview):
+		status, code, detail = http.StatusForbidden, "forbidden", "another admin must review your own business"
+	case errors.Is(err, domain.ErrCRDocumentRequired):
+		status, code, detail = http.StatusConflict, "cr_document_required", "upload the CR certificate first"
+	case errors.Is(err, domain.ErrBranchRequired):
+		status, code, detail = http.StatusConflict, "branch_required", "add a branch with its location first"
+	case errors.Is(err, domain.ErrCRNumberClaimed):
+		status, code, detail = http.StatusConflict, "cr_number_taken", "another business on the platform already uses this CR number"
+	case errors.Is(err, domain.ErrRejectionReasonRequired):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "reason: required"
+	case errors.Is(err, domain.ErrUnknownStatus):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "status: drafts are not in the review queue"
 	case errors.Is(err, errBadIfMatch):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the business version you last read"
 	case errors.Is(err, domain.ErrNotFound):
@@ -218,7 +236,7 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 }
 
 func toAPIBusiness(b *domain.Business) apigen.Business {
-	return apigen.Business{
+	out := apigen.Business{
 		Id:          b.ID().UUID(),
 		DisplayName: toAPIText(b.DisplayName()),
 		LegalName:   b.LegalName(),
@@ -227,7 +245,13 @@ func toAPIBusiness(b *domain.Business) apigen.Business {
 		Version:     b.Version(),
 		CreatedAt:   b.CreatedAt(),
 		UpdatedAt:   b.UpdatedAt(),
+		SubmittedAt: b.Review().SubmittedAt,
+		ReviewedAt:  b.Review().ReviewedAt,
 	}
+	if reason := b.Review().RejectionReason; reason != "" && b.Status() == domain.StatusRejected {
+		out.RejectionReason = &reason
+	}
+	return out
 }
 
 // toAPIText returns both languages: business-mode screens edit them.

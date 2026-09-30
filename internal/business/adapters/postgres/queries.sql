@@ -31,7 +31,9 @@ SELECT * FROM business.businesses WHERE id = $1 FOR UPDATE;
 -- it matches no row if the version moved since the caller read it.
 UPDATE business.businesses
 SET display_name_ar = @display_name_ar, display_name_en = @display_name_en, legal_name = @legal_name,
-    status = @status, version = @version, updated_at = @updated_at
+    status = @status, version = @version, updated_at = @updated_at,
+    submitted_at = @submitted_at, reviewed_at = @reviewed_at, reviewed_by = @reviewed_by,
+    rejection_reason = @rejection_reason
 WHERE id = @id AND version = @expected_version;
 
 -- name: InsertBranch :exec
@@ -74,3 +76,16 @@ VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: VerificationDocumentsByBusiness :many
 SELECT * FROM business.verification_documents WHERE business_id = $1 ORDER BY uploaded_at, object_id;
+
+-- name: CountBranches :one
+SELECT count(*) FROM business.branches WHERE business_id = $1;
+
+-- name: BusinessesForReview :many
+-- One page of the admin queue: one status, oldest submission first. The
+-- cursor is the (submitted_at, id) of the last row of the previous page.
+SELECT * FROM business.businesses
+WHERE status = @status
+  AND (sqlc.narg('after_submitted_at')::timestamptz IS NULL
+       OR (submitted_at, id) > (sqlc.narg('after_submitted_at')::timestamptz, sqlc.narg('after_id')::uuid))
+ORDER BY submitted_at, id
+LIMIT @page_size;

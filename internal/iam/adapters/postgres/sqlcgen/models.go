@@ -38,16 +38,20 @@ type BusinessBranch struct {
 }
 
 type BusinessBusiness struct {
-	ID            uuid.UUID
-	OwnerUserID   uuid.UUID
-	DisplayNameAr string
-	DisplayNameEn string
-	LegalName     string
-	CrNumber      string
-	Status        string
-	Version       int32
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID              uuid.UUID
+	OwnerUserID     uuid.UUID
+	DisplayNameAr   string
+	DisplayNameEn   string
+	LegalName       string
+	CrNumber        string
+	Status          string
+	Version         int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	SubmittedAt     *time.Time
+	ReviewedAt      *time.Time
+	ReviewedBy      pgtype.UUID
+	RejectionReason string
 }
 
 type BusinessStaffMember struct {

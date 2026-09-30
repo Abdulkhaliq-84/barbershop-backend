@@ -28,6 +28,8 @@ tags:
     description: Business mode — a business's shops, with location and booking policy
   - name: media
     description: Stored files, served through short-lived signed links
+  - name: admin
+    description: Platform administration (platform admins only)
 
 # Protected by default: an operation is public only if it says `security: []`.
 security:
@@ -475,6 +477,138 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/businesses/{business_id}/verification/submit:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    post:
+      operationId: submitBusiness
+      tags: [businesses]
+      summary: Send the business for review (owner)
+      description: |
+        Moves a `draft` or `rejected` business to `pending_review`. It needs a
+        CR document (`409 cr_document_required`) and at least one branch
+        (`409 branch_required`). Submitting claims the CR number: if another
+        submitted or approved business uses it, `409 cr_number_taken`.
+        While under review the business can't be edited.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      responses:
+        "200":
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/admin/businesses:
+    get:
+      operationId: listBusinessesForReview
+      tags: [admin]
+      summary: The review queue (platform admins)
+      description: |
+        Businesses in one status, oldest submission first. Pass `next_cursor`
+        from a page as `cursor` to get the next one. Drafts are never listed:
+        they belong to their owner until submitted. Non-admins get `403 forbidden`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending_review, active, rejected, suspended]
+            default: pending_review
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBusinessPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/admin/businesses/{business_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: getBusinessForReview
+      tags: [admin]
+      summary: A submitted business with its documents and branches (platform admins)
+      description: Document links are signed and work for a few minutes. Drafts get `404 not_found`.
+      responses:
+        "200":
+          description: The business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBusinessDetail"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/admin/businesses/{business_id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    post:
+      operationId: approveBusiness
+      tags: [admin]
+      summary: Approve a business under review (platform admins)
+      description: "`pending_review` → `active`. Anything else: `409 invalid_state_transition`."
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBusiness"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/admin/businesses/{business_id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    post:
+      operationId: rejectBusiness
+      tags: [admin]
+      summary: Reject a business under review, with a reason (platform admins)
+      description: |
+        `pending_review` → `rejected`. The owner sees `rejection_reason`, fixes
+        the business and submits again. Rejecting releases the CR number claim.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Rejection"
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBusiness"
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -561,7 +695,8 @@ components:
             `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`,
             `forbidden`, `business_already_registered`, `invalid_state_transition`,
             `version_conflict`, `unsupported_media_type`, `payload_too_large`,
-            `document_limit_reached`, `download_link_invalid`.
+            `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
+            `branch_required`, `cr_number_taken`.
           example: otp_cooldown
         detail:
           type: string
@@ -759,6 +894,19 @@ components:
         updated_at:
           type: string
           format: date-time
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the business was last sent for review.
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejection_reason:
+          type: string
+          nullable: true
+          description: Why the last review rejected it (only while `rejected`).
 
     BusinessSummary:
       type: object
@@ -1022,3 +1170,56 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VerificationDocument"
+
+    Rejection:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: صورة السجل التجاري غير واضحة، يرجى رفع نسخة أوضح
+
+    AdminBusiness:
+      type: object
+      required: [business, owner_user_id]
+      properties:
+        business:
+          $ref: "#/components/schemas/Business"
+        owner_user_id:
+          type: string
+          format: uuid
+        reviewed_by:
+          type: string
+          format: uuid
+          nullable: true
+
+    AdminBusinessPage:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminBusiness"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass as `cursor` for the next page; absent on the last page.
+
+    AdminBusinessDetail:
+      type: object
+      required: [business, documents, branches]
+      properties:
+        business:
+          $ref: "#/components/schemas/AdminBusiness"
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationDocument"
+        branches:
+          type: array
+          items:
+            $ref: "#/components/schemas/Branch"

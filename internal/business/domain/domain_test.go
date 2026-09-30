@@ -189,7 +189,7 @@ func TestBusinessRename(t *testing.T) {
 			t.Parallel()
 			r := registration(t)
 			cr := r.CRNumber
-			b := domain.RehydrateBusiness(shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), r.DisplayName, "مؤسسة الأناقة", cr, tt.status, 3, t0, t0)
+			b := domain.RehydrateBusiness(shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), r.DisplayName, "مؤسسة الأناقة", cr, tt.status, 3, t0, t0, domain.Review{})
 
 			err := b.Rename(tt.text, tt.legal, later)
 			if !errors.Is(err, tt.want) {
@@ -225,7 +225,7 @@ func TestCanAttachDocument(t *testing.T) {
 		{domain.StatusActive, 0, domain.ErrInvalidStateTransition},
 		{domain.StatusSuspended, 0, domain.ErrInvalidStateTransition},
 	} {
-		b := domain.RehydrateBusiness(shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), r.DisplayName, "مؤسسة", r.CRNumber, tt.status, 1, t0, t0)
+		b := domain.RehydrateBusiness(shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), r.DisplayName, "مؤسسة", r.CRNumber, tt.status, 1, t0, t0, domain.Review{})
 		if err := b.CanAttachDocument(tt.existing); !errors.Is(err, tt.want) {
 			t.Errorf("%s with %d documents: error = %v, want %v", tt.status, tt.existing, err, tt.want)
 		}

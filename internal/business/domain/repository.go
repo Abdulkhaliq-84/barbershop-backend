@@ -20,6 +20,10 @@ type Businesses interface {
 	// result — all in one transaction. If fn returns an error nothing is
 	// saved. Returns ErrNotFound when there is no such business.
 	Update(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*Business) error) error
+	// UpdateWithReadiness is Update for submission: fn also receives the
+	// document and branch counts, read under the same lock. Returns
+	// ErrCRNumberClaimed when another submitted business holds the CR number.
+	UpdateWithReadiness(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*Business, Readiness) error) error
 }
 
 // Staff stores staff members.

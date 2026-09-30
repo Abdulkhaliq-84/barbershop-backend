@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,6 +36,7 @@ var (
 	_ domain.Businesses    = (*Store)(nil)
 	_ domain.Staff         = (*Store)(nil)
 	_ app.MembershipReader = (*Store)(nil)
+	_ app.ReviewQueue      = (*Store)(nil)
 )
 
 // uniqueViolation is PostgreSQL's error code for a broken unique constraint.
@@ -101,6 +103,29 @@ func (s *Store) ByID(ctx context.Context, id shared.BusinessID) (*domain.Busines
 // still expectedVersion (optimistic concurrency: two owners editing from two
 // phones can't silently overwrite each other).
 func (s *Store) Update(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*domain.Business) error) error {
+	return s.update(ctx, id, expectedVersion, func(_ *sqlcgen.Queries, b *domain.Business) error { return fn(b) })
+}
+
+// UpdateWithReadiness is Update for submission: fn also gets the document
+// and branch counts, read after the business row is locked. Attaching a
+// document takes the same lock, so the count can't change underneath.
+func (s *Store) UpdateWithReadiness(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*domain.Business, domain.Readiness) error) error {
+	return s.update(ctx, id, expectedVersion, func(q *sqlcgen.Queries, b *domain.Business) error {
+		docs, err := q.CountVerificationDocuments(ctx, id.UUID())
+		if err != nil {
+			return fmt.Errorf("count documents: %w", err)
+		}
+		branches, err := q.CountBranches(ctx, id.UUID())
+		if err != nil {
+			return fmt.Errorf("count branches: %w", err)
+		}
+		return fn(b, domain.Readiness{Documents: int(docs), Branches: int(branches)})
+	})
+}
+
+// update is the one locked read-change-write path every business change
+// goes through.
+func (s *Store) update(ctx context.Context, id shared.BusinessID, expectedVersion int, fn func(*sqlcgen.Queries, *domain.Business) error) error {
 	expected, err := toInt32(expectedVersion)
 	if err != nil {
 		return domain.ErrVersionConflict // no business ever has that version
@@ -121,12 +146,18 @@ func (s *Store) Update(ctx context.Context, id shared.BusinessID, expectedVersio
 		if err != nil {
 			return err
 		}
-		if err := fn(b); err != nil {
+		if err := fn(q, b); err != nil {
 			return err
 		}
 		version, err := toInt32(b.Version())
 		if err != nil {
 			return err
+		}
+		r := b.Review()
+		var reviewer *uuid.UUID
+		if !r.ReviewedBy.IsZero() {
+			u := r.ReviewedBy.UUID()
+			reviewer = &u
 		}
 		n, err := q.UpdateBusiness(ctx, sqlcgen.UpdateBusinessParams{
 			DisplayNameAr:   b.DisplayName().Ar(),
@@ -135,9 +166,19 @@ func (s *Store) Update(ctx context.Context, id shared.BusinessID, expectedVersio
 			Status:          string(b.Status()),
 			Version:         version,
 			UpdatedAt:       b.UpdatedAt(),
+			SubmittedAt:     r.SubmittedAt,
+			ReviewedAt:      r.ReviewedAt,
+			ReviewedBy:      reviewer,
+			RejectionReason: r.RejectionReason,
 			ID:              b.ID().UUID(),
 			ExpectedVersion: expected,
 		})
+		// Submitting claims the CR number platform-wide (a partial unique
+		// index); the database is the one place two submissions can't race.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "businesses_claimed_cr_number_key" {
+			return domain.ErrCRNumberClaimed
+		}
 		if err != nil {
 			return fmt.Errorf("update business: %w", err)
 		}
@@ -146,6 +187,33 @@ func (s *Store) Update(ctx context.Context, id shared.BusinessID, expectedVersio
 		}
 		return nil
 	})
+}
+
+// ReviewPage returns up to limit businesses in status, oldest submission
+// first, after the given position (nil for the first page).
+func (s *Store) ReviewPage(ctx context.Context, status domain.Status, after *app.QueuePosition, limit int) ([]*domain.Business, error) {
+	size, err := toInt32(limit)
+	if err != nil {
+		return nil, err
+	}
+	params := sqlcgen.BusinessesForReviewParams{Status: string(status), PageSize: size}
+	if after != nil {
+		at, id := after.SubmittedAt, after.ID.UUID()
+		params.AfterSubmittedAt, params.AfterID = &at, &id
+	}
+	rows, err := sqlcgen.New(s.pool).BusinessesForReview(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("review queue: %w", err)
+	}
+	out := make([]*domain.Business, 0, len(rows))
+	for _, row := range rows {
+		b, err := toBusiness(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, nil
 }
 
 // Membership returns user's staff record in business.
@@ -206,9 +274,13 @@ func toBusiness(row sqlcgen.BusinessBusiness) (*domain.Business, error) {
 	if err != nil {
 		return nil, err
 	}
+	review := domain.Review{SubmittedAt: row.SubmittedAt, ReviewedAt: row.ReviewedAt, RejectionReason: row.RejectionReason}
+	if row.ReviewedBy != nil {
+		review.ReviewedBy = shared.IDFromUUID[shared.UserTag](*row.ReviewedBy)
+	}
 	return domain.RehydrateBusiness(
 		shared.IDFromUUID[shared.BusinessTag](row.ID), shared.IDFromUUID[shared.UserTag](row.OwnerUserID),
-		name, row.LegalName, cr, status, int(row.Version), row.CreatedAt, row.UpdatedAt,
+		name, row.LegalName, cr, status, int(row.Version), row.CreatedAt, row.UpdatedAt, review,
 	), nil
 }
 

@@ -35,13 +35,16 @@ type Module struct {
 // New wires the repositories, use cases and HTTP handlers.
 func New(d Deps) *Module {
 	store := postgres.NewStore(d.Pool)
+	files := acl.NewMediaFiles(d.Media)
 	return &Module{
 		http: httpapi.NewHandlers(httpapi.UseCases{
 			Register:    app.NewRegisterBusinessHandler(store, d.Clock),
 			Get:         app.NewGetBusinessHandler(store, store),
 			Update:      app.NewUpdateBusinessHandler(store, store, d.Clock),
 			Branches:    app.NewBranchHandlers(store.Branches(), store, d.Clock),
-			Documents:   app.NewDocumentHandlers(store, store.Documents(), store, acl.NewMediaFiles(d.Media), d.Clock),
+			Documents:   app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock),
+			Submit:      app.NewSubmitHandler(store, store, d.Clock),
+			Review:      app.NewReviewHandlers(store, store.Documents(), store.Branches(), store, files, d.Clock),
 			Memberships: app.NewListMyMembershipsHandler(store),
 		}, d.Logger),
 	}
