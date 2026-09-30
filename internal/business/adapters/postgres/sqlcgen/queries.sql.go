@@ -188,6 +188,17 @@ func (q *Queries) BusinessByIDForUpdate(ctx context.Context, id uuid.UUID) (Busi
 	return i, err
 }
 
+const countVerificationDocuments = `-- name: CountVerificationDocuments :one
+SELECT count(*) FROM business.verification_documents WHERE business_id = $1
+`
+
+func (q *Queries) CountVerificationDocuments(ctx context.Context, businessID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countVerificationDocuments, businessID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const insertBranch = `-- name: InsertBranch :exec
 INSERT INTO business.branches (
     id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status,
@@ -314,6 +325,34 @@ func (q *Queries) InsertStaffMember(ctx context.Context, arg InsertStaffMemberPa
 		arg.Role,
 		arg.Active,
 		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertVerificationDocument = `-- name: InsertVerificationDocument :exec
+INSERT INTO business.verification_documents (object_id, business_id, kind, content_type, size_bytes, uploaded_by, uploaded_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertVerificationDocumentParams struct {
+	ObjectID    uuid.UUID
+	BusinessID  uuid.UUID
+	Kind        string
+	ContentType string
+	SizeBytes   int64
+	UploadedBy  uuid.UUID
+	UploadedAt  time.Time
+}
+
+func (q *Queries) InsertVerificationDocument(ctx context.Context, arg InsertVerificationDocumentParams) error {
+	_, err := q.db.Exec(ctx, insertVerificationDocument,
+		arg.ObjectID,
+		arg.BusinessID,
+		arg.Kind,
+		arg.ContentType,
+		arg.SizeBytes,
+		arg.UploadedBy,
+		arg.UploadedAt,
 	)
 	return err
 }
@@ -491,4 +530,36 @@ func (q *Queries) UpdateBusiness(ctx context.Context, arg UpdateBusinessParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const verificationDocumentsByBusiness = `-- name: VerificationDocumentsByBusiness :many
+SELECT object_id, business_id, kind, content_type, size_bytes, uploaded_by, uploaded_at FROM business.verification_documents WHERE business_id = $1 ORDER BY uploaded_at, object_id
+`
+
+func (q *Queries) VerificationDocumentsByBusiness(ctx context.Context, businessID uuid.UUID) ([]BusinessVerificationDocument, error) {
+	rows, err := q.db.Query(ctx, verificationDocumentsByBusiness, businessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BusinessVerificationDocument{}
+	for rows.Next() {
+		var i BusinessVerificationDocument
+		if err := rows.Scan(
+			&i.ObjectID,
+			&i.BusinessID,
+			&i.Kind,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.UploadedBy,
+			&i.UploadedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

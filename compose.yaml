@@ -39,6 +39,8 @@ services:
       OTP_SECRET: local-development-otp-secret-not-for-real-use
       SMS_PROVIDER: console
       TOKEN_SIGNING_SECRET: local-development-token-signing-secret-not-for-real-use
+      MEDIA_SIGNING_SECRET: local-development-media-signing-secret-not-for-real-use
+      MEDIA_DIR: /var/lib/barbershop/media
     depends_on:
       db:
         condition: service_healthy
@@ -50,9 +52,12 @@ services:
     environment: *app-env
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - media-data:/var/lib/barbershop/media # uploaded files survive restarts
     depends_on:
       migrate:
         condition: service_completed_successfully
 
 volumes:
   db-data:
+  media-data:

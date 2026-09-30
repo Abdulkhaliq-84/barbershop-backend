@@ -25,6 +25,8 @@ import (
 	businesshttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
 	iamhttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media"
+	mediahttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/media/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/config"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
@@ -97,11 +99,13 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 type (
 	iamAPI      = iamhttp.Handlers
 	businessAPI = businesshttp.Handlers
+	mediaAPI    = mediahttp.Handlers
 )
 
 type apiServer struct {
 	*iamAPI      // iam: /v1/auth/*, /v1/me
 	*businessAPI // business: /v1/businesses/* (incl. branches), /v1/me/memberships
+	*mediaAPI    // media: /v1/media/* (signed downloads)
 }
 
 // newHandler builds every module and mounts the API next to the health checks.
@@ -117,10 +121,17 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 		return nil, err
 	}
 
-	businessModule := business.New(business.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
+	mediaModule, err := media.New(media.Deps{
+		Pool: pool, Clock: clock.System{}, Logger: logger,
+		Dir: cfg.Media.Dir, Secret: []byte(cfg.Media.SigningSecret),
+	})
+	if err != nil {
+		return nil, err
+	}
+	businessModule := business.New(business.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Media: mediaModule})
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	api := apiServer{iamModule.HTTP(), businessModule.HTTP()}
+	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP()}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}

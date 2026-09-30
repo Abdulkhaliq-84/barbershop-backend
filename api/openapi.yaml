@@ -26,6 +26,8 @@ tags:
     description: Business mode — register and run a barbershop business (tenant)
   - name: branches
     description: Business mode — a business's shops, with location and booking policy
+  - name: media
+    description: Stored files, served through short-lived signed links
 
 # Protected by default: an operation is public only if it says `security: []`.
 security:
@@ -364,6 +366,115 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/businesses/{business_id}/verification/documents:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: listVerificationDocuments
+      tags: [businesses]
+      summary: The business's verification documents (owner)
+      description: |
+        Each document comes with a signed `download_url` that works for a few
+        minutes. Ask again for fresh links; never store them.
+      responses:
+        "200":
+          description: The documents, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocumentList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: uploadVerificationDocument
+      tags: [businesses]
+      summary: Upload a verification document, e.g. the CR certificate (owner)
+      description: |
+        Send the file itself as the body (`Content-Type: application/octet-stream`),
+        up to 10 MiB. PDF, JPEG and PNG are accepted; the type is read from the
+        file's content, not its name (`415 unsupported_media_type` otherwise,
+        `413 payload_too_large` when bigger).
+
+        Only while the business is `draft` or `rejected`
+        (`409 invalid_state_transition`), and at most 5 documents
+        (`409 document_limit_reached`).
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [cr_certificate]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocument"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/media/{media_id}:
+    parameters:
+      - name: media_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: downloadMedia
+      tags: [media]
+      security: []
+      summary: Download a file through a signed link
+      description: |
+        Public, because the link itself is the permission: `expires` and
+        `signature` are issued by the API (`download_url`) and stop working
+        after a few minutes. A changed, expired or made-up link gets
+        `403 download_link_invalid`. Files are always sent as attachments.
+      parameters:
+        - name: expires
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: signature
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      responses:
+        "200":
+          description: The file
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            X-Content-Type-Options:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -449,7 +560,8 @@ components:
             `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`,
             `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`,
             `forbidden`, `business_already_registered`, `invalid_state_transition`,
-            `version_conflict`.
+            `version_conflict`, `unsupported_media_type`, `payload_too_large`,
+            `document_limit_reached`, `download_link_invalid`.
           example: otp_cooldown
         detail:
           type: string
@@ -874,3 +986,39 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Branch"
+
+    VerificationDocument:
+      type: object
+      required: [id, kind, content_type, size_bytes, uploaded_at, download_url, download_url_expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [cr_certificate]
+        content_type:
+          type: string
+          enum: [application/pdf, image/jpeg, image/png]
+        size_bytes:
+          type: integer
+          format: int64
+        uploaded_at:
+          type: string
+          format: date-time
+        download_url:
+          type: string
+          description: Relative, signed link (prefix it with the API's base URL). Works until download_url_expires_at.
+          example: /v1/media/01a0e410-90f4-75da-8156-6b695634873a?expires=1790000000&signature=abc
+        download_url_expires_at:
+          type: string
+          format: date-time
+
+    VerificationDocumentList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationDocument"

@@ -64,3 +64,13 @@ SET name_ar = @name_ar, name_en = @name_en, city_code = @city_code, district = @
     pending_expiry_minutes = @pending_expiry_minutes, max_active_bookings = @max_active_bookings,
     version = @version, updated_at = @updated_at
 WHERE business_id = @business_id AND id = @id AND version = @expected_version;
+
+-- name: CountVerificationDocuments :one
+SELECT count(*) FROM business.verification_documents WHERE business_id = $1;
+
+-- name: InsertVerificationDocument :exec
+INSERT INTO business.verification_documents (object_id, business_id, kind, content_type, size_bytes, uploaded_by, uploaded_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: VerificationDocumentsByBusiness :many
+SELECT * FROM business.verification_documents WHERE business_id = $1 ORDER BY uploaded_at, object_id;

@@ -28,6 +28,7 @@ type UseCases struct {
 	Get         *app.GetBusinessHandler
 	Update      *app.UpdateBusinessHandler
 	Branches    *app.BranchHandlers
+	Documents   *app.DocumentHandlers
 	Memberships *app.ListMyMembershipsHandler
 }
 
@@ -181,7 +182,15 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	case errors.Is(err, domain.ErrVersionConflict):
 		status, code, detail = http.StatusPreconditionFailed, "version_conflict", "it changed since you read it; reload and try again"
 	case errors.Is(err, domain.ErrInvalidStateTransition):
-		status, code, detail = http.StatusConflict, "invalid_state_transition", "names can change only while the business is a draft or rejected"
+		status, code, detail = http.StatusConflict, "invalid_state_transition", "only allowed while the business is a draft or rejected"
+	case errors.Is(err, domain.ErrUnsupportedFile):
+		status, code, detail = http.StatusUnsupportedMediaType, "unsupported_media_type", "send a PDF, JPEG or PNG file"
+	case errors.Is(err, domain.ErrFileTooLarge):
+		status, code, detail = http.StatusRequestEntityTooLarge, "payload_too_large", "files may be up to 10 MiB"
+	case errors.Is(err, domain.ErrEmptyFile):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "the file is empty"
+	case errors.Is(err, domain.ErrDocumentLimitReached):
+		status, code, detail = http.StatusConflict, "document_limit_reached", "a business keeps at most 5 verification documents"
 	case errors.Is(err, domain.ErrInvalidCRNumber):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "cr_number: must be 10 digits"
 	case errors.Is(err, shared.ErrArabicRequired):

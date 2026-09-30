@@ -11,9 +11,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/acl"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 )
 
@@ -22,6 +24,7 @@ type Deps struct {
 	Pool   *pgxpool.Pool
 	Clock  clock.Clock
 	Logger *slog.Logger
+	Media  *media.Module // stores verification documents (through adapters/acl)
 }
 
 // Module is the wired business module.
@@ -38,6 +41,7 @@ func New(d Deps) *Module {
 			Get:         app.NewGetBusinessHandler(store, store),
 			Update:      app.NewUpdateBusinessHandler(store, store, d.Clock),
 			Branches:    app.NewBranchHandlers(store.Branches(), store, d.Clock),
+			Documents:   app.NewDocumentHandlers(store, store.Documents(), store, acl.NewMediaFiles(d.Media), d.Clock),
 			Memberships: app.NewListMyMembershipsHandler(store),
 		}, d.Logger),
 	}
