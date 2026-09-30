@@ -143,14 +143,11 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	}
 
 	var headers apigen.ProblemResponseHeaders
-	var later *domain.RetryLaterError
-	if errors.As(err, &later) {
-		secs := int(math.Ceil(later.After.Seconds()))
-		headers.RetryAfter = &secs
+	if later, ok := errors.AsType[*domain.RetryLaterError](err); ok {
+		headers.RetryAfter = new(int(math.Ceil(later.After.Seconds())))
 	}
 	if code == "unauthorized" {
-		challenge := httpx.BearerChallenge
-		headers.WWWAuthenticate = &challenge
+		headers.WWWAuthenticate = new(httpx.BearerChallenge)
 	}
 	return httpx.APIProblem(ctx, status, code, detail), headers
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -22,7 +23,7 @@ func (h *Handlers) GetBarberSchedule(ctx context.Context, req apigen.GetBarberSc
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	s, err := h.schedules.Schedule(ctx, staffRef(p.UserID, req.BusinessId, req.BranchId, req.StaffId))
 	if err != nil {
@@ -39,9 +40,9 @@ func (h *Handlers) SetBarberSchedule(ctx context.Context, req apigen.SetBarberSc
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 0)
 	if err != nil {
 		return fail(err)
 	}
@@ -90,7 +91,7 @@ func (h *Handlers) ListTimeOff(ctx context.Context, req apigen.ListTimeOffReques
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	list, err := h.schedules.TimeOff(ctx, p.UserID, shared.IDFromUUID[shared.BusinessTag](req.BusinessId), shared.IDFromUUID[shared.StaffTag](req.StaffId))
 	if err != nil {
@@ -111,7 +112,7 @@ func (h *Handlers) AddTimeOff(ctx context.Context, req apigen.AddTimeOffRequestO
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	cmd := app.AddTimeOff{
 		Actor: p.UserID, BusinessID: shared.IDFromUUID[shared.BusinessTag](req.BusinessId), StaffID: shared.IDFromUUID[shared.StaffTag](req.StaffId),
@@ -135,7 +136,7 @@ func (h *Handlers) DeleteTimeOff(ctx context.Context, req apigen.DeleteTimeOffRe
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	err := h.schedules.DeleteTimeOff(ctx, app.TimeOffRef{
 		Actor: p.UserID, BusinessID: shared.IDFromUUID[shared.BusinessTag](req.BusinessId),
@@ -155,7 +156,7 @@ func (h *Handlers) GetWorkingWindows(ctx context.Context, req apigen.GetWorkingW
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	windows, loc, err := h.windows.ForStaff(ctx, app.WindowsQuery{
 		StaffRef: staffRef(p.UserID, req.BusinessId, req.BranchId, req.StaffId), From: req.Params.From, To: req.Params.To,
@@ -190,8 +191,7 @@ func toAPISchedule(s *domain.BarberSchedule) apigen.BarberSchedule {
 		out.Overrides = append(out.Overrides, apigen.DateHours{Date: openapi_types.Date{Time: d.AsTime()}, Intervals: ranges})
 	}
 	if !s.UpdatedAt().IsZero() {
-		at := s.UpdatedAt()
-		out.UpdatedAt = &at
+		out.UpdatedAt = new(s.UpdatedAt())
 	}
 	return out
 }

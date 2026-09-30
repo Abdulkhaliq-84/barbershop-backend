@@ -35,8 +35,6 @@ func NewHandlers(calendars *app.CalendarHandlers, schedules *app.ScheduleHandler
 }
 
 var (
-	errNoPrincipal   = errors.New("no authenticated caller")
-	errBadIfMatch    = errors.New("if-match: not a version")
 	errBadTime       = errors.New("not an HH:MM time")
 	errDuplicateDate = errors.New("a date is listed twice")
 )
@@ -56,7 +54,7 @@ func (h *Handlers) GetOpeningHours(ctx context.Context, req apigen.GetOpeningHou
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	cal, err := h.calendars.OpeningHours(ctx, branchRef(p.UserID, req.BusinessId, req.BranchId))
 	if err != nil {
@@ -73,9 +71,9 @@ func (h *Handlers) SetOpeningHours(ctx context.Context, req apigen.SetOpeningHou
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 0)
 	if err != nil {
 		return fail(err)
 	}
@@ -117,8 +115,7 @@ func fromAPIDays(days []apigen.DayHours) ([]domain.WeeklyInterval, error) {
 func toAPIOpeningHours(cal *domain.BranchCalendar) apigen.OpeningHours {
 	out := apigen.OpeningHours{Days: toAPIWeek(cal.OpeningHours()), Version: cal.Version()}
 	if !cal.UpdatedAt().IsZero() {
-		at := cal.UpdatedAt()
-		out.UpdatedAt = &at
+		out.UpdatedAt = new(cal.UpdatedAt())
 	}
 	return out
 }
@@ -175,11 +172,10 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	status, code, detail := http.StatusInternalServerError, "internal", ""
 	var headers apigen.ProblemResponseHeaders
 	switch {
-	case errors.Is(err, errNoPrincipal):
+	case errors.Is(err, httpx.ErrNoPrincipal):
 		status, code, detail = http.StatusUnauthorized, "unauthorized", "a valid access token is required"
-		challenge := httpx.BearerChallenge
-		headers.WWWAuthenticate = &challenge
-	case errors.Is(err, errBadIfMatch):
+		headers.WWWAuthenticate = new(httpx.BearerChallenge)
+	case errors.Is(err, httpx.ErrBadIfMatch):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the version you last read (0 the first time)"
 	case errors.Is(err, errBadTime):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "times are HH:MM"
@@ -204,20 +200,6 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		h.logger.ErrorContext(ctx, "scheduling request failed", slog.String("error_type", fmt.Sprintf("%T", err)))
 	}
 	return httpx.APIProblem(ctx, status, code, detail), headers
-}
-
-// parseIfMatch reads a version from If-Match, bare (3) or as an ETag ("3").
-// 0 is allowed: the version of hours never set.
-func parseIfMatch(v string) (int, error) {
-	v = strings.TrimSpace(v)
-	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
-		v = v[1 : len(v)-1]
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
-		return 0, errBadIfMatch
-	}
-	return n, nil
 }
 
 func branchRef(actor shared.UserID, business, branch apigen.BusinessID) app.BranchRef {

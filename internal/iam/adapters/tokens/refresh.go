@@ -24,9 +24,7 @@ type RefreshSecrets struct{}
 // hash is enough here, unlike OTP codes: 256 random bits can't be brute-forced.
 func (RefreshSecrets) New() (string, []byte, error) {
 	b := make([]byte, refreshBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", nil, err
-	}
+	rand.Read(b) // never fails: crypto/rand crashes the program instead of returning an error
 	token := refreshPrefix + base64.RawURLEncoding.EncodeToString(b)
 	hash := sha256.Sum256([]byte(token))
 	return token, hash[:], nil

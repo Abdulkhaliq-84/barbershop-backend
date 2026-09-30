@@ -87,8 +87,7 @@ func (r *Schedules) Update(ctx context.Context, business shared.BusinessID, bran
 		}
 		return saveSchedule(ctx, q, k, s, expectedVersion)
 	})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "barber_schedules_pkey" {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "barber_schedules_pkey" {
 		return domain.ErrVersionConflict
 	}
 	return err
@@ -232,8 +231,7 @@ func (r *TimeOffs) Add(ctx context.Context, t *domain.TimeOff) error {
 		ID: t.ID().UUID(), BusinessID: t.BusinessID().UUID(), StaffID: t.StaffID().UUID(),
 		StartsAt: t.Span().Start(), EndsAt: t.Span().End(), Reason: t.Reason(), CreatedAt: t.CreatedAt(),
 	})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == exclusionViolation && pgErr.ConstraintName == "time_off_no_overlap" {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == exclusionViolation && pgErr.ConstraintName == "time_off_no_overlap" {
 		return domain.ErrTimeOffOverlaps
 	}
 	if err != nil {

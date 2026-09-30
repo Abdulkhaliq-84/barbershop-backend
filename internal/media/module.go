@@ -66,7 +66,7 @@ func New(d Deps) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	svc := app.NewService(postgres.NewObjects(d.Pool), store, sig, d.Clock)
+	svc := app.NewService(postgres.NewObjects(d.Pool), store, sig, d.Clock, d.Logger)
 	return &Module{svc: svc, http: httpapi.NewHandlers(svc, d.Logger), disk: store}, nil
 }
 

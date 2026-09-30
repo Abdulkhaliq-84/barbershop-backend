@@ -64,6 +64,9 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	// everything below watches it to shut down cleanly.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// After the first signal, stop listening: a second Ctrl-C then kills the
+	// process the default way instead of waiting out the graceful shutdown.
+	context.AfterFunc(ctx, stop)
 
 	role := "api"
 	if len(args) > 0 {
@@ -100,6 +103,11 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := a.close(); err != nil {
+			logger.WarnContext(ctx, "closing the application", slog.String("error_type", fmt.Sprintf("%T", err)))
+		}
+	}()
 	if role == "worker" {
 		return a.bus.Run(ctx, cfg.Worker.StopTimeout)
 	}
@@ -133,6 +141,7 @@ type apiServer struct {
 type application struct {
 	handler http.Handler
 	bus     *outbox.Bus
+	close   func() error // releases what the modules hold open (the media directory)
 }
 
 // newApplication builds every module, subscribes them to each other's
@@ -174,7 +183,7 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
-	return &application{handler: router, bus: bus}, nil
+	return &application{handler: router, bus: bus, close: mediaModule.Close}, nil
 }
 
 // subscribe wires who reacts to which event. Subscriber names are stored in

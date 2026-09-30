@@ -90,8 +90,7 @@ func (s *Store) Register(ctx context.Context, b *domain.Business, owner *domain.
 	})
 	// The database, not a read-then-insert check, decides duplicates: two
 	// retries racing each other can't both pass a unique index.
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "businesses_owner_cr_number_key" {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "businesses_owner_cr_number_key" {
 		return domain.ErrAlreadyRegistered
 	}
 	if err != nil && !errors.Is(err, domain.ErrTooManyRegistrations) {
@@ -169,8 +168,7 @@ func (s *Store) update(ctx context.Context, id shared.BusinessID, expectedVersio
 		r := b.Review()
 		var reviewer *uuid.UUID
 		if !r.ReviewedBy.IsZero() {
-			u := r.ReviewedBy.UUID()
-			reviewer = &u
+			reviewer = new(r.ReviewedBy.UUID())
 		}
 		n, err := q.UpdateBusiness(ctx, sqlcgen.UpdateBusinessParams{
 			DisplayNameAr:   b.DisplayName().Ar(),
@@ -188,8 +186,7 @@ func (s *Store) update(ctx context.Context, id shared.BusinessID, expectedVersio
 		})
 		// Submitting claims the CR number platform-wide (a partial unique
 		// index); the database is the one place two submissions can't race.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "businesses_claimed_cr_number_key" {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "businesses_claimed_cr_number_key" {
 			return domain.ErrCRNumberClaimed
 		}
 		if err != nil {

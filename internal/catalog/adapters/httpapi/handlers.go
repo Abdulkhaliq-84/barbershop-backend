@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
@@ -32,17 +30,12 @@ func NewHandlers(services *app.ServiceHandlers, logger *slog.Logger) *Handlers {
 	return &Handlers{services: services, logger: logger}
 }
 
-var (
-	errNoPrincipal = errors.New("no authenticated caller")
-	errBadIfMatch  = errors.New("if-match: not a version")
-)
-
 // ListServiceCategories handles GET /v1/service-categories.
 func (h *Handlers) ListServiceCategories(context.Context, apigen.ListServiceCategoriesRequestObject) (apigen.ListServiceCategoriesResponseObject, error) {
 	cats := h.services.Categories()
 	list := apigen.ListServiceCategories200JSONResponse{Data: make([]apigen.ServiceCategory, 0, len(cats))}
 	for _, c := range cats {
-		list.Data = append(list.Data, apigen.ServiceCategory{Code: string(c.Code), Name: toAPIText(c.Name), Icon: c.Icon})
+		list.Data = append(list.Data, apigen.ServiceCategory{Code: string(c.Code), Name: httpx.APIText(c.Name), Icon: c.Icon})
 	}
 	return list, nil
 }
@@ -55,7 +48,7 @@ func (h *Handlers) ListServices(ctx context.Context, req apigen.ListServicesRequ
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	services, err := h.services.List(ctx, branchRef(p.UserID, req.BusinessId, req.BranchId))
 	if err != nil {
@@ -76,7 +69,7 @@ func (h *Handlers) CreateService(ctx context.Context, req apigen.CreateServiceRe
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
 	body := req.Body
 	cmd := app.CreateService{
@@ -107,9 +100,9 @@ func (h *Handlers) UpdateService(ctx context.Context, req apigen.UpdateServiceRe
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 1)
 	if err != nil {
 		return fail(err)
 	}
@@ -129,8 +122,7 @@ func (h *Handlers) UpdateService(ctx context.Context, req apigen.UpdateServiceRe
 		cmd.Description = &domain.Description{Ar: deref(body.Description.Ar), En: deref(body.Description.En)}
 	}
 	if body.DurationMinutes != nil {
-		d := time.Duration(*body.DurationMinutes) * time.Minute
-		cmd.Duration = &d
+		cmd.Duration = new(time.Duration(*body.DurationMinutes) * time.Minute)
 	}
 	if body.Price != nil {
 		cmd.Price = &app.Money{Amount: body.Price.Amount, Currency: string(body.Price.Currency)}
@@ -150,9 +142,9 @@ func (h *Handlers) SetServiceOfferings(ctx context.Context, req apigen.SetServic
 	}
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return fail(errNoPrincipal)
+		return fail(httpx.ErrNoPrincipal)
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 1)
 	if err != nil {
 		return fail(err)
 	}
@@ -168,8 +160,7 @@ func (h *Handlers) SetServiceOfferings(ctx context.Context, req apigen.SetServic
 			in.Price = &app.Money{Amount: o.Price.Amount, Currency: string(o.Price.Currency)}
 		}
 		if o.DurationMinutes != nil {
-			d := time.Duration(*o.DurationMinutes) * time.Minute
-			in.Duration = &d
+			in.Duration = new(time.Duration(*o.DurationMinutes) * time.Minute)
 		}
 		cmd.Offerings = append(cmd.Offerings, in)
 	}
@@ -186,11 +177,10 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	status, code, detail := http.StatusInternalServerError, "internal", ""
 	var headers apigen.ProblemResponseHeaders
 	switch {
-	case errors.Is(err, errNoPrincipal):
+	case errors.Is(err, httpx.ErrNoPrincipal):
 		status, code, detail = http.StatusUnauthorized, "unauthorized", "a valid access token is required"
-		challenge := httpx.BearerChallenge
-		headers.WWWAuthenticate = &challenge
-	case errors.Is(err, errBadIfMatch):
+		headers.WWWAuthenticate = new(httpx.BearerChallenge)
+	case errors.Is(err, httpx.ErrBadIfMatch):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the service version you last read"
 	case errors.Is(err, domain.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"
@@ -224,19 +214,6 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	return httpx.APIProblem(ctx, status, code, detail), headers
 }
 
-// parseIfMatch reads a version from If-Match, bare (3) or as an ETag ("3").
-func parseIfMatch(v string) (int, error) {
-	v = strings.TrimSpace(v)
-	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
-		v = v[1 : len(v)-1]
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 {
-		return 0, errBadIfMatch
-	}
-	return n, nil
-}
-
 func branchRef(actor shared.UserID, business, branch apigen.BusinessID) app.BranchRef {
 	return app.BranchRef{
 		Actor:      actor,
@@ -251,7 +228,7 @@ func toAPIService(s *domain.Service) apigen.Service {
 		Id:              s.ID().UUID(),
 		BranchId:        s.BranchID().UUID(),
 		Category:        string(d.Category),
-		Name:            toAPIText(d.Name),
+		Name:            httpx.APIText(d.Name),
 		DurationMinutes: int(d.Duration / time.Minute),
 		Price:           toAPIMoney(d.Price),
 		Offerings:       make([]apigen.Offering, 0, len(s.Offerings())),
@@ -264,12 +241,10 @@ func toAPIService(s *domain.Service) apigen.Service {
 	for _, o := range s.Offerings() {
 		off := apigen.Offering{StaffId: o.Staff.UUID()}
 		if o.Price != nil {
-			p := toAPIMoney(*o.Price)
-			off.Price = &p
+			off.Price = new(toAPIMoney(*o.Price))
 		}
 		if o.Duration != nil {
-			m := int(*o.Duration / time.Minute)
-			off.DurationMinutes = &m
+			off.DurationMinutes = new(int(*o.Duration / time.Minute))
 		}
 		out.Offerings = append(out.Offerings, off)
 	}
@@ -288,14 +263,6 @@ func toAPIService(s *domain.Service) apigen.Service {
 
 func toAPIMoney(m shared.Money) apigen.Money {
 	return apigen.Money{Amount: m.Amount(), Currency: apigen.MoneyCurrency(m.Currency())}
-}
-
-func toAPIText(t shared.LocalizedText) apigen.LocalizedText {
-	text := apigen.LocalizedText{Ar: t.Ar()}
-	if en := t.En(); en != "" {
-		text.En = &en
-	}
-	return text
 }
 
 func deref(s *string) string {

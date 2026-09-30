@@ -90,8 +90,7 @@ func (r *Calendars) Update(ctx context.Context, business shared.BusinessID, bran
 		}
 		return saveHours(ctx, q, cal)
 	})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "branch_calendars_pkey" {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "branch_calendars_pkey" {
 		return domain.ErrVersionConflict
 	}
 	return err

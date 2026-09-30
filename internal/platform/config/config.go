@@ -199,18 +199,18 @@ func (c Config) validate() error {
 // fields ("ReadTimeout"), to name the environment variable the operator must
 // fix ("HTTP_READ_TIMEOUT").
 //
-// errors.As is Go's typed error check — like `err instanceof ParseError` in
-// JavaScript, but it also looks through wrapped errors.
+// errors.AsType (Go 1.26) is Go's typed error check — like
+// `err instanceof ParseError` in JavaScript, but it also looks through
+// wrapped errors, and hands back the typed value.
 func withEnvNames(err error) error {
-	var agg env.AggregateError
-	if !errors.As(err, &agg) {
+	agg, ok := errors.AsType[env.AggregateError](err)
+	if !ok {
 		return err
 	}
 	keys := envKeys(reflect.TypeFor[Config]())
 	errs := make([]error, 0, len(agg.Errors))
 	for _, e := range agg.Errors {
-		var pe env.ParseError
-		if errors.As(e, &pe) && keys[pe.Name] != "" {
+		if pe, ok := errors.AsType[env.ParseError](e); ok && keys[pe.Name] != "" {
 			e = fmt.Errorf("%s: invalid value", keys[pe.Name])
 		}
 		errs = append(errs, e)

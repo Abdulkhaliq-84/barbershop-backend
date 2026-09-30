@@ -30,9 +30,7 @@ type Tokens struct{}
 // New returns a fresh token and its hash.
 func (Tokens) New() (string, []byte, error) {
 	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", nil, err
-	}
+	rand.Read(b[:]) // never fails: crypto/rand crashes the program instead of returning an error
 	token := tokenPrefix + base64.RawURLEncoding.EncodeToString(b[:])
 	return token, Tokens{}.Hash(token), nil
 }

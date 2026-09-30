@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -110,7 +111,7 @@ func newFixture() *fixture {
 		objects: &memObjects{objects: map[shared.MediaID]*domain.Object{}},
 		clock:   clock.NewFake(t0),
 	}
-	f.svc = app.NewService(f.objects, f.storage, plainSigner{}, f.clock)
+	f.svc = app.NewService(f.objects, f.storage, plainSigner{}, f.clock, slog.New(slog.DiscardHandler))
 	return f
 }
 

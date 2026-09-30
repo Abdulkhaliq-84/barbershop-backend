@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media/domain"
@@ -49,11 +50,12 @@ type Service struct {
 	storage Storage
 	signer  Signer
 	clock   clock.Clock
+	logger  *slog.Logger
 }
 
 // NewService wires the use cases.
-func NewService(objects domain.Objects, storage Storage, signer Signer, clk clock.Clock) *Service {
-	return &Service{objects: objects, storage: storage, signer: signer, clock: clk}
+func NewService(objects domain.Objects, storage Storage, signer Signer, clk clock.Clock, logger *slog.Logger) *Service {
+	return &Service{objects: objects, storage: storage, signer: signer, clock: clk, logger: logger}
 }
 
 // Store checks and saves a file. The bytes are streamed to storage — never
@@ -91,16 +93,16 @@ func (s *Service) Store(ctx context.Context, in Upload) (*domain.Object, error) 
 		return nil, fmt.Errorf("store file: %w", err)
 	}
 	if counted.n > domain.MaxSize {
-		s.discard(id)
+		s.discard(ctx, id)
 		return nil, domain.ErrTooLarge
 	}
 	obj, err := domain.NewObject(id, purpose, ct, counted.n, counted.h.Sum(nil), in.UploadedBy, s.clock.Now())
 	if err != nil {
-		s.discard(id)
+		s.discard(ctx, id)
 		return nil, err
 	}
 	if err := s.objects.Add(ctx, obj); err != nil {
-		s.discard(id)
+		s.discard(ctx, id)
 		return nil, fmt.Errorf("save object: %w", err)
 	}
 	return obj, nil
@@ -118,13 +120,20 @@ func (s *Service) Delete(ctx context.Context, id shared.MediaID) error {
 	return nil
 }
 
-// discard cleans up after a refused or failed upload. It must not depend on
-// the request's context, which may be the reason we are cleaning up.
-func (s *Service) discard(id shared.MediaID) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// discard cleans up after a refused or failed upload. It must outlive the
+// request's cancellation, which may be the reason we are cleaning up, but
+// keeps its values (the request ID in the log line).
+func (s *Service) discard(ctx context.Context, id shared.MediaID) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()
-	_ = s.storage.Remove(ctx, id.String()) // best effort: an orphan file is harmless
+	if err := s.storage.Remove(ctx, id.String()); err != nil {
+		// Harmless (nothing links to the file) but worth a sweep.
+		s.logger.WarnContext(ctx, "media: refused upload left on disk", slog.String("media_id", id.String()), slog.String("error_type", fmt.Sprintf("%T", err)))
+	}
 }
+
+// cleanupTimeout bounds cleanup after a failed request.
+const cleanupTimeout = 5 * time.Second
 
 // DownloadPath returns a signed, relative download link and when it stops
 // working. Callers decide who may receive it; the link itself is the key.

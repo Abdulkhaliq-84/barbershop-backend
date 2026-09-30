@@ -143,7 +143,7 @@ func New(d Deps) *Module {
 			Get:       app.NewGetBusinessHandler(store, store),
 			Update:    app.NewUpdateBusinessHandler(store, store, d.Clock),
 			Branches:  app.NewBranchHandlers(store.Branches(), store, plans, d.Clock),
-			Documents: app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock),
+			Documents: app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock, d.Logger),
 			Submit:    app.NewSubmitHandler(store, store, d.Clock),
 			Review:    app.NewReviewHandlers(store, store, store.Documents(), store.Branches(), store, files, d.Clock),
 			Staff: app.NewStaffHandlers(app.StaffDeps{

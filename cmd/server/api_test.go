@@ -85,6 +85,11 @@ func newAPI(t *testing.T) *api {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := app.close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	})
 	srv := httptest.NewServer(app.handler)
 	t.Cleanup(srv.Close)
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -116,7 +117,7 @@ func newDocFixture(t *testing.T) *docFixture {
 	files := &fakeFiles{files: map[shared.MediaID][]byte{}}
 	return &docFixture{
 		fixture: f, docs: docs, files: files, owner: owner, business: b.ID(),
-		handlers: app.NewDocumentHandlers(f.store, docs, f.store, files, f.clock),
+		handlers: app.NewDocumentHandlers(f.store, docs, f.store, files, f.clock, slog.New(slog.DiscardHandler)),
 	}
 }
 

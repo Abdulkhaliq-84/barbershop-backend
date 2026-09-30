@@ -37,10 +37,6 @@ const (
 // from protected operations (RFC 6750).
 const BearerChallenge = `Bearer realm="barbershop-api"` //nolint:gosec // G101: a challenge naming the scheme, not a credential
 
-// errNoPrincipal tells the spec validator that a protected operation was
-// called without a valid access token.
-var errNoPrincipal = errors.New("a valid access token is required")
-
 // MountAPI serves every operation of api/openapi.yaml on r. Each request is
 // first validated against the spec (types, required fields, lengths, unknown
 // fields, and security), so handlers only ever see well-formed input from
@@ -68,18 +64,17 @@ func MountAPI(r chi.Router, server apigen.StrictServerInterface, logger *slog.Lo
 				if _, ok := auth.PrincipalFrom(ctx); ok {
 					return nil
 				}
-				return errNoPrincipal
+				return ErrNoPrincipal
 			},
 		},
 		ErrorHandlerWithOpts: func(_ context.Context, err error, w http.ResponseWriter, r *http.Request, opts nethttpmiddleware.ErrorHandlerOpts) {
-			var tooBig *http.MaxBytesError
-			if errors.As(err, &tooBig) {
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 				WriteProblem(w, r, Problem{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Detail: "the request body is too large"})
 				return
 			}
 			if opts.StatusCode == http.StatusUnauthorized {
 				w.Header().Set("WWW-Authenticate", BearerChallenge)
-				WriteProblem(w, r, Problem{Status: http.StatusUnauthorized, Code: "unauthorized", Detail: errNoPrincipal.Error()})
+				WriteProblem(w, r, Problem{Status: http.StatusUnauthorized, Code: "unauthorized", Detail: ErrNoPrincipal.Error()})
 				return
 			}
 			WriteProblem(w, r, Problem{Status: opts.StatusCode, Code: "validation_failed", Detail: validationDetail(err)})

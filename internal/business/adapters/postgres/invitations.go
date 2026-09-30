@@ -157,8 +157,7 @@ func (r *InvitationStore) Accept(ctx context.Context, tokenHash []byte, fn func(
 		}
 		return insertStaff(ctx, q, member)
 	})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "staff_members_user_business_key" {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "staff_members_user_business_key" {
 		return domain.ErrAlreadyStaff
 	}
 	return err
@@ -167,8 +166,7 @@ func (r *InvitationStore) Accept(ctx context.Context, tokenHash []byte, fn func(
 func saveInvitation(ctx context.Context, q *sqlcgen.Queries, inv *domain.Invitation) error {
 	var by *uuid.UUID
 	if !inv.AcceptedBy().IsZero() {
-		u := inv.AcceptedBy().UUID()
-		by = &u
+		by = new(inv.AcceptedBy().UUID())
 	}
 	if err := q.SaveInvitation(ctx, sqlcgen.SaveInvitationParams{
 		Status: string(inv.Status()), AcceptedAt: inv.AcceptedAt(), AcceptedBy: by, ID: inv.ID().UUID(),

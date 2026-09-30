@@ -8,6 +8,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -15,7 +16,7 @@ import (
 func (h *Handlers) ListBranches(ctx context.Context, req apigen.ListBranchesRequestObject) (apigen.ListBranchesResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.ListBranchesdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	branches, err := h.uc.Branches.List(ctx, p.UserID, shared.IDFromUUID[shared.BusinessTag](req.BusinessId))
@@ -34,7 +35,7 @@ func (h *Handlers) ListBranches(ctx context.Context, req apigen.ListBranchesRequ
 func (h *Handlers) CreateBranch(ctx context.Context, req apigen.CreateBranchRequestObject) (apigen.CreateBranchResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.CreateBranchdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	body := req.Body
@@ -50,8 +51,7 @@ func (h *Handlers) CreateBranch(ctx context.Context, req apigen.CreateBranchRequ
 		Timezone:   deref(body.Timezone),
 	}
 	if body.BookingPolicy != nil {
-		rules := toPolicyRules(*body.BookingPolicy)
-		cmd.Policy = &rules
+		cmd.Policy = new(toPolicyRules(*body.BookingPolicy))
 	}
 	b, err := h.uc.Branches.Create(ctx, cmd)
 	if err != nil {
@@ -65,7 +65,7 @@ func (h *Handlers) CreateBranch(ctx context.Context, req apigen.CreateBranchRequ
 func (h *Handlers) GetBranch(ctx context.Context, req apigen.GetBranchRequestObject) (apigen.GetBranchResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.GetBranchdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	b, err := h.uc.Branches.Get(ctx, app.BranchQuery{
@@ -84,10 +84,10 @@ func (h *Handlers) GetBranch(ctx context.Context, req apigen.GetBranchRequestObj
 func (h *Handlers) UpdateBranch(ctx context.Context, req apigen.UpdateBranchRequestObject) (apigen.UpdateBranchResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.UpdateBranchdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
-	version, err := parseIfMatch(req.Params.IfMatch)
+	version, err := httpx.ParseIfMatch(req.Params.IfMatch, 1)
 	if err != nil {
 		problem, headers := h.problem(ctx, err)
 		return apigen.UpdateBranchdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
@@ -111,8 +111,7 @@ func (h *Handlers) UpdateBranch(ctx context.Context, req apigen.UpdateBranchRequ
 		cmd.Location = &app.Location{Lat: l.Latitude, Lng: l.Longitude}
 	}
 	if bp := body.BookingPolicy; bp != nil {
-		rules := toPolicyRules(*bp)
-		cmd.Policy = &rules
+		cmd.Policy = new(toPolicyRules(*bp))
 	}
 	b, err := h.uc.Branches.Update(ctx, cmd)
 	if err != nil {
@@ -127,7 +126,7 @@ func toAPIBranch(b *domain.Branch) apigen.Branch {
 	branch := apigen.Branch{
 		Id:         b.ID().UUID(),
 		BusinessId: b.BusinessID().UUID(),
-		Name:       toAPIText(p.Name),
+		Name:       httpx.APIText(p.Name),
 		CityCode:   string(p.City),
 		Address:    p.Address,
 		Location:   apigen.GeoPoint{Latitude: p.Location.Lat(), Longitude: p.Location.Lng()},
@@ -151,8 +150,7 @@ func toAPIBranch(b *domain.Branch) apigen.Branch {
 		branch.District = &p.District
 	}
 	if !p.Phone.IsZero() {
-		phone := p.Phone.String()
-		branch.Phone = &phone
+		branch.Phone = new(p.Phone.String())
 	}
 	return branch
 }

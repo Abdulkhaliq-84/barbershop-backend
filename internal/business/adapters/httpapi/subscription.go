@@ -5,6 +5,7 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/apigen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/httpx"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -12,7 +13,7 @@ import (
 func (h *Handlers) GetSubscription(ctx context.Context, req apigen.GetSubscriptionRequestObject) (apigen.GetSubscriptionResponseObject, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		problem, headers := h.problem(ctx, errNoPrincipal)
+		problem, headers := h.problem(ctx, httpx.ErrNoPrincipal)
 		return apigen.GetSubscriptiondefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	s, err := h.uc.Plan.Handle(ctx, p.UserID, shared.IDFromUUID[shared.BusinessTag](req.BusinessId))
@@ -21,7 +22,7 @@ func (h *Handlers) GetSubscription(ctx context.Context, req apigen.GetSubscripti
 		return apigen.GetSubscriptiondefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
 	}
 	return apigen.GetSubscription200JSONResponse{
-		Plan:        apigen.Plan{Code: apigen.PlanCode(s.Plan), Name: toAPIText(s.PlanName)},
+		Plan:        apigen.Plan{Code: apigen.PlanCode(s.Plan), Name: httpx.APIText(s.PlanName)},
 		Status:      apigen.SubscriptionStatus(s.Status),
 		TrialEndsAt: s.TrialEndsAt,
 		MaxBranches: s.Limits.MaxBranches,
