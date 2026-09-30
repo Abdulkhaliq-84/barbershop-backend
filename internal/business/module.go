@@ -145,7 +145,7 @@ func New(d Deps) *Module {
 			Branches:  app.NewBranchHandlers(store.Branches(), store, plans, d.Clock),
 			Documents: app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock),
 			Submit:    app.NewSubmitHandler(store, store, d.Clock),
-			Review:    app.NewReviewHandlers(store, store.Documents(), store.Branches(), store, files, d.Clock),
+			Review:    app.NewReviewHandlers(store, store, store.Documents(), store.Branches(), store, files, d.Clock),
 			Staff: app.NewStaffHandlers(app.StaffDeps{
 				Businesses: store, Staff: store, Invitations: store.Invitations(), Users: acl.NewIAMUsers(d.Users),
 				Plans: plans, Tokens: invites.Tokens{}, Sender: sender, Clock: d.Clock,

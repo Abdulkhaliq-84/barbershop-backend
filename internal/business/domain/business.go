@@ -44,6 +44,11 @@ const (
 	MaxLegalNameLen   = 200
 )
 
+// MaxOpenRegistrations is how many businesses a user may have that aren't
+// approved yet (draft, under review or rejected). A draft can already invite
+// staff — an SMS each — so drafts with made-up CR numbers must not be free.
+const MaxOpenRegistrations = 3
+
 // Business is a tenant: a barbershop company with one or more branches. It
 // is the aggregate root for its profile and verification status.
 type Business struct {

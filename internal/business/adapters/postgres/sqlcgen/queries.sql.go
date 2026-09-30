@@ -12,6 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const advisoryLock = `-- name: AdvisoryLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// A transaction lock on a name, for what no row lock covers: invitations
+// to one phone across businesses, one user's registrations.
+func (q *Queries) AdvisoryLock(ctx context.Context, name string) error {
+	_, err := q.db.Exec(ctx, advisoryLock, name)
+	return err
+}
+
 const branchByID = `-- name: BranchByID :one
 SELECT id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status, min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings, version, created_at, updated_at FROM business.branches WHERE business_id = $1 AND id = $2
 `
@@ -54,7 +65,7 @@ func (q *Queries) BranchByID(ctx context.Context, arg BranchByIDParams) (Busines
 }
 
 const branchByIDForUpdate = `-- name: BranchByIDForUpdate :one
-SELECT id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status, min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings, version, created_at, updated_at FROM business.branches WHERE business_id = $1 AND id = $2 FOR UPDATE
+SELECT id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status, min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings, version, created_at, updated_at FROM business.branches WHERE business_id = $1 AND id = $2 FOR NO KEY UPDATE
 `
 
 type BranchByIDForUpdateParams struct {
@@ -169,11 +180,13 @@ func (q *Queries) BusinessByID(ctx context.Context, id uuid.UUID) (BusinessBusin
 
 const businessByIDForUpdate = `-- name: BusinessByIDForUpdate :one
 
-SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at, submitted_at, reviewed_at, reviewed_by, rejection_reason FROM business.businesses WHERE id = $1 FOR UPDATE
+SELECT id, owner_user_id, display_name_ar, display_name_en, legal_name, cr_number, status, version, created_at, updated_at, submitted_at, reviewed_at, reviewed_by, rejection_reason FROM business.businesses WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // UUIDv7: newest first
 // Locks the row until the transaction ends: a second editor waits here.
+// NO KEY: the id never changes, so rows that reference the business
+// (branches, invitations) can still be inserted meanwhile.
 func (q *Queries) BusinessByIDForUpdate(ctx context.Context, id uuid.UUID) (BusinessBusiness, error) {
 	row := q.db.QueryRow(ctx, businessByIDForUpdate, id)
 	var i BusinessBusiness
@@ -276,6 +289,18 @@ type CountBranchesInParams struct {
 
 func (q *Queries) CountBranchesIn(ctx context.Context, arg CountBranchesInParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countBranchesIn, arg.BusinessID, arg.Ids)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countOpenRegistrations = `-- name: CountOpenRegistrations :one
+SELECT count(*) FROM business.businesses
+WHERE owner_user_id = $1 AND status IN ('draft', 'pending_review', 'rejected')
+`
+
+func (q *Queries) CountOpenRegistrations(ctx context.Context, ownerUserID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenRegistrations, ownerUserID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -575,6 +600,48 @@ func (q *Queries) InvitationForUpdate(ctx context.Context, arg InvitationForUpda
 		&i.ExpiresAt,
 		&i.AcceptedAt,
 		&i.AcceptedBy,
+	)
+	return i, err
+}
+
+const inviteHistory = `-- name: InviteHistory :one
+SELECT
+    (SELECT coalesce(max(i.created_at), $1::timestamptz) FROM business.invitations i
+     WHERE i.business_id = $2 AND i.phone = $3 AND i.created_at > $1)::timestamptz AS last_to_phone,
+    (SELECT count(*) FROM business.invitations i
+     WHERE i.phone = $3 AND i.created_at > $1) AS to_phone,
+    (SELECT coalesce(min(i.created_at), $1::timestamptz) FROM business.invitations i
+     WHERE i.phone = $3 AND i.created_at > $1)::timestamptz AS oldest_to_phone,
+    (SELECT count(*) FROM business.invitations i
+     WHERE i.business_id = $2 AND i.created_at > $1) AS by_business,
+    (SELECT coalesce(min(i.created_at), $1::timestamptz) FROM business.invitations i
+     WHERE i.business_id = $2 AND i.created_at > $1)::timestamptz AS oldest_by_business
+`
+
+type InviteHistoryParams struct {
+	Since      time.Time
+	BusinessID uuid.UUID
+	Phone      string
+}
+
+type InviteHistoryRow struct {
+	LastToPhone      time.Time
+	ToPhone          int64
+	OldestToPhone    time.Time
+	ByBusiness       int64
+	OldestByBusiness time.Time
+}
+
+// What the invitation limits need, in one round trip (both indexes above).
+func (q *Queries) InviteHistory(ctx context.Context, arg InviteHistoryParams) (InviteHistoryRow, error) {
+	row := q.db.QueryRow(ctx, inviteHistory, arg.Since, arg.BusinessID, arg.Phone)
+	var i InviteHistoryRow
+	err := row.Scan(
+		&i.LastToPhone,
+		&i.ToPhone,
+		&i.OldestToPhone,
+		&i.ByBusiness,
+		&i.OldestByBusiness,
 	)
 	return i, err
 }

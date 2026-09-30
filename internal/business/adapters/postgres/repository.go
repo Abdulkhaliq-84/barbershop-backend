@@ -61,6 +61,17 @@ func (s *Store) Register(ctx context.Context, b *domain.Business, owner *domain.
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
+		// Count, then insert, one registration of this user at a time.
+		if err := q.AdvisoryLock(ctx, "business.register:"+b.OwnerID().String()); err != nil {
+			return fmt.Errorf("lock owner: %w", err)
+		}
+		open, err := q.CountOpenRegistrations(ctx, b.OwnerID().UUID())
+		if err != nil {
+			return fmt.Errorf("count registrations: %w", err)
+		}
+		if open >= domain.MaxOpenRegistrations {
+			return domain.ErrTooManyRegistrations
+		}
 		if err := q.InsertBusiness(ctx, sqlcgen.InsertBusinessParams{
 			ID:            b.ID().UUID(),
 			OwnerUserID:   b.OwnerID().UUID(),
@@ -83,10 +94,10 @@ func (s *Store) Register(ctx context.Context, b *domain.Business, owner *domain.
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "businesses_owner_cr_number_key" {
 		return domain.ErrAlreadyRegistered
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, domain.ErrTooManyRegistrations) {
 		return fmt.Errorf("insert business: %w", err)
 	}
-	return nil
+	return err
 }
 
 // ByID returns the business with id.

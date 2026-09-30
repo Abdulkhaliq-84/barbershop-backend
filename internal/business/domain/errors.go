@@ -46,4 +46,8 @@ var (
 	ErrInvitationClosed    = errors.New("staff: invitation already accepted or revoked")
 	ErrBranchLimitReached  = errors.New("business: the plan's branch limit is reached")
 	ErrStaffLimitReached   = errors.New("staff: the plan's staff limit is reached")
+	ErrTooManyInvitations  = errors.New("staff: too many invitations; try again later")
+	// ErrTooManyRegistrations: the user has MaxOpenRegistrations businesses
+	// not yet approved.
+	ErrTooManyRegistrations = errors.New("business: finish an earlier registration first")
 )

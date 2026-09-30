@@ -166,3 +166,46 @@ func (i *Invitation) AcceptedAt() *time.Time { return i.acceptedAt }
 
 // AcceptedBy returns who accepted it (zero until accepted).
 func (i *Invitation) AcceptedBy() shared.UserID { return i.acceptedBy }
+
+// Invitation sending limits. Each invitation is a paid SMS to someone who
+// didn't ask for it, so they are capped like login codes (ADR-0013): per
+// phone, from one business and from all of them, and per business.
+const (
+	InviteCooldown        = time.Minute // between two invitations to a phone from one business
+	MaxInvitesPerPhone    = 5           // to one phone, from all businesses, per InviteWindow
+	MaxInvitesPerBusiness = 50          // from one business, per InviteWindow
+	InviteWindow          = 24 * time.Hour
+)
+
+// InviteHistory is what has been sent recently, as the limits need it.
+type InviteHistory struct {
+	LastToPhone    time.Time // this business's latest invitation to the phone (zero or long ago if none)
+	ToPhone        int       // invitations to the phone in the window, from any business
+	OldestToPhone  time.Time // the first of those
+	ByBusiness     int       // this business's invitations in the window
+	OldestBusiness time.Time // the first of those
+}
+
+// InviteRateError says an invitation would exceed a limit, and when one
+// frees up.
+type InviteRateError struct{ RetryAfter time.Duration }
+
+func (e *InviteRateError) Error() string { return "staff: too many invitations; try again later" }
+
+// Is makes errors.Is(err, ErrTooManyInvitations) match any InviteRateError.
+func (e *InviteRateError) Is(target error) bool { return target == ErrTooManyInvitations }
+
+// AllowInvite checks the limits for an invitation sent at now.
+func (h InviteHistory) AllowInvite(now time.Time) error {
+	wait := h.LastToPhone.Add(InviteCooldown).Sub(now)
+	if h.ToPhone >= MaxInvitesPerPhone {
+		wait = max(wait, h.OldestToPhone.Add(InviteWindow).Sub(now))
+	}
+	if h.ByBusiness >= MaxInvitesPerBusiness {
+		wait = max(wait, h.OldestBusiness.Add(InviteWindow).Sub(now))
+	}
+	if wait > 0 {
+		return &InviteRateError{RetryAfter: wait}
+	}
+	return nil
+}

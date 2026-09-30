@@ -24,7 +24,7 @@ func newReviewFixture(t *testing.T) *reviewFixture {
 	return &reviewFixture{
 		docFixture: f,
 		submit:     app.NewSubmitHandler(f.store, f.store, f.clock),
-		review:     app.NewReviewHandlers(f.store, f.docs, &branchStore{}, f.store, f.files, f.clock),
+		review:     app.NewReviewHandlers(f.store, f.store, f.docs, &branchStore{}, f.store, f.files, f.clock),
 		admin:      app.Admin{ID: shared.NewID[shared.UserTag](), IsPlatformAdmin: true},
 	}
 }
@@ -175,5 +175,31 @@ func TestReviewQueuePages(t *testing.T) {
 	// The fixture's own draft business is never listed; drafts aren't a queue.
 	if _, _, err := f.review.Queue(ctx, f.admin, domain.StatusDraft, nil, 20); !errors.Is(err, domain.ErrUnknownStatus) {
 		t.Errorf("draft queue: %v", err)
+	}
+}
+
+// Not only the owner: an admin who works at the business, or used to, isn't
+// independent either.
+func TestAdminWhoWorksThereCantReview(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newReviewFixture(t)
+	if _, err := f.submit.Handle(ctx, f.owner, f.business, 1); err != nil {
+		t.Fatal(err)
+	}
+	barber, former := shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag]()
+	f.store.addStaff(f.business, barber, domain.RoleBarber, true)
+	f.store.addStaff(f.business, former, domain.RoleManager, false)
+	for name, id := range map[string]shared.UserID{"barber": barber, "former manager": former} {
+		admin := app.Admin{ID: id, IsPlatformAdmin: true}
+		if _, err := f.review.Approve(ctx, admin, f.business, 2); !errors.Is(err, domain.ErrSelfReview) {
+			t.Errorf("%s approves: %v", name, err)
+		}
+		if _, err := f.review.Reject(ctx, admin, f.business, 2, "no"); !errors.Is(err, domain.ErrSelfReview) {
+			t.Errorf("%s rejects: %v", name, err)
+		}
+	}
+	if _, err := f.review.Approve(ctx, f.admin, f.business, 2); err != nil {
+		t.Errorf("an independent admin: %v", err)
 	}
 }

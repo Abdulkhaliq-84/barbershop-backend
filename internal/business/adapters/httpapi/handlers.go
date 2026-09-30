@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -184,7 +185,7 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	case errors.Is(err, domain.ErrNotPlatformAdmin):
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, domain.ErrSelfReview):
-		status, code, detail = http.StatusForbidden, "forbidden", "another admin must review your own business"
+		status, code, detail = http.StatusForbidden, "forbidden", "another admin must review a business you own or work at"
 	case errors.Is(err, domain.ErrCRDocumentRequired):
 		status, code, detail = http.StatusConflict, "cr_document_required", "upload the CR certificate first"
 	case errors.Is(err, domain.ErrBranchRequired):
@@ -199,6 +200,15 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the business version you last read"
 	case errors.Is(err, domain.ErrBranchLimitReached):
 		status, code, detail = http.StatusConflict, "plan_limit_reached", "your plan's branch limit is reached; see GET /v1/businesses/{business_id}/subscription"
+	case errors.Is(err, domain.ErrTooManyInvitations):
+		status, code, detail = http.StatusTooManyRequests, "rate_limited", "too many invitations; try again later"
+		var rate *domain.InviteRateError
+		if errors.As(err, &rate) {
+			secs := int(math.Ceil(rate.RetryAfter.Seconds()))
+			headers.RetryAfter = &secs
+		}
+	case errors.Is(err, domain.ErrTooManyRegistrations):
+		status, code, detail = http.StatusConflict, "registration_limit_reached", "finish, or wait for the review of, an earlier registration first"
 	case errors.Is(err, domain.ErrStaffLimitReached):
 		status, code, detail = http.StatusConflict, "plan_limit_reached", "your plan's staff limit is reached (pending invitations count); see GET /v1/businesses/{business_id}/subscription"
 	case errors.Is(err, domain.ErrInvitationInvalid):

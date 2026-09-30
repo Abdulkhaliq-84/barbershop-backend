@@ -26,7 +26,7 @@ UPDATE catalog.services SET
     description_ar = @description_ar, description_en = @description_en,
     duration_minutes = @duration_minutes, price_amount = @price_amount, price_currency = @price_currency,
     active = @active, sort_order = @sort_order, version = @version, updated_at = @updated_at
-WHERE id = @id AND version = @expected_version;
+WHERE business_id = @business_id AND branch_id = @branch_id AND id = @id AND version = @expected_version;
 
 -- name: OfferingsByBranch :many
 SELECT o.* FROM catalog.service_offerings o

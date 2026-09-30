@@ -199,6 +199,8 @@ paths:
         Creates a business in `draft` status with the caller as its owner.
         A draft is private to its staff; customers see nothing until the
         platform approves it (submission and review arrive later in M3).
+        A user has at most 3 businesses not yet approved (draft, under
+        review or rejected): `409 registration_limit_reached`.
 
         The CR number (Saudi Commercial Registration, 10 digits) is checked
         for format only. It is claimed — made unique across the platform —
@@ -356,6 +358,9 @@ paths:
 
         The owner may edit every branch; a manager only the branches they
         work at (`403 forbidden` for the others). Barbers can't edit.
+        Only the owner changes `timezone` (`403 forbidden` for a manager):
+        opening hours and schedules are wall-clock times in it, so they all
+        move with it.
       parameters:
         - $ref: "#/components/parameters/IfMatchVersion"
       requestBody:
@@ -453,6 +458,10 @@ paths:
         (the old link stops working) — that is how to resend one. Every
         branch in `branch_ids` must belong to the business
         (`422 validation_failed` otherwise).
+
+        Each invitation is an SMS, so they are limited: one a minute to a
+        phone from a business, 5 a day to a phone from all businesses, 50 a
+        day from a business (`429 rate_limited`, with `Retry-After`).
       requestBody:
         required: true
         content:
@@ -1041,7 +1050,10 @@ paths:
       operationId: approveBusiness
       tags: [admin]
       summary: Approve a business under review (platform admins)
-      description: "`pending_review` → `active`. Anything else: `409 invalid_state_transition`."
+      description: |
+        `pending_review` → `active`. Anything else: `409 invalid_state_transition`.
+        An admin who owns, works at or used to work at the business can't
+        decide on it (`403 forbidden`).
       parameters:
         - $ref: "#/components/parameters/IfMatchVersion"
       responses:
@@ -1202,7 +1214,8 @@ components:
             `version_conflict`, `unsupported_media_type`, `payload_too_large`,
             `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
             `branch_required`, `cr_number_taken`, `invitation_invalid`,
-            `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`.
+            `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`,
+            `registration_limit_reached`.
           example: otp_cooldown
         detail:
           type: string
