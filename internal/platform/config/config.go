@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -32,6 +33,7 @@ type Config struct {
 	Database Database
 	Log      Log
 	Auth     Auth
+	Media    Media
 }
 
 // HTTP configures the HTTP server. The timeouts protect the server from slow
@@ -67,12 +69,24 @@ type Auth struct {
 	TokenSecret string `env:"TOKEN_SIGNING_SECRET,required,notEmpty"`
 }
 
+// Media configures file storage.
+type Media struct {
+	// Dir is where uploaded files are kept. Relative paths are fine in
+	// development (var/media); staging and production must use an absolute
+	// path on a persistent volume.
+	Dir string `env:"MEDIA_DIR" envDefault:"var/media"`
+	// SigningSecret signs download links (≥ 32 bytes). Whoever knows it can
+	// make links to any private file, such as CR documents.
+	SigningSecret string `env:"MEDIA_SIGNING_SECRET,required,notEmpty"`
+}
+
 // devSecrets are the local-development values published in the Makefile,
 // compose.yaml and .env.example. Anyone can read them, so they are refused
 // outside development and test.
 var devSecrets = map[string]string{
 	"OTP_SECRET":           "local-development-otp-secret-not-for-real-use",
 	"TOKEN_SIGNING_SECRET": "local-development-token-signing-secret-not-for-real-use",
+	"MEDIA_SIGNING_SECRET": "local-development-media-signing-secret-not-for-real-use",
 }
 
 // Log configures structured logging.
@@ -127,8 +141,18 @@ func (c Config) validate() error {
 	if len(c.Auth.TokenSecret) < 32 {
 		errs = append(errs, errors.New("TOKEN_SIGNING_SECRET must be at least 32 bytes"))
 	}
+	if len(c.Media.SigningSecret) < 32 {
+		errs = append(errs, errors.New("MEDIA_SIGNING_SECRET must be at least 32 bytes"))
+	}
 	if c.Env == EnvStaging || c.Env == EnvProduction {
-		for key, value := range map[string]string{"OTP_SECRET": c.Auth.OTPSecret, "TOKEN_SIGNING_SECRET": c.Auth.TokenSecret} {
+		if !filepath.IsAbs(c.Media.Dir) {
+			errs = append(errs, errors.New("MEDIA_DIR must be an absolute path outside development"))
+		}
+		for key, value := range map[string]string{
+			"OTP_SECRET":           c.Auth.OTPSecret,
+			"TOKEN_SIGNING_SECRET": c.Auth.TokenSecret,
+			"MEDIA_SIGNING_SECRET": c.Media.SigningSecret,
+		} {
 			if value == devSecrets[key] {
 				errs = append(errs, fmt.Errorf("%s is the public development value; set a real secret", key))
 			}

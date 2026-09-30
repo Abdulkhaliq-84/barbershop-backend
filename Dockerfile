@@ -23,11 +23,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
+RUN mkdir -p /out/media
 
 # ---- runtime ----------------------------------------------------------------
 FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 
 COPY --from=build /out/server /server
+# An empty, nonroot-owned directory for uploads: a named volume mounted here
+# starts with this owner, so the server can write without running as root.
+COPY --from=build --chown=65532:65532 /out/media /var/lib/barbershop/media
 
 # 65532 is distroless's "nonroot" user; numeric so runAsNonRoot checks can verify it.
 USER 65532:65532

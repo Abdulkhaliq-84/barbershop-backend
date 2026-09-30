@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -67,10 +68,13 @@ func newAPI(t *testing.T) *api {
 	if err := database.Migrate(t.Context(), pool, logger); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{Auth: config.Auth{
-		OTPSecret:   "test-only-otp-secret-0123456789abcdef",
-		TokenSecret: "test-only-token-secret-0123456789abcdef",
-	}}
+	cfg := config.Config{
+		Auth: config.Auth{
+			OTPSecret:   "test-only-otp-secret-0123456789abcdef",
+			TokenSecret: "test-only-token-secret-0123456789abcdef",
+		},
+		Media: config.Media{Dir: t.TempDir(), SigningSecret: "test-only-media-secret-0123456789abcdef"},
+	}
 	handler, err := newHandler(cfg, pool, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -402,5 +406,141 @@ func TestBranchesAreIsolatedBetweenBusinesses(t *testing.T) {
 	}
 	if r := a.do(t, http.MethodGet, biz+"/branches/"+id, owner, ""); r.body["version"] != float64(1) || r.body["address"] != "شارع العليا العام" {
 		t.Fatalf("the branch changed: %v", r.body)
+	}
+}
+
+// raw sends a request and returns the undecoded response (downloads aren't JSON).
+func (a *api) raw(t *testing.T, method, path, token, contentType string, body []byte) (int, http.Header, []byte) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, a.url+path, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header, data
+}
+
+// upload posts a file as a verification document.
+func (a *api) upload(t *testing.T, biz, token string, file []byte) response {
+	t.Helper()
+	status, headers, data := a.raw(t, http.MethodPost, biz+"/verification/documents?kind=cr_certificate", token, "application/octet-stream", file)
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("upload: response is not JSON: %s", data)
+	}
+	return response{status: status, headers: headers, body: body}
+}
+
+func pdfFile(size int) []byte {
+	b := bytes.Repeat([]byte{'x'}, size)
+	copy(b, "%PDF-1.7\n")
+	return b
+}
+
+func TestVerificationDocumentsAPI(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner, biz := a.register(t, "0551234567", "1010000001")
+	file := pdfFile(50_000)
+
+	// Upload: stored, typed from the content, with a signed link.
+	r := a.upload(t, biz, owner, file)
+	if r.status != http.StatusCreated || r.body["content_type"] != "application/pdf" || r.body["size_bytes"] != float64(50_000) || r.body["kind"] != "cr_certificate" {
+		t.Fatalf("upload: %d %v", r.status, r.body)
+	}
+	link, _ := r.body["download_url"].(string)
+
+	// The link downloads exactly the bytes, as a no-store attachment.
+	status, headers, data := a.raw(t, http.MethodGet, link, "", "", nil)
+	if status != http.StatusOK || !bytes.Equal(data, file) {
+		t.Fatalf("download: %d, %d bytes", status, len(data))
+	}
+	if headers.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(headers.Get("Content-Disposition"), "attachment;") ||
+		headers.Get("X-Content-Type-Options") != "nosniff" || headers.Get("Cache-Control") != "private, no-store" {
+		t.Errorf("download headers: %v", headers)
+	}
+
+	// A tampered link opens nothing: another expiry, another signature, another file.
+	u, _ := url.Parse(link)
+	q := u.Query()
+	for name, bad := range map[string]string{
+		"later expiry":    strings.Replace(link, "expires="+q.Get("expires"), "expires=9999999999", 1),
+		"other signature": strings.Replace(link, "signature="+q.Get("signature"), "signature=AAAA", 1),
+		"no signature":    u.Path + "?expires=" + q.Get("expires") + "&signature=x",
+	} {
+		if status, _, data := a.raw(t, http.MethodGet, bad, "", "", nil); status != http.StatusForbidden || !bytes.Contains(data, []byte("download_link_invalid")) {
+			t.Errorf("%s: %d %s", name, status, data)
+		}
+	}
+	other := a.upload(t, biz, owner, pdfFile(100))
+	otherID, _ := other.body["id"].(string)
+	if status, _, _ := a.raw(t, http.MethodGet, strings.Replace(link, u.Path, "/v1/media/"+otherID, 1), "", "", nil); status != http.StatusForbidden {
+		t.Errorf("this link for another file: %d", status)
+	}
+
+	// The owner lists them with fresh links; a stranger learns nothing.
+	r = a.do(t, http.MethodGet, biz+"/verification/documents", owner, "")
+	if data, _ := r.body["data"].([]any); r.status != http.StatusOK || len(data) != 2 {
+		t.Fatalf("list: %d %v", r.status, r.body)
+	}
+	stranger := a.signIn(t, "0559876543")
+	if r := a.do(t, http.MethodGet, biz+"/verification/documents", stranger, ""); r.status != http.StatusNotFound {
+		t.Errorf("stranger list: %d %v", r.status, r.body)
+	}
+	if r := a.upload(t, biz, stranger, file); r.status != http.StatusNotFound {
+		t.Errorf("stranger upload: %d %v", r.status, r.body)
+	}
+	if r := a.upload(t, biz, "", file); r.status != http.StatusUnauthorized {
+		t.Errorf("anonymous upload: %d %v", r.status, r.body)
+	}
+}
+
+func TestVerificationDocumentUploadRejects(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	owner, biz := a.register(t, "0551234567", "1010000001")
+
+	tests := []struct {
+		name   string
+		file   []byte
+		status int
+		code   string
+	}{
+		{"html page named cr.pdf", []byte("<html><script>alert(1)</script></html>"), http.StatusUnsupportedMediaType, "unsupported_media_type"},
+		{"windows program", append([]byte("MZ"), make([]byte, 100)...), http.StatusUnsupportedMediaType, "unsupported_media_type"},
+		{"over 10 MiB", pdfFile(10<<20 + 1), http.StatusRequestEntityTooLarge, "payload_too_large"},
+		{"way over 10 MiB", pdfFile(12 << 20), http.StatusRequestEntityTooLarge, "payload_too_large"},
+	}
+	for _, tt := range tests {
+		if r := a.upload(t, biz, owner, tt.file); r.status != tt.status || r.body["code"] != tt.code {
+			t.Errorf("%s: %d %v, want %d %s", tt.name, r.status, r.body, tt.status, tt.code)
+		}
+	}
+	// Exactly 10 MiB is fine; then fill up to the limit of five.
+	if r := a.upload(t, biz, owner, pdfFile(10<<20)); r.status != http.StatusCreated {
+		t.Fatalf("10 MiB: %d %v", r.status, r.body)
+	}
+	for range 4 {
+		if r := a.upload(t, biz, owner, pdfFile(10)); r.status != http.StatusCreated {
+			t.Fatalf("upload: %d %v", r.status, r.body)
+		}
+	}
+	if r := a.upload(t, biz, owner, pdfFile(10)); r.status != http.StatusConflict || r.body["code"] != "document_limit_reached" {
+		t.Errorf("sixth document: %d %v", r.status, r.body)
+	}
+	// JSON is not a file.
+	if status, _, data := a.raw(t, http.MethodPost, biz+"/verification/documents?kind=cr_certificate", owner, "application/json", []byte(`{}`)); status != http.StatusBadRequest {
+		t.Errorf("json body: %d %s", status, data)
 	}
 }

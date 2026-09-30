@@ -208,3 +208,29 @@ func TestBusinessRename(t *testing.T) {
 		})
 	}
 }
+
+func TestCanAttachDocument(t *testing.T) {
+	t.Parallel()
+	r := registration(t)
+	for _, tt := range []struct {
+		status   domain.Status
+		existing int
+		want     error
+	}{
+		{domain.StatusDraft, 0, nil},
+		{domain.StatusDraft, domain.MaxVerificationDocuments - 1, nil},
+		{domain.StatusDraft, domain.MaxVerificationDocuments, domain.ErrDocumentLimitReached},
+		{domain.StatusRejected, 2, nil}, // fixing the business after a rejection
+		{domain.StatusPendingReview, 0, domain.ErrInvalidStateTransition},
+		{domain.StatusActive, 0, domain.ErrInvalidStateTransition},
+		{domain.StatusSuspended, 0, domain.ErrInvalidStateTransition},
+	} {
+		b := domain.RehydrateBusiness(shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), r.DisplayName, "مؤسسة", r.CRNumber, tt.status, 1, t0, t0)
+		if err := b.CanAttachDocument(tt.existing); !errors.Is(err, tt.want) {
+			t.Errorf("%s with %d documents: error = %v, want %v", tt.status, tt.existing, err, tt.want)
+		}
+	}
+	if _, err := domain.ParseDocumentKind("passport"); !errors.Is(err, domain.ErrUnknownDocumentKind) {
+		t.Errorf("unknown kind: %v", err)
+	}
+}

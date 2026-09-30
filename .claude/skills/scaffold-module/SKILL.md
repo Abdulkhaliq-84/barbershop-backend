@@ -45,7 +45,8 @@ it in the PR, and leave the next instance as the "Your turn" exercise.
 7. **Cross-module needs** — call the other module's **root package** API through an ACL adapter in
    `adapters/acl/` that implements this module's port. Never import its internals (depguard fails
    the build; add the new module to the `*-keeps-to-itself` rules in `.golangci.yml`). No foreign
-   keys into another module's schema (ADR-0015).
+   keys into another module's schema (ADR-0015). First instance: `internal/business/adapters/acl/media.go`
+   (business's `DocumentFiles` port over `media.Module`).
 8. **Wiring** — `internal/<module>/module.go` (`New(deps)`, routes, event subscriptions) and `cmd/server`.
 9. **Docs** — update `docs/api/overview.md` / domain model if behaviour changed; README roadmap checkbox when a milestone completes.
 

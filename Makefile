@@ -24,6 +24,7 @@ export LOG_FORMAT ?= text
 export OTP_SECRET   ?= local-development-otp-secret-not-for-real-use
 export SMS_PROVIDER ?= console
 export TOKEN_SIGNING_SECRET ?= local-development-token-signing-secret-not-for-real-use
+export MEDIA_SIGNING_SECRET ?= local-development-media-signing-secret-not-for-real-use
 
 GOBIN := $(shell go env GOPATH)/bin
 

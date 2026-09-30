@@ -58,6 +58,16 @@ type BusinessStaffMember struct {
 	CreatedAt  time.Time
 }
 
+type BusinessVerificationDocument struct {
+	ObjectID    uuid.UUID
+	BusinessID  uuid.UUID
+	Kind        string
+	ContentType string
+	SizeBytes   int64
+	UploadedBy  uuid.UUID
+	UploadedAt  time.Time
+}
+
 type IamOtpChallenge struct {
 	ID         uuid.UUID
 	Phone      string
@@ -101,4 +111,14 @@ type IamUser struct {
 	PlatformRole string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type MediaObject struct {
+	ID          uuid.UUID
+	Purpose     string
+	ContentType string
+	SizeBytes   int64
+	Sha256      []byte
+	CreatedBy   uuid.UUID
+	CreatedAt   time.Time
 }

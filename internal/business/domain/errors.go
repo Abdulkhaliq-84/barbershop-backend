@@ -23,4 +23,10 @@ var (
 	ErrInvalidCityCode = errors.New("branch: unknown city code")
 	ErrAddressRequired = errors.New("branch: address is required")
 	ErrInvalidTimezone = errors.New("branch: not an IANA time zone")
+
+	ErrUnknownDocumentKind  = errors.New("verification: unknown document kind")
+	ErrDocumentLimitReached = errors.New("verification: too many documents")
+	ErrEmptyFile            = errors.New("verification: the file is empty")
+	ErrFileTooLarge         = errors.New("verification: the file is too large")
+	ErrUnsupportedFile      = errors.New("verification: only PDF, JPEG and PNG files are accepted")
 )

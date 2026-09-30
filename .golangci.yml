@@ -72,12 +72,25 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
               desc: use the business root package, never its internals
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media/
+              desc: use the media root package, never its internals
         business-keeps-to-itself:
           files:
             - "**/internal/business/**"
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/
               desc: use the iam root package, never its internals
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media/
+              desc: use the media root package (through adapters/acl), never its internals
+        # media is generic: it knows nothing about who stores files or why.
+        media-keeps-to-itself:
+          files:
+            - "**/internal/media/**"
+          deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
+              desc: media must not depend on other modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
+              desc: media must not depend on other modules
         # Platform plumbing must never depend on business modules.
         platform-has-no-business:
           files:
@@ -88,6 +101,8 @@ linters:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
               desc: platform code must not import business modules
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
+              desc: platform code must not import business modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media
               desc: platform code must not import business modules
   exclusions:
     presets:

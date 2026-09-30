@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -16,8 +17,12 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
 )
 
-// maxBodyBytes caps request bodies; the API only takes small JSON documents.
-const maxBodyBytes = 1 << 20 // 1 MiB
+// Request body caps. JSON documents are small; file uploads (sent as
+// application/octet-stream) may be up to 10 MiB, which media checks again.
+const (
+	maxBodyBytes   = 1 << 20  // 1 MiB
+	maxUploadBytes = 10 << 20 // 10 MiB
+)
 
 // BearerChallenge is the WWW-Authenticate value sent with 401 responses
 // from protected operations (RFC 6750).
@@ -54,6 +59,11 @@ func MountAPI(r chi.Router, server apigen.StrictServerInterface, logger *slog.Lo
 			},
 		},
 		ErrorHandlerWithOpts: func(_ context.Context, err error, w http.ResponseWriter, r *http.Request, opts nethttpmiddleware.ErrorHandlerOpts) {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				WriteProblem(w, r, Problem{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Detail: "the request body is too large"})
+				return
+			}
 			if opts.StatusCode == http.StatusUnauthorized {
 				w.Header().Set("WWW-Authenticate", BearerChallenge)
 				WriteProblem(w, r, Problem{Status: http.StatusUnauthorized, Code: "unauthorized", Detail: errNoPrincipal.Error()})
@@ -74,7 +84,7 @@ func MountAPI(r chi.Router, server apigen.StrictServerInterface, logger *slog.Lo
 	})
 
 	r.Group(func(r chi.Router) {
-		r.Use(limitBody(maxBodyBytes), bearerAuth(authenticate), validator)
+		r.Use(limitBody(maxBodyBytes, maxUploadBytes), bearerAuth(authenticate), validator)
 		apigen.HandlerWithOptions(handler, apigen.ChiServerOptions{
 			BaseRouter: r,
 			// A path or header parameter the router can't parse (e.g. a
@@ -112,10 +122,17 @@ func validationDetail(_ error) string {
 	return "request does not match the API specification"
 }
 
-func limitBody(n int64) func(http.Handler) http.Handler {
+// limitBody stops reading a request body after n bytes (upload bytes for
+// application/octet-stream bodies), so a client can't make the server read —
+// and the validator buffer — an unbounded body.
+func limitBody(n, upload int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.Body = http.MaxBytesReader(w, r.Body, n)
+			limit := n
+			if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt == "application/octet-stream" {
+				limit = upload
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			next.ServeHTTP(w, r)
 		})
 	}

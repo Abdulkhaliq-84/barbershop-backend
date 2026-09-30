@@ -17,7 +17,8 @@ delivery pipeline (Docker image, security scans, GHCR publishing, release-please
 shared kernel and IAM (phone OTP login, access + rotating refresh tokens, `GET /v1/me`). M3 (business
 onboarding) is in progress: M3.1 added the `business` module — register a draft business, owner
 membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the membership-first
-`authorize` policy (ADR-0015); M3.2 branches (location, city, time zone, booking policy).
+`authorize` policy (ADR-0015); M3.2 branches (location, city, time zone, booking policy); M3.3 the
+`media` module (private uploads, signed download links — ADR-0016) and CR document upload.
 
 ## 2. Where things are
 
@@ -29,7 +30,7 @@ membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the 
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0015) |
+| Why a decision was made | `docs/adr/` (0001–0016) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
@@ -145,8 +146,9 @@ Binary roles: `server api` (default), `server migrate`; `worker` arrives in M3. 
 `main.version` is stamped at build time (`-ldflags -X`); releases are cut by merging release-please's Release PR — never tag by hand.
 Database tests skip unless `TEST_DATABASE_URL` is set (in CI a missing URL fails); each test gets its own database (ADR-0012).
 Login locally: `make run`, `POST /v1/auth/otp/request`, read the code from the API log (`SMS_PROVIDER=console`), `POST /v1/auth/otp/verify`
-→ `tokens.access_token` opens `GET /v1/me` (`Authorization: Bearer …`). `TOKEN_SIGNING_SECRET` and `OTP_SECRET` have public dev
-values in the Makefile/compose; they are refused when `APP_ENV` is staging or production.
+→ `tokens.access_token` opens `GET /v1/me` (`Authorization: Bearer …`). `TOKEN_SIGNING_SECRET`, `OTP_SECRET` and `MEDIA_SIGNING_SECRET` have
+public dev values in the Makefile/compose; they are refused when `APP_ENV` is staging or production. Uploaded files go to
+`MEDIA_DIR` (default `var/media`, git-ignored; absolute path required outside development).
 
 ## 12. Don'ts
 

@@ -171,6 +171,11 @@ watch the second call end the session (`refresh_token_reused`).
 | **Struct conversion** between two types with identical fields (`sqlcgen.InsertBranchParams(row)`), checked by the compiler | `adapters/postgres/branches.go` | a spread `{...row}` that nothing checks |
 | An error type carrying a safe message (`*PolicyError`) matched with `errors.As` | `domain/booking_policy.go` | `class PolicyError extends Error` + `instanceof` |
 
+| **Streaming an upload** through `io.TeeReader` + `io.LimitReader` into storage while hashing and counting — never the whole file in memory | `internal/media/app/app.go` `Store` | piping a `req` stream through a hash transform into `fs.createWriteStream` |
+| `os.Root`: file access that **cannot escape a directory** (no `..`, no symlinks out) | `internal/media/adapters/disk` | hand-rolled `path.resolve` checks |
+| **HMAC-signed links** checked with `hmac.Equal` (constant time) | `internal/media/adapters/signer` | `crypto.timingSafeEqual` |
+| An **anti-corruption layer**: business's own port, implemented over another module's public API | `internal/business/adapters/acl/media.go` | a wrapper service that maps another team's SDK to your types |
+
 Try this: register a business, then call `GET /v1/businesses/{id}` with another user's token and
 compare the answer with an ID that doesn't exist. They should be identical.
 
