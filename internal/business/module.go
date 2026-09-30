@@ -13,8 +13,10 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/acl"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/invites"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/app"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 )
@@ -25,6 +27,10 @@ type Deps struct {
 	Clock  clock.Clock
 	Logger *slog.Logger
 	Media  *media.Module // stores verification documents (through adapters/acl)
+	Users  *iam.Module   // who a user is: their sign-in phone (through adapters/acl)
+	// InviteSender delivers staff invitations; nil = development console
+	// sender (only with SMS_PROVIDER=console, refused in production).
+	InviteSender app.InvitationSender
 }
 
 // Module is the wired business module.
@@ -36,6 +42,10 @@ type Module struct {
 func New(d Deps) *Module {
 	store := postgres.NewStore(d.Pool)
 	files := acl.NewMediaFiles(d.Media)
+	sender := d.InviteSender
+	if sender == nil {
+		sender = invites.NewConsole(d.Logger)
+	}
 	return &Module{
 		http: httpapi.NewHandlers(httpapi.UseCases{
 			Register:    app.NewRegisterBusinessHandler(store, d.Clock),
@@ -45,6 +55,7 @@ func New(d Deps) *Module {
 			Documents:   app.NewDocumentHandlers(store, store.Documents(), store, files, d.Clock),
 			Submit:      app.NewSubmitHandler(store, store, d.Clock),
 			Review:      app.NewReviewHandlers(store, store.Documents(), store.Branches(), store, files, d.Clock),
+			Staff:       app.NewStaffHandlers(store, store, store.Invitations(), acl.NewIAMUsers(d.Users), invites.Tokens{}, sender, d.Clock),
 			Memberships: app.NewListMyMembershipsHandler(store),
 		}, d.Logger),
 	}

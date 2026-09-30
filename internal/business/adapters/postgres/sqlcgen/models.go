@@ -53,13 +53,36 @@ type BusinessBusiness struct {
 	RejectionReason string
 }
 
-type BusinessStaffMember struct {
-	ID         uuid.UUID
+type BusinessInvitation struct {
+	ID          uuid.UUID
+	BusinessID  uuid.UUID
+	Phone       string
+	DisplayName string
+	Role        string
+	BranchIds   []uuid.UUID
+	TokenHash   []byte
+	Status      string
+	InvitedBy   uuid.UUID
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	AcceptedAt  *time.Time
+	AcceptedBy  *uuid.UUID
+}
+
+type BusinessStaffBranch struct {
+	StaffID    uuid.UUID
+	BranchID   uuid.UUID
 	BusinessID uuid.UUID
-	UserID     *uuid.UUID
-	Role       string
-	Active     bool
-	CreatedAt  time.Time
+}
+
+type BusinessStaffMember struct {
+	ID          uuid.UUID
+	BusinessID  uuid.UUID
+	UserID      *uuid.UUID
+	Role        string
+	Active      bool
+	CreatedAt   time.Time
+	DisplayName string
 }
 
 type BusinessVerificationDocument struct {

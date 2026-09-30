@@ -166,7 +166,7 @@ func TestStoreRegisterIsAtomic(t *testing.T) {
 	// A second business reusing the first owner's staff ID: its business row
 	// inserts fine, its staff row breaks the primary key.
 	second, _ := newBusiness(t, shared.NewID[shared.UserTag](), "1010000002")
-	clash := domain.RehydrateStaffMember(owner.ID(), second.ID(), second.OwnerID(), domain.RoleOwner, true, t0)
+	clash := domain.RehydrateStaffMember(owner.ID(), second.ID(), second.OwnerID(), domain.RoleOwner, true, t0, "", nil)
 	if err := store.Register(ctx, second, clash); err == nil {
 		t.Fatal("a clashing staff ID was accepted")
 	}

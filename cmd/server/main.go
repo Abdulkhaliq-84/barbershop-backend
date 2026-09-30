@@ -104,7 +104,7 @@ type (
 
 type apiServer struct {
 	*iamAPI      // iam: /v1/auth/*, /v1/me
-	*businessAPI // business: /v1/businesses/* (incl. branches), /v1/me/memberships
+	*businessAPI // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
 	*mediaAPI    // media: /v1/media/* (signed downloads)
 }
 
@@ -128,7 +128,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 	if err != nil {
 		return nil, err
 	}
-	businessModule := business.New(business.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Media: mediaModule})
+	businessModule := business.New(business.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Media: mediaModule, Users: iamModule})
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
 	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP()}

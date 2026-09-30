@@ -102,8 +102,8 @@ membership in `business` (below) — the authorization check lives in each modul
 |---|---|---|
 | `Business` | id, owner user id, display name {ar,en}, legal name, CR number, VAT number?, logo, status, verification (documents, submitted/reviewed at, reviewer, rejection reason) | CR is 10 digits; unique among submitted/active/suspended businesses (drafts don't claim it — ADR-0015); created together with its owner; only `Draft`/`Rejected` can be submitted; submission needs CR document + ≥ 1 branch with a location |
 | `Branch` | id, business id, name {ar,en}, slug, city, district, address, location (lat/lng), phone, timezone (IANA), photos, status, **booking policy** | publishable only when business is `Active`, location set, ≥ 1 active service, ≥ 1 barber with working hours; branch count ≤ plan entitlement |
-| `StaffMember` | id, business id, user id (null until invite accepted), role, branch ids, display name, avatar, bio, active | exactly one owner; barber count ≤ plan entitlement; a barber belongs to ≥ 1 branch |
-| `Invitation` | business id, phone, role, branch ids, token hash, status, expires at | one pending invitation per phone per business |
+| `StaffMember` | id, business id, user id, role, branch ids, display name, avatar, bio, active | exactly one owner; barber count ≤ plan entitlement; a barber belongs to ≥ 1 branch |
+| `Invitation` | business id, phone, name, role, branch ids, token hash, status, expires at | one pending invitation per phone per business; accepted only by a user signed in with that phone (ADR-0018) |
 
 **Business lifecycle**
 
@@ -121,8 +121,15 @@ stateDiagram-v2
 **Branch (M3.2).** City is a code from the app's list (`riyadh`, `jeddah`, …), not free text, so
 customers can search by it. The location is stored as plain latitude/longitude here; map search runs
 on discovery's PostGIS read model (M6). A branch is always loaded by `(business_id, branch_id)`, so
-another business's branch ID is "not found". Any staff may read branches; only the owner creates or
-edits them until managers are assigned branches (M3.5).
+another business's branch ID is "not found". Any staff may read branches; the owner creates them, and
+the owner or a manager of the branch edits them.
+
+**Staff and invitations (M3.5, ADR-0018).** The owner invites a phone as a `manager` or `barber` for
+1–50 of the business's branches. The invitee gets an SMS link with a random token (only its hash is
+stored) and accepts it signed in with that same phone; the invitation then becomes an active
+`StaffMember` with the name and branches from the invitation. Invitations expire after 7 days; inviting
+the same phone again replaces the pending one. `StaffMember.AuthorizeBranch` checks the role *and* that
+the member works at the branch (the owner works at all of them).
 
 **Review (M3.4, ADR-0017).** Submit (owner) needs ≥ 1 CR document and ≥ 1 branch, counted under the
 business row lock, and claims the CR number platform-wide. Approve / reject (platform admin, never the

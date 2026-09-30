@@ -102,21 +102,60 @@ func (e BusinessStatus) Valid() bool {
 	}
 }
 
+// Defines values for StaffInvitationStatus.
+const (
+	Accepted StaffInvitationStatus = "accepted"
+	Pending  StaffInvitationStatus = "pending"
+	Revoked  StaffInvitationStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the StaffInvitationStatus enum.
+func (e StaffInvitationStatus) Valid() bool {
+	switch e {
+	case Accepted:
+		return true
+	case Pending:
+		return true
+	case Revoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StaffInvitationCreateRole.
+const (
+	StaffInvitationCreateRoleBarber  StaffInvitationCreateRole = "barber"
+	StaffInvitationCreateRoleManager StaffInvitationCreateRole = "manager"
+)
+
+// Valid indicates whether the value is a known member of the StaffInvitationCreateRole enum.
+func (e StaffInvitationCreateRole) Valid() bool {
+	switch e {
+	case StaffInvitationCreateRoleBarber:
+		return true
+	case StaffInvitationCreateRoleManager:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StaffRole.
 const (
-	Barber  StaffRole = "barber"
-	Manager StaffRole = "manager"
-	Owner   StaffRole = "owner"
+	StaffRoleBarber  StaffRole = "barber"
+	StaffRoleManager StaffRole = "manager"
+	StaffRoleOwner   StaffRole = "owner"
 )
 
 // Valid indicates whether the value is a known member of the StaffRole enum.
 func (e StaffRole) Valid() bool {
 	switch e {
-	case Barber:
+	case StaffRoleBarber:
 		return true
-	case Manager:
+	case StaffRoleManager:
 		return true
-	case Owner:
+	case StaffRoleOwner:
 		return true
 	default:
 		return false
@@ -466,6 +505,12 @@ type GeoPoint struct {
 	Longitude float64 `json:"longitude"`
 }
 
+// InvitationAccept defines model for InvitationAccept.
+type InvitationAccept struct {
+	// Token The `token` from the invitation link.
+	Token string `json:"token"`
+}
+
 // LocalizedText Text in Arabic (required) and English (optional).
 type LocalizedText struct {
 	// Ar Example: صالون الأناقة
@@ -533,7 +578,8 @@ type Problem struct {
 	// `forbidden`, `business_already_registered`, `invalid_state_transition`,
 	// `version_conflict`, `unsupported_media_type`, `payload_too_large`,
 	// `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
-	// `branch_required`, `cr_number_taken`.
+	// `branch_required`, `cr_number_taken`, `invitation_invalid`,
+	// `invitation_closed`, `already_staff`.
 	//
 	//
 	// Example: otp_cooldown
@@ -560,6 +606,69 @@ type RefreshRequest struct {
 type Rejection struct {
 	// Reason Example: صورة السجل التجاري غير واضحة، يرجى رفع نسخة أوضح
 	Reason string `json:"reason"`
+}
+
+// StaffInvitation defines model for StaffInvitation.
+type StaffInvitation struct {
+	BranchIds   []openapi_types.UUID `json:"branch_ids"`
+	CreatedAt   time.Time            `json:"created_at"`
+	DisplayName string               `json:"display_name"`
+	ExpiresAt   time.Time            `json:"expires_at"`
+	Id          openapi_types.UUID   `json:"id"`
+
+	// Phone Example: +966551234567
+	Phone  string                `json:"phone"`
+	Role   StaffRole             `json:"role"`
+	Status StaffInvitationStatus `json:"status"`
+}
+
+// StaffInvitationStatus defines model for StaffInvitation.Status.
+type StaffInvitationStatus string
+
+// StaffInvitationCreate defines model for StaffInvitationCreate.
+type StaffInvitationCreate struct {
+	// BranchIds The branches they will work at (managers run these branches).
+	BranchIds []openapi_types.UUID `json:"branch_ids"`
+
+	// DisplayName How customers and colleagues will see them.
+	//
+	// Example: أحمد
+	DisplayName string `json:"display_name"`
+
+	// Phone Saudi mobile number in any common format.
+	//
+	// Example: 0551234567
+	Phone string `json:"phone"`
+
+	// Role A business has one owner, from registration; it can't be invited.
+	Role StaffInvitationCreateRole `json:"role"`
+}
+
+// StaffInvitationCreateRole A business has one owner, from registration; it can't be invited.
+type StaffInvitationCreateRole string
+
+// StaffInvitationList defines model for StaffInvitationList.
+type StaffInvitationList struct {
+	Data []StaffInvitation `json:"data"`
+}
+
+// StaffMember defines model for StaffMember.
+type StaffMember struct {
+	Active bool `json:"active"`
+
+	// BranchIds Where they work. Empty for the owner, who runs every branch.
+	BranchIds []openapi_types.UUID `json:"branch_ids"`
+
+	// DisplayName Empty for the owner until profiles exist.
+	DisplayName string             `json:"display_name"`
+	Id          openapi_types.UUID `json:"id"`
+	JoinedAt    time.Time          `json:"joined_at"`
+	Role        StaffRole          `json:"role"`
+}
+
+// StaffMemberList defines model for StaffMemberList.
+type StaffMemberList struct {
+	Data []StaffMember `json:"data"`
 }
 
 // StaffRole defines model for StaffRole.
@@ -641,6 +750,9 @@ type BusinessID = openapi_types.UUID
 
 // IfMatchVersion Example: "3"
 type IfMatchVersion = string
+
+// InvitationID defines model for InvitationID.
+type InvitationID = openapi_types.UUID
 
 // ListBusinessesForReviewParams defines parameters for ListBusinessesForReview.
 type ListBusinessesForReviewParams struct {
@@ -726,6 +838,12 @@ type CreateBranchJSONRequestBody = BranchCreate
 // UpdateBranchJSONRequestBody defines body for UpdateBranch for application/json ContentType.
 type UpdateBranchJSONRequestBody = BranchUpdate
 
+// InviteStaffJSONRequestBody defines body for InviteStaff for application/json ContentType.
+type InviteStaffJSONRequestBody = StaffInvitationCreate
+
+// AcceptStaffInvitationJSONRequestBody defines body for AcceptStaffInvitation for application/json ContentType.
+type AcceptStaffInvitationJSONRequestBody = InvitationAccept
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// ListBusinessesForReview The review queue (platform admins)
@@ -770,9 +888,21 @@ type ServerInterface interface {
 	// GetBranch One branch (any staff of the business)
 	// (GET /v1/businesses/{business_id}/branches/{branch_id})
 	GetBranch(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID)
-	// UpdateBranch Edit a branch (owner)
+	// UpdateBranch Edit a branch (owner, or a manager of the branch)
 	// (PATCH /v1/businesses/{business_id}/branches/{branch_id})
 	UpdateBranch(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, params UpdateBranchParams)
+	// ListStaff The business's team (owner and managers)
+	// (GET /v1/businesses/{business_id}/staff)
+	ListStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID)
+	// ListStaffInvitations Invitations waiting for an answer (owner)
+	// (GET /v1/businesses/{business_id}/staff/invitations)
+	ListStaffInvitations(w http.ResponseWriter, r *http.Request, businessId BusinessID)
+	// InviteStaff Invite a manager or barber by phone (owner)
+	// (POST /v1/businesses/{business_id}/staff/invitations)
+	InviteStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID)
+	// RevokeStaffInvitation Revoke a pending invitation (owner)
+	// (DELETE /v1/businesses/{business_id}/staff/invitations/{invitation_id})
+	RevokeStaffInvitation(w http.ResponseWriter, r *http.Request, businessId BusinessID, invitationId InvitationID)
 	// ListVerificationDocuments The business's verification documents (owner)
 	// (GET /v1/businesses/{business_id}/verification/documents)
 	ListVerificationDocuments(w http.ResponseWriter, r *http.Request, businessId BusinessID)
@@ -782,6 +912,9 @@ type ServerInterface interface {
 	// SubmitBusiness Send the business for review (owner)
 	// (POST /v1/businesses/{business_id}/verification/submit)
 	SubmitBusiness(w http.ResponseWriter, r *http.Request, businessId BusinessID, params SubmitBusinessParams)
+	// AcceptStaffInvitation Join a business with an invitation token
+	// (POST /v1/invitations/accept)
+	AcceptStaffInvitation(w http.ResponseWriter, r *http.Request)
 	// GetMe The signed-in user
 	// (GET /v1/me)
 	GetMe(w http.ResponseWriter, r *http.Request)
@@ -881,9 +1014,33 @@ func (_ Unimplemented) GetBranch(w http.ResponseWriter, r *http.Request, busines
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// UpdateBranch Edit a branch (owner)
+// UpdateBranch Edit a branch (owner, or a manager of the branch)
 // (PATCH /v1/businesses/{business_id}/branches/{branch_id})
 func (_ Unimplemented) UpdateBranch(w http.ResponseWriter, r *http.Request, businessId BusinessID, branchId BranchID, params UpdateBranchParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListStaff The business's team (owner and managers)
+// (GET /v1/businesses/{business_id}/staff)
+func (_ Unimplemented) ListStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListStaffInvitations Invitations waiting for an answer (owner)
+// (GET /v1/businesses/{business_id}/staff/invitations)
+func (_ Unimplemented) ListStaffInvitations(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// InviteStaff Invite a manager or barber by phone (owner)
+// (POST /v1/businesses/{business_id}/staff/invitations)
+func (_ Unimplemented) InviteStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeStaffInvitation Revoke a pending invitation (owner)
+// (DELETE /v1/businesses/{business_id}/staff/invitations/{invitation_id})
+func (_ Unimplemented) RevokeStaffInvitation(w http.ResponseWriter, r *http.Request, businessId BusinessID, invitationId InvitationID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -902,6 +1059,12 @@ func (_ Unimplemented) UploadVerificationDocument(w http.ResponseWriter, r *http
 // SubmitBusiness Send the business for review (owner)
 // (POST /v1/businesses/{business_id}/verification/submit)
 func (_ Unimplemented) SubmitBusiness(w http.ResponseWriter, r *http.Request, businessId BusinessID, params SubmitBusinessParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcceptStaffInvitation Join a business with an invitation token
+// (POST /v1/invitations/accept)
+func (_ Unimplemented) AcceptStaffInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1452,6 +1615,119 @@ func (siw *ServerInterfaceWrapper) UpdateBranch(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ListStaff operation middleware
+func (siw *ServerInterfaceWrapper) ListStaff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListStaff(w, r, businessId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListStaffInvitations operation middleware
+func (siw *ServerInterfaceWrapper) ListStaffInvitations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListStaffInvitations(w, r, businessId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// InviteStaff operation middleware
+func (siw *ServerInterfaceWrapper) InviteStaff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.InviteStaff(w, r, businessId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeStaffInvitation operation middleware
+func (siw *ServerInterfaceWrapper) RevokeStaffInvitation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "business_id" -------------
+	var businessId BusinessID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "business_id", chi.URLParam(r, "business_id"), &businessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "business_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "invitation_id" -------------
+	var invitationId InvitationID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "invitation_id", chi.URLParam(r, "invitation_id"), &invitationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invitation_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeStaffInvitation(w, r, businessId, invitationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListVerificationDocuments operation middleware
 func (siw *ServerInterfaceWrapper) ListVerificationDocuments(w http.ResponseWriter, r *http.Request) {
 
@@ -1565,6 +1841,20 @@ func (siw *ServerInterfaceWrapper) SubmitBusiness(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SubmitBusiness(w, r, businessId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptStaffInvitation operation middleware
+func (siw *ServerInterfaceWrapper) AcceptStaffInvitation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptStaffInvitation(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1808,6 +2098,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/v1/businesses/{business_id}/branches/{branch_id}", wrapper.UpdateBranch)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/businesses/{business_id}/staff", wrapper.ListStaff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/businesses/{business_id}/staff/invitations", wrapper.ListStaffInvitations)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/businesses/{business_id}/staff/invitations", wrapper.InviteStaff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/businesses/{business_id}/staff/invitations/{invitation_id}", wrapper.RevokeStaffInvitation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invitations/accept", wrapper.AcceptStaffInvitation)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/businesses/{business_id}/verification/documents", wrapper.ListVerificationDocuments)
@@ -2541,6 +2846,186 @@ func (response UpdateBranchdefaultApplicationProblemPlusJSONResponse) VisitUpdat
 	return err
 }
 
+type ListStaffRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+}
+
+type ListStaffResponseObject interface {
+	VisitListStaffResponse(w http.ResponseWriter) error
+}
+
+type ListStaff200JSONResponse StaffMemberList
+
+func (response ListStaff200JSONResponse) VisitListStaffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStaffdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ListStaffdefaultApplicationProblemPlusJSONResponse) VisitListStaffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStaffInvitationsRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+}
+
+type ListStaffInvitationsResponseObject interface {
+	VisitListStaffInvitationsResponse(w http.ResponseWriter) error
+}
+
+type ListStaffInvitations200JSONResponse StaffInvitationList
+
+func (response ListStaffInvitations200JSONResponse) VisitListStaffInvitationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStaffInvitationsdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ListStaffInvitationsdefaultApplicationProblemPlusJSONResponse) VisitListStaffInvitationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InviteStaffRequestObject struct {
+	BusinessId BusinessID `json:"business_id"`
+	Body       *InviteStaffJSONRequestBody
+}
+
+type InviteStaffResponseObject interface {
+	VisitInviteStaffResponse(w http.ResponseWriter) error
+}
+
+type InviteStaff201JSONResponse StaffInvitation
+
+func (response InviteStaff201JSONResponse) VisitInviteStaffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InviteStaffdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response InviteStaffdefaultApplicationProblemPlusJSONResponse) VisitInviteStaffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeStaffInvitationRequestObject struct {
+	BusinessId   BusinessID   `json:"business_id"`
+	InvitationId InvitationID `json:"invitation_id"`
+}
+
+type RevokeStaffInvitationResponseObject interface {
+	VisitRevokeStaffInvitationResponse(w http.ResponseWriter) error
+}
+
+type RevokeStaffInvitation204Response struct {
+}
+
+func (response RevokeStaffInvitation204Response) VisitRevokeStaffInvitationResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeStaffInvitationdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeStaffInvitationdefaultApplicationProblemPlusJSONResponse) VisitRevokeStaffInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListVerificationDocumentsRequestObject struct {
 	BusinessId BusinessID `json:"business_id"`
 }
@@ -2665,6 +3150,52 @@ type SubmitBusinessdefaultApplicationProblemPlusJSONResponse struct {
 }
 
 func (response SubmitBusinessdefaultApplicationProblemPlusJSONResponse) VisitSubmitBusinessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptStaffInvitationRequestObject struct {
+	Body *AcceptStaffInvitationJSONRequestBody
+}
+
+type AcceptStaffInvitationResponseObject interface {
+	VisitAcceptStaffInvitationResponse(w http.ResponseWriter) error
+}
+
+type AcceptStaffInvitation200JSONResponse Membership
+
+func (response AcceptStaffInvitation200JSONResponse) VisitAcceptStaffInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptStaffInvitationdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response AcceptStaffInvitationdefaultApplicationProblemPlusJSONResponse) VisitAcceptStaffInvitationResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -2885,9 +3416,21 @@ type StrictServerInterface interface {
 	// GetBranch One branch (any staff of the business)
 	// (GET /v1/businesses/{business_id}/branches/{branch_id})
 	GetBranch(ctx context.Context, request GetBranchRequestObject) (GetBranchResponseObject, error)
-	// UpdateBranch Edit a branch (owner)
+	// UpdateBranch Edit a branch (owner, or a manager of the branch)
 	// (PATCH /v1/businesses/{business_id}/branches/{branch_id})
 	UpdateBranch(ctx context.Context, request UpdateBranchRequestObject) (UpdateBranchResponseObject, error)
+	// ListStaff The business's team (owner and managers)
+	// (GET /v1/businesses/{business_id}/staff)
+	ListStaff(ctx context.Context, request ListStaffRequestObject) (ListStaffResponseObject, error)
+	// ListStaffInvitations Invitations waiting for an answer (owner)
+	// (GET /v1/businesses/{business_id}/staff/invitations)
+	ListStaffInvitations(ctx context.Context, request ListStaffInvitationsRequestObject) (ListStaffInvitationsResponseObject, error)
+	// InviteStaff Invite a manager or barber by phone (owner)
+	// (POST /v1/businesses/{business_id}/staff/invitations)
+	InviteStaff(ctx context.Context, request InviteStaffRequestObject) (InviteStaffResponseObject, error)
+	// RevokeStaffInvitation Revoke a pending invitation (owner)
+	// (DELETE /v1/businesses/{business_id}/staff/invitations/{invitation_id})
+	RevokeStaffInvitation(ctx context.Context, request RevokeStaffInvitationRequestObject) (RevokeStaffInvitationResponseObject, error)
 	// ListVerificationDocuments The business's verification documents (owner)
 	// (GET /v1/businesses/{business_id}/verification/documents)
 	ListVerificationDocuments(ctx context.Context, request ListVerificationDocumentsRequestObject) (ListVerificationDocumentsResponseObject, error)
@@ -2897,6 +3440,9 @@ type StrictServerInterface interface {
 	// SubmitBusiness Send the business for review (owner)
 	// (POST /v1/businesses/{business_id}/verification/submit)
 	SubmitBusiness(ctx context.Context, request SubmitBusinessRequestObject) (SubmitBusinessResponseObject, error)
+	// AcceptStaffInvitation Join a business with an invitation token
+	// (POST /v1/invitations/accept)
+	AcceptStaffInvitation(ctx context.Context, request AcceptStaffInvitationRequestObject) (AcceptStaffInvitationResponseObject, error)
 	// GetMe The signed-in user
 	// (GET /v1/me)
 	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
@@ -3391,6 +3937,118 @@ func (sh *strictHandler) UpdateBranch(w http.ResponseWriter, r *http.Request, bu
 	}
 }
 
+// ListStaff operation middleware
+func (sh *strictHandler) ListStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
+	var request ListStaffRequestObject
+
+	request.BusinessId = businessId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListStaff(ctx, request.(ListStaffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListStaff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListStaffResponseObject); ok {
+		if err := validResponse.VisitListStaffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListStaffInvitations operation middleware
+func (sh *strictHandler) ListStaffInvitations(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
+	var request ListStaffInvitationsRequestObject
+
+	request.BusinessId = businessId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListStaffInvitations(ctx, request.(ListStaffInvitationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListStaffInvitations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListStaffInvitationsResponseObject); ok {
+		if err := validResponse.VisitListStaffInvitationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// InviteStaff operation middleware
+func (sh *strictHandler) InviteStaff(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
+	var request InviteStaffRequestObject
+
+	request.BusinessId = businessId
+
+	var body InviteStaffJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.InviteStaff(ctx, request.(InviteStaffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InviteStaff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(InviteStaffResponseObject); ok {
+		if err := validResponse.VisitInviteStaffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeStaffInvitation operation middleware
+func (sh *strictHandler) RevokeStaffInvitation(w http.ResponseWriter, r *http.Request, businessId BusinessID, invitationId InvitationID) {
+	var request RevokeStaffInvitationRequestObject
+
+	request.BusinessId = businessId
+	request.InvitationId = invitationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeStaffInvitation(ctx, request.(RevokeStaffInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeStaffInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeStaffInvitationResponseObject); ok {
+		if err := validResponse.VisitRevokeStaffInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListVerificationDocuments operation middleware
 func (sh *strictHandler) ListVerificationDocuments(w http.ResponseWriter, r *http.Request, businessId BusinessID) {
 	var request ListVerificationDocumentsRequestObject
@@ -3466,6 +4124,37 @@ func (sh *strictHandler) SubmitBusiness(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SubmitBusinessResponseObject); ok {
 		if err := validResponse.VisitSubmitBusinessResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AcceptStaffInvitation operation middleware
+func (sh *strictHandler) AcceptStaffInvitation(w http.ResponseWriter, r *http.Request) {
+	var request AcceptStaffInvitationRequestObject
+
+	var body AcceptStaffInvitationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcceptStaffInvitation(ctx, request.(AcceptStaffInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcceptStaffInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcceptStaffInvitationResponseObject); ok {
+		if err := validResponse.VisitAcceptStaffInvitationResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3553,134 +4242,152 @@ func (sh *strictHandler) DownloadMedia(w http.ResponseWriter, r *http.Request, m
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"Tt+it/z/DQA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

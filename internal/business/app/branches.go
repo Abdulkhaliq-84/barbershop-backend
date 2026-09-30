@@ -56,7 +56,8 @@ type BranchQuery struct {
 
 // BranchHandlers are the branch use cases. Who may do what:
 //
-//	create, edit   owner (managers get their own branches with invitations, M3.5)
+//	create         owner
+//	edit           owner, or a manager of that branch
 //	list, get      any active staff of the business
 type BranchHandlers struct {
 	branches domain.Branches
@@ -131,11 +132,15 @@ func (h *BranchHandlers) Get(ctx context.Context, q BranchQuery) (*domain.Branch
 
 // Update edits a branch under the version check.
 func (h *BranchHandlers) Update(ctx context.Context, cmd UpdateBranch) (*domain.Branch, error) {
-	if _, err := authorize(ctx, h.staff, cmd.Actor, cmd.BusinessID, domain.RoleOwner); err != nil {
+	member, err := authorize(ctx, h.staff, cmd.Actor, cmd.BusinessID, domain.RoleManager)
+	if err != nil {
+		return nil, err
+	}
+	if err := member.AuthorizeBranch(domain.RoleManager, cmd.BranchID); err != nil {
 		return nil, err
 	}
 	var updated *domain.Branch
-	err := h.branches.Update(ctx, cmd.BusinessID, cmd.BranchID, cmd.ExpectedVersion, func(b *domain.Branch) error {
+	err = h.branches.Update(ctx, cmd.BusinessID, cmd.BranchID, cmd.ExpectedVersion, func(b *domain.Branch) error {
 		p, policy, err := cmd.apply(b.Profile(), b.Policy())
 		if err != nil {
 			return err

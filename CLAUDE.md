@@ -19,7 +19,8 @@ onboarding) is in progress: M3.1 added the `business` module — register a draf
 membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the membership-first
 `authorize` policy (ADR-0015); M3.2 branches (location, city, time zone, booking policy); M3.3 the
 `media` module (private uploads, signed download links — ADR-0016) and CR document upload; M3.4 submit for
-review and the platform-admin review queue (approve / reject, keyset pagination — ADR-0017).
+review and the platform-admin review queue (approve / reject, keyset pagination — ADR-0017); M3.5 staff
+invitations by SMS link, accepted by the invited phone, and branch-scoped managers (ADR-0018).
 
 ## 2. Where things are
 
@@ -31,7 +32,7 @@ review and the platform-admin review queue (approve / reject, keyset pagination 
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0017) |
+| Why a decision was made | `docs/adr/` (0001–0018) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 

@@ -8,6 +8,7 @@ package iam
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,6 +22,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/auth"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 // Deps are what the module needs from the outside world.
@@ -38,7 +40,11 @@ type Deps struct {
 type Module struct {
 	http   *httpapi.Handlers
 	signer *tokens.Signer
+	users  *postgres.Users
 }
+
+// ErrUnknownUser reports a user ID with no account behind it.
+var ErrUnknownUser = errors.New("iam: unknown user")
 
 // New wires repositories, use cases and HTTP handlers — manual dependency
 // injection: every dependency is visible right here, no framework needed.
@@ -69,6 +75,7 @@ func New(d Deps) (*Module, error) {
 
 	return &Module{
 		signer: signer,
+		users:  users,
 		http: httpapi.NewHandlers(httpapi.UseCases{
 			RequestOTP: app.NewRequestOTPHandler(challenges, codes, hasher, sender, d.Clock, otpPolicy),
 			VerifyOTP:  app.NewVerifyOTPHandler(challenges, users, hasher, issuer, d.Clock, otpPolicy),
@@ -77,6 +84,20 @@ func New(d Deps) (*Module, error) {
 			GetMe:      app.NewGetMeHandler(users),
 		}, d.Logger),
 	}, nil
+}
+
+// PhoneOf returns the phone number a user signs in with. Other modules use
+// it to tie something sent to a phone (a staff invitation) to the account
+// that proved it owns that phone.
+func (m *Module) PhoneOf(ctx context.Context, id shared.UserID) (shared.PhoneNumber, error) {
+	u, err := m.users.ByID(ctx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return shared.PhoneNumber{}, ErrUnknownUser
+	}
+	if err != nil {
+		return shared.PhoneNumber{}, err
+	}
+	return u.Phone(), nil
 }
 
 // HTTP returns the handlers for the iam API operations.

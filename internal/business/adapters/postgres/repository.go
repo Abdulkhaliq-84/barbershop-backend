@@ -65,15 +65,7 @@ func (s *Store) Register(ctx context.Context, b *domain.Business, owner *domain.
 		}); err != nil {
 			return err
 		}
-		user := owner.UserID().UUID()
-		return q.InsertStaffMember(ctx, sqlcgen.InsertStaffMemberParams{
-			ID:         owner.ID().UUID(),
-			BusinessID: owner.BusinessID().UUID(),
-			UserID:     &user,
-			Role:       string(owner.Role()),
-			Active:     owner.IsActive(),
-			CreatedAt:  owner.CreatedAt(),
-		})
+		return insertStaff(ctx, q, owner)
 	})
 	// The database, not a read-then-insert check, decides duplicates: two
 	// retries racing each other can't both pass a unique index.
@@ -226,7 +218,46 @@ func (s *Store) Membership(ctx context.Context, business shared.BusinessID, user
 	if err != nil {
 		return nil, fmt.Errorf("load membership: %w", err)
 	}
-	return toStaffMember(row)
+	return toStaffMember(sqlcgen.StaffByBusinessRow(row))
+}
+
+// List returns the business's staff, oldest first.
+func (s *Store) List(ctx context.Context, business shared.BusinessID) ([]*domain.StaffMember, error) {
+	rows, err := sqlcgen.New(s.pool).StaffByBusiness(ctx, business.UUID())
+	if err != nil {
+		return nil, fmt.Errorf("list staff: %w", err)
+	}
+	out := make([]*domain.StaffMember, 0, len(rows))
+	for _, row := range rows {
+		m, err := toStaffMember(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// insertStaff saves a staff member and the branches they work at.
+func insertStaff(ctx context.Context, q *sqlcgen.Queries, m *domain.StaffMember) error {
+	user := m.UserID().UUID()
+	if err := q.InsertStaffMember(ctx, sqlcgen.InsertStaffMemberParams{
+		ID:          m.ID().UUID(),
+		BusinessID:  m.BusinessID().UUID(),
+		UserID:      &user,
+		Role:        string(m.Role()),
+		Active:      m.IsActive(),
+		CreatedAt:   m.CreatedAt(),
+		DisplayName: m.DisplayName(),
+	}); err != nil {
+		return err
+	}
+	for _, b := range m.Branches() {
+		if err := q.InsertStaffBranch(ctx, sqlcgen.InsertStaffBranchParams{StaffID: m.ID().UUID(), BranchID: b.UUID(), BusinessID: m.BusinessID().UUID()}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ForUser lists user's active memberships, newest business first.
@@ -284,7 +315,7 @@ func toBusiness(row sqlcgen.BusinessBusiness) (*domain.Business, error) {
 	), nil
 }
 
-func toStaffMember(row sqlcgen.BusinessStaffMember) (*domain.StaffMember, error) {
+func toStaffMember(row sqlcgen.StaffByBusinessRow) (*domain.StaffMember, error) {
 	role, err := domain.ParseRole(row.Role)
 	if err != nil {
 		return nil, err
@@ -293,9 +324,13 @@ func toStaffMember(row sqlcgen.BusinessStaffMember) (*domain.StaffMember, error)
 	if row.UserID != nil {
 		user = shared.IDFromUUID[shared.UserTag](*row.UserID)
 	}
+	branches := make([]shared.BranchID, 0, len(row.BranchIds))
+	for _, b := range row.BranchIds {
+		branches = append(branches, shared.IDFromUUID[shared.BranchTag](b))
+	}
 	return domain.RehydrateStaffMember(
 		shared.IDFromUUID[shared.StaffTag](row.ID), shared.IDFromUUID[shared.BusinessTag](row.BusinessID),
-		user, role, row.Active, row.CreatedAt,
+		user, role, row.Active, row.CreatedAt, row.DisplayName, branches,
 	), nil
 }
 

@@ -138,7 +138,8 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 4. M3.4 — submit for review; admin review queue (keyset pagination), approve / reject
    ([ADR-0017](adr/0017-business-review-and-admin-access.md)).
    *Your turn:* suspend / reactivate.
-5. M3.5 — staff invitations (SMS deep link) and accepting them.
+5. M3.5 — staff invitations (SMS deep link) and accepting them; managers edit their own branches
+   ([ADR-0018](adr/0018-staff-invitations.md)).
 6. M3.6 — River outbox + `worker` role with its first consumer; `billing`: plans, trial subscription
    on `BusinessApproved`, entitlements (branch / barber limits).
 

@@ -22,3 +22,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0015](0015-business-tenancy-and-authorization.md) | Business tenancy: membership-first authorization, CR claimed on submission, no cross-module foreign keys | Accepted |
 | [0016](0016-media-storage-and-signed-links.md) | Media: files on a storage port, private files through signed links | Accepted |
 | [0017](0017-business-review-and-admin-access.md) | Business review: admin access from the token, keyset pagination, outbox with its first consumer | Accepted |
+| [0018](0018-staff-invitations.md) | Staff invitations: a token sent to a phone, accepted by that phone, branch-scoped managers | Accepted |

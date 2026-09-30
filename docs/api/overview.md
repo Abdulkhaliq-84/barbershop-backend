@@ -117,13 +117,15 @@ Client flow (Flutter):
 | GET / POST | `/v1/businesses/{business_id}/verification/documents` (CR upload, `application/octet-stream`, ≤ 10 MiB, PDF/JPEG/PNG) — live (M3.3) | owner |
 | POST | `/v1/businesses/{business_id}/verification/submit` — live (M3.4): needs a CR document and a branch; claims the CR number | owner |
 | GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
-| GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner until managers get branches (M3.5) | manager |
+| GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner or a manager of that branch (M3.5) | manager |
 | POST | `…/branches/{branch_id}/publish` · `…/unpublish` | owner |
 | PUT | `…/branches/{branch_id}/opening-hours` | manager |
 | GET / POST / DELETE | `…/branches/{branch_id}/closures` | manager |
 | GET / POST / PATCH | `…/branches/{branch_id}/services` | manager |
-| GET / POST | `/v1/businesses/{business_id}/staff` · `/staff/invitations` | owner |
-| POST | `/v1/invitations/{token}/accept` | invited user |
+| GET | `/v1/businesses/{business_id}/staff` — live (M3.5) | manager |
+| GET / POST | `/v1/businesses/{business_id}/staff/invitations` — live (M3.5): invite by phone, texts a 7-day link | owner |
+| DELETE | `/v1/businesses/{business_id}/staff/invitations/{invitation_id}` — live (M3.5): revoke | owner |
+| POST | `/v1/invitations/accept` `{token}` — live (M3.5): signed in with the invited phone; `404 invitation_invalid`, `409 already_staff` | invited user |
 | GET / PUT | `/v1/businesses/{business_id}/staff/{staff_id}/schedule` | manager / the barber |
 | GET / POST / DELETE | `/v1/businesses/{business_id}/staff/{staff_id}/time-off` | manager / the barber |
 | GET | `…/branches/{branch_id}/day?date=` — per-barber timeline + KPIs (dashboard) | barber (own) / manager |

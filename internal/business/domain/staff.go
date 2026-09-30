@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -44,17 +45,22 @@ func ParseRole(s string) (Role, error) {
 // business-mode request starts by loading the caller's StaffMember and
 // asking it whether the role is enough (Authorize).
 type StaffMember struct {
-	id        shared.StaffID
-	business  shared.BusinessID
-	user      shared.UserID
-	role      Role
-	active    bool
-	createdAt time.Time
+	id          shared.StaffID
+	business    shared.BusinessID
+	user        shared.UserID
+	role        Role
+	active      bool
+	createdAt   time.Time
+	displayName string            // how customers and colleagues see them
+	branches    []shared.BranchID // where a manager or barber works; empty for the owner
 }
 
 // RehydrateStaffMember rebuilds a staff member loaded from storage.
-func RehydrateStaffMember(id shared.StaffID, business shared.BusinessID, user shared.UserID, role Role, active bool, createdAt time.Time) *StaffMember {
-	return &StaffMember{id: id, business: business, user: user, role: role, active: active, createdAt: createdAt}
+func RehydrateStaffMember(id shared.StaffID, business shared.BusinessID, user shared.UserID, role Role, active bool, createdAt time.Time, displayName string, branches []shared.BranchID) *StaffMember {
+	return &StaffMember{
+		id: id, business: business, user: user, role: role, active: active, createdAt: createdAt,
+		displayName: displayName, branches: slices.Clone(branches),
+	}
 }
 
 // Authorize says whether this member may do something that needs at least
@@ -65,6 +71,30 @@ func (m *StaffMember) Authorize(need Role) error {
 	}
 	return nil
 }
+
+// AuthorizeBranch is Authorize for work on one branch: owners may act on
+// every branch, managers and barbers only on the branches they work at.
+func (m *StaffMember) AuthorizeBranch(need Role, branch shared.BranchID) error {
+	if err := m.Authorize(need); err != nil {
+		return err
+	}
+	if !m.WorksAt(branch) {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// WorksAt reports whether the member works at branch. The owner works at
+// all of them.
+func (m *StaffMember) WorksAt(branch shared.BranchID) bool {
+	return m.role == RoleOwner || slices.Contains(m.branches, branch)
+}
+
+// DisplayName returns the name shown for this member.
+func (m *StaffMember) DisplayName() string { return m.displayName }
+
+// Branches returns the branches a manager or barber works at.
+func (m *StaffMember) Branches() []shared.BranchID { return slices.Clone(m.branches) }
 
 // ID returns the staff member's ID.
 func (m *StaffMember) ID() shared.StaffID { return m.id }

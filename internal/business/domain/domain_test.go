@@ -132,7 +132,7 @@ func TestStaffMemberAuthorize(t *testing.T) {
 	for _, has := range roles {
 		for _, need := range roles {
 			for _, active := range []bool{true, false} {
-				m := domain.RehydrateStaffMember(shared.NewID[shared.StaffTag](), shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), has, active, t0)
+				m := domain.RehydrateStaffMember(shared.NewID[shared.StaffTag](), shared.NewID[shared.BusinessTag](), shared.NewID[shared.UserTag](), has, active, t0, "", nil)
 				want := active && slices.Contains(allowed[has], need)
 				err := m.Authorize(need)
 				if (err == nil) != want || (err != nil && !errors.Is(err, domain.ErrForbidden)) {

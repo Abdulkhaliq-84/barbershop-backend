@@ -31,11 +31,12 @@ type UseCases struct {
 	Documents   *app.DocumentHandlers
 	Submit      *app.SubmitHandler
 	Review      *app.ReviewHandlers
+	Staff       *app.StaffHandlers
 	Memberships *app.ListMyMembershipsHandler
 }
 
-// Handlers serves /v1/businesses/* (businesses and their branches) and
-// /v1/me/memberships.
+// Handlers serves /v1/businesses/* (businesses, branches, staff),
+// /v1/invitations/accept and /v1/me/memberships.
 type Handlers struct {
 	uc     UseCases
 	logger *slog.Logger
@@ -149,17 +150,21 @@ func (h *Handlers) ListMyMemberships(ctx context.Context, _ apigen.ListMyMembers
 	}
 	list := apigen.ListMyMemberships200JSONResponse{Data: make([]apigen.Membership, 0, len(views))}
 	for _, v := range views {
-		list.Data = append(list.Data, apigen.Membership{
-			StaffId: v.StaffID.UUID(),
-			Role:    apigen.StaffRole(v.Role),
-			Business: apigen.BusinessSummary{
-				Id:          v.BusinessID.UUID(),
-				DisplayName: toAPIText(v.DisplayName),
-				Status:      apigen.BusinessStatus(v.Status),
-			},
-		})
+		list.Data = append(list.Data, toAPIMembership(v))
 	}
 	return list, nil
+}
+
+func toAPIMembership(v app.MembershipView) apigen.Membership {
+	return apigen.Membership{
+		StaffId: v.StaffID.UUID(),
+		Role:    apigen.StaffRole(v.Role),
+		Business: apigen.BusinessSummary{
+			Id:          v.BusinessID.UUID(),
+			DisplayName: toAPIText(v.DisplayName),
+			Status:      apigen.BusinessStatus(v.Status),
+		},
+	}
 }
 
 // problem maps a use-case error to an API error. Unknown errors are bugs or
@@ -191,6 +196,20 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "status: drafts are not in the review queue"
 	case errors.Is(err, errBadIfMatch):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "If-Match: send the business version you last read"
+	case errors.Is(err, domain.ErrInvitationInvalid):
+		status, code, detail = http.StatusNotFound, "invitation_invalid", "this invitation link is not valid for your account; ask the owner to invite you again"
+	case errors.Is(err, domain.ErrAlreadyStaff):
+		status, code, detail = http.StatusConflict, "already_staff", "you already work at this business"
+	case errors.Is(err, domain.ErrInvitationClosed):
+		status, code, detail = http.StatusConflict, "invitation_closed", "it was already accepted or revoked"
+	case errors.Is(err, domain.ErrUnknownBranch):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "branch_ids: every branch must belong to this business"
+	case errors.Is(err, domain.ErrStaffBranchRequired):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "branch_ids: pick at least one branch"
+	case errors.Is(err, domain.ErrStaffNameRequired):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "display_name: required"
+	case errors.Is(err, domain.ErrInvalidInviteRole):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "role: invite a manager or a barber"
 	case errors.Is(err, domain.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, domain.ErrForbidden):

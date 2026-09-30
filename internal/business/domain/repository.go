@@ -31,6 +31,26 @@ type Staff interface {
 	// Membership returns user's staff record in business, or ErrNotFound
 	// when the user doesn't work there (or the business doesn't exist).
 	Membership(ctx context.Context, business shared.BusinessID, user shared.UserID) (*StaffMember, error)
+	// List returns the business's staff, oldest first.
+	List(ctx context.Context, business shared.BusinessID) ([]*StaffMember, error)
+}
+
+// Invitations stores staff invitations.
+type Invitations interface {
+	// Invite saves inv and revokes any other pending invitation for the same
+	// phone in the business (inviting again = resending). Returns
+	// ErrUnknownBranch if a branch isn't the business's.
+	Invite(ctx context.Context, inv *Invitation) error
+	// Pending returns the business's pending invitations, newest first.
+	Pending(ctx context.Context, business shared.BusinessID) ([]*Invitation, error)
+	// Update locks the invitation inside business, calls fn and saves it.
+	// ErrNotFound when there is none.
+	Update(ctx context.Context, business shared.BusinessID, id InvitationID, fn func(*Invitation) error) error
+	// Accept locks the invitation whose token hashes to tokenHash, calls fn
+	// and saves the invitation and the staff member fn returns — together.
+	// ErrInvitationInvalid when no invitation has that hash; ErrAlreadyStaff
+	// when the user already works at the business.
+	Accept(ctx context.Context, tokenHash []byte, fn func(*Invitation) (*StaffMember, error)) error
 }
 
 // Branches stores branches. Every method takes the business: a branch is
