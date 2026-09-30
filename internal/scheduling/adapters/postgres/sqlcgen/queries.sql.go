@@ -10,7 +10,87 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const barberHours = `-- name: BarberHours :many
+SELECT business_id, branch_id, staff_id, weekday, start_minute, duration_minutes FROM scheduling.barber_hours
+WHERE business_id = $1 AND branch_id = $2 AND staff_id = $3
+ORDER BY weekday, start_minute
+`
+
+type BarberHoursParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+}
+
+func (q *Queries) BarberHours(ctx context.Context, arg BarberHoursParams) ([]SchedulingBarberHour, error) {
+	rows, err := q.db.Query(ctx, barberHours, arg.BusinessID, arg.BranchID, arg.StaffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SchedulingBarberHour{}
+	for rows.Next() {
+		var i SchedulingBarberHour
+		if err := rows.Scan(
+			&i.BusinessID,
+			&i.BranchID,
+			&i.StaffID,
+			&i.Weekday,
+			&i.StartMinute,
+			&i.DurationMinutes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const barberHoursElsewhere = `-- name: BarberHoursElsewhere :many
+SELECT business_id, branch_id, staff_id, weekday, start_minute, duration_minutes FROM scheduling.barber_hours
+WHERE business_id = $1 AND staff_id = $2 AND branch_id <> $3
+ORDER BY branch_id, weekday, start_minute
+`
+
+type BarberHoursElsewhereParams struct {
+	BusinessID uuid.UUID
+	StaffID    uuid.UUID
+	BranchID   uuid.UUID
+}
+
+// The same person's weekly hours at their other branches.
+func (q *Queries) BarberHoursElsewhere(ctx context.Context, arg BarberHoursElsewhereParams) ([]SchedulingBarberHour, error) {
+	rows, err := q.db.Query(ctx, barberHoursElsewhere, arg.BusinessID, arg.StaffID, arg.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SchedulingBarberHour{}
+	for rows.Next() {
+		var i SchedulingBarberHour
+		if err := rows.Scan(
+			&i.BusinessID,
+			&i.BranchID,
+			&i.StaffID,
+			&i.Weekday,
+			&i.StartMinute,
+			&i.DurationMinutes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const calendarByBranch = `-- name: CalendarByBranch :one
 
@@ -57,6 +137,21 @@ func (q *Queries) CalendarForUpdate(ctx context.Context, arg CalendarForUpdatePa
 	return i, err
 }
 
+const deleteBarberHours = `-- name: DeleteBarberHours :exec
+DELETE FROM scheduling.barber_hours WHERE business_id = $1 AND branch_id = $2 AND staff_id = $3
+`
+
+type DeleteBarberHoursParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+}
+
+func (q *Queries) DeleteBarberHours(ctx context.Context, arg DeleteBarberHoursParams) error {
+	_, err := q.db.Exec(ctx, deleteBarberHours, arg.BusinessID, arg.BranchID, arg.StaffID)
+	return err
+}
+
 const deleteOpeningHours = `-- name: DeleteOpeningHours :exec
 DELETE FROM scheduling.opening_hours WHERE business_id = $1 AND branch_id = $2
 `
@@ -68,6 +163,79 @@ type DeleteOpeningHoursParams struct {
 
 func (q *Queries) DeleteOpeningHours(ctx context.Context, arg DeleteOpeningHoursParams) error {
 	_, err := q.db.Exec(ctx, deleteOpeningHours, arg.BusinessID, arg.BranchID)
+	return err
+}
+
+const deleteOverrideHours = `-- name: DeleteOverrideHours :exec
+DELETE FROM scheduling.override_hours WHERE business_id = $1 AND branch_id = $2 AND staff_id = $3
+`
+
+type DeleteOverrideHoursParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+}
+
+func (q *Queries) DeleteOverrideHours(ctx context.Context, arg DeleteOverrideHoursParams) error {
+	_, err := q.db.Exec(ctx, deleteOverrideHours, arg.BusinessID, arg.BranchID, arg.StaffID)
+	return err
+}
+
+const deleteOverrides = `-- name: DeleteOverrides :exec
+DELETE FROM scheduling.schedule_overrides WHERE business_id = $1 AND branch_id = $2 AND staff_id = $3
+`
+
+type DeleteOverridesParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+}
+
+func (q *Queries) DeleteOverrides(ctx context.Context, arg DeleteOverridesParams) error {
+	_, err := q.db.Exec(ctx, deleteOverrides, arg.BusinessID, arg.BranchID, arg.StaffID)
+	return err
+}
+
+const deleteTimeOff = `-- name: DeleteTimeOff :execrows
+DELETE FROM scheduling.time_off WHERE business_id = $1 AND staff_id = $2 AND id = $3
+`
+
+type DeleteTimeOffParams struct {
+	BusinessID uuid.UUID
+	StaffID    uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) DeleteTimeOff(ctx context.Context, arg DeleteTimeOffParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTimeOff, arg.BusinessID, arg.StaffID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertBarberHour = `-- name: InsertBarberHour :exec
+INSERT INTO scheduling.barber_hours (business_id, branch_id, staff_id, weekday, start_minute, duration_minutes) VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertBarberHourParams struct {
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	StaffID         uuid.UUID
+	Weekday         int16
+	StartMinute     int16
+	DurationMinutes int16
+}
+
+func (q *Queries) InsertBarberHour(ctx context.Context, arg InsertBarberHourParams) error {
+	_, err := q.db.Exec(ctx, insertBarberHour,
+		arg.BusinessID,
+		arg.BranchID,
+		arg.StaffID,
+		arg.Weekday,
+		arg.StartMinute,
+		arg.DurationMinutes,
+	)
 	return err
 }
 
@@ -115,6 +283,113 @@ func (q *Queries) InsertOpeningHour(ctx context.Context, arg InsertOpeningHourPa
 	return err
 }
 
+const insertOverride = `-- name: InsertOverride :exec
+INSERT INTO scheduling.schedule_overrides (business_id, branch_id, staff_id, on_date) VALUES ($1, $2, $3, $4)
+`
+
+type InsertOverrideParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+	OnDate     time.Time
+}
+
+func (q *Queries) InsertOverride(ctx context.Context, arg InsertOverrideParams) error {
+	_, err := q.db.Exec(ctx, insertOverride,
+		arg.BusinessID,
+		arg.BranchID,
+		arg.StaffID,
+		arg.OnDate,
+	)
+	return err
+}
+
+const insertOverrideHour = `-- name: InsertOverrideHour :exec
+INSERT INTO scheduling.override_hours (business_id, branch_id, staff_id, on_date, start_minute, duration_minutes) VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertOverrideHourParams struct {
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	StaffID         uuid.UUID
+	OnDate          time.Time
+	StartMinute     int16
+	DurationMinutes int16
+}
+
+func (q *Queries) InsertOverrideHour(ctx context.Context, arg InsertOverrideHourParams) error {
+	_, err := q.db.Exec(ctx, insertOverrideHour,
+		arg.BusinessID,
+		arg.BranchID,
+		arg.StaffID,
+		arg.OnDate,
+		arg.StartMinute,
+		arg.DurationMinutes,
+	)
+	return err
+}
+
+const insertSchedule = `-- name: InsertSchedule :exec
+INSERT INTO scheduling.barber_schedules (business_id, branch_id, staff_id, version, updated_at) VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertScheduleParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+	Version    int32
+	UpdatedAt  time.Time
+}
+
+func (q *Queries) InsertSchedule(ctx context.Context, arg InsertScheduleParams) error {
+	_, err := q.db.Exec(ctx, insertSchedule,
+		arg.BusinessID,
+		arg.BranchID,
+		arg.StaffID,
+		arg.Version,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const insertTimeOff = `-- name: InsertTimeOff :exec
+INSERT INTO scheduling.time_off (id, business_id, staff_id, starts_at, ends_at, reason, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertTimeOffParams struct {
+	ID         uuid.UUID
+	BusinessID uuid.UUID
+	StaffID    uuid.UUID
+	StartsAt   time.Time
+	EndsAt     time.Time
+	Reason     string
+	CreatedAt  time.Time
+}
+
+func (q *Queries) InsertTimeOff(ctx context.Context, arg InsertTimeOffParams) error {
+	_, err := q.db.Exec(ctx, insertTimeOff,
+		arg.ID,
+		arg.BusinessID,
+		arg.StaffID,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.Reason,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const lockStaffSchedules = `-- name: LockStaffSchedules :exec
+SELECT pg_advisory_xact_lock(hashtextextended('scheduling.staff:' || $1::text, 0))
+`
+
+// Serializes changes to one person's schedules across branches, so two
+// branches can't both give them the same hours at once.
+func (q *Queries) LockStaffSchedules(ctx context.Context, staffID string) error {
+	_, err := q.db.Exec(ctx, lockStaffSchedules, staffID)
+	return err
+}
+
 const openingHours = `-- name: OpeningHours :many
 SELECT business_id, branch_id, weekday, start_minute, duration_minutes FROM scheduling.opening_hours WHERE business_id = $1 AND branch_id = $2 ORDER BY weekday, start_minute
 `
@@ -150,6 +425,134 @@ func (q *Queries) OpeningHours(ctx context.Context, arg OpeningHoursParams) ([]S
 	return items, nil
 }
 
+const overrideHours = `-- name: OverrideHours :many
+SELECT o.on_date, h.start_minute, h.duration_minutes
+FROM scheduling.schedule_overrides o
+LEFT JOIN scheduling.override_hours h
+  ON h.business_id = o.business_id AND h.branch_id = o.branch_id AND h.staff_id = o.staff_id AND h.on_date = o.on_date
+WHERE o.business_id = $1 AND o.branch_id = $2 AND o.staff_id = $3
+ORDER BY o.on_date, h.start_minute
+`
+
+type OverrideHoursParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+}
+
+type OverrideHoursRow struct {
+	OnDate          time.Time
+	StartMinute     pgtype.Int2
+	DurationMinutes pgtype.Int2
+}
+
+// Every override date, with its hours; a date with no hours is a day off.
+func (q *Queries) OverrideHours(ctx context.Context, arg OverrideHoursParams) ([]OverrideHoursRow, error) {
+	rows, err := q.db.Query(ctx, overrideHours, arg.BusinessID, arg.BranchID, arg.StaffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OverrideHoursRow{}
+	for rows.Next() {
+		var i OverrideHoursRow
+		if err := rows.Scan(&i.OnDate, &i.StartMinute, &i.DurationMinutes); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const scheduleByKey = `-- name: ScheduleByKey :one
+SELECT business_id, branch_id, staff_id, version, updated_at FROM scheduling.barber_schedules WHERE business_id = $1 AND branch_id = $2 AND staff_id = $3
+`
+
+type ScheduleByKeyParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+}
+
+func (q *Queries) ScheduleByKey(ctx context.Context, arg ScheduleByKeyParams) (SchedulingBarberSchedule, error) {
+	row := q.db.QueryRow(ctx, scheduleByKey, arg.BusinessID, arg.BranchID, arg.StaffID)
+	var i SchedulingBarberSchedule
+	err := row.Scan(
+		&i.BusinessID,
+		&i.BranchID,
+		&i.StaffID,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const scheduleForUpdate = `-- name: ScheduleForUpdate :one
+SELECT business_id, branch_id, staff_id, version, updated_at FROM scheduling.barber_schedules WHERE business_id = $1 AND branch_id = $2 AND staff_id = $3 FOR UPDATE
+`
+
+type ScheduleForUpdateParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	StaffID    uuid.UUID
+}
+
+func (q *Queries) ScheduleForUpdate(ctx context.Context, arg ScheduleForUpdateParams) (SchedulingBarberSchedule, error) {
+	row := q.db.QueryRow(ctx, scheduleForUpdate, arg.BusinessID, arg.BranchID, arg.StaffID)
+	var i SchedulingBarberSchedule
+	err := row.Scan(
+		&i.BusinessID,
+		&i.BranchID,
+		&i.StaffID,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const timeOffByStaff = `-- name: TimeOffByStaff :many
+SELECT id, business_id, staff_id, starts_at, ends_at, reason, created_at FROM scheduling.time_off
+WHERE business_id = $1 AND staff_id = $2 AND ends_at > $3
+ORDER BY starts_at
+`
+
+type TimeOffByStaffParams struct {
+	BusinessID uuid.UUID
+	StaffID    uuid.UUID
+	EndsAt     time.Time
+}
+
+func (q *Queries) TimeOffByStaff(ctx context.Context, arg TimeOffByStaffParams) ([]SchedulingTimeOff, error) {
+	rows, err := q.db.Query(ctx, timeOffByStaff, arg.BusinessID, arg.StaffID, arg.EndsAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SchedulingTimeOff{}
+	for rows.Next() {
+		var i SchedulingTimeOff
+		if err := rows.Scan(
+			&i.ID,
+			&i.BusinessID,
+			&i.StaffID,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateCalendar = `-- name: UpdateCalendar :execrows
 UPDATE scheduling.branch_calendars SET version = $1, updated_at = $2
 WHERE business_id = $3 AND branch_id = $4 AND version = $5
@@ -169,6 +572,35 @@ func (q *Queries) UpdateCalendar(ctx context.Context, arg UpdateCalendarParams) 
 		arg.UpdatedAt,
 		arg.BusinessID,
 		arg.BranchID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateSchedule = `-- name: UpdateSchedule :execrows
+UPDATE scheduling.barber_schedules SET version = $1, updated_at = $2
+WHERE business_id = $3 AND branch_id = $4 AND staff_id = $5 AND version = $6
+`
+
+type UpdateScheduleParams struct {
+	Version         int32
+	UpdatedAt       time.Time
+	BusinessID      uuid.UUID
+	BranchID        uuid.UUID
+	StaffID         uuid.UUID
+	ExpectedVersion int32
+}
+
+func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSchedule,
+		arg.Version,
+		arg.UpdatedAt,
+		arg.BusinessID,
+		arg.BranchID,
+		arg.StaffID,
 		arg.ExpectedVersion,
 	)
 	if err != nil {

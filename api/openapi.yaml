@@ -692,6 +692,115 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/schedule:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+      - $ref: "#/components/parameters/StaffID"
+    get:
+      operationId: getBarberSchedule
+      tags: [scheduling]
+      summary: A staff member's schedule at a branch (anyone working at the branch)
+      description: |
+        The weekly template (all seven days, Sunday first) and the date
+        overrides. A schedule never set is empty, with `version` 0. Someone
+        who doesn't work at the branch gets `404 not_found`.
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarberSchedule"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setBarberSchedule
+      tags: [scheduling]
+      summary: Set a staff member's schedule at a branch (the person, the owner or a manager of the branch)
+      description: |
+        Replaces the weekly template and every date override. Times follow
+        the opening-hours rules (branch-local, 5-minute steps, a `closes` at
+        or before `opens` is the next day). An override replaces the
+        intervals that start on its date; with no intervals it is a day off.
+        The template may not overlap the same person's template at another
+        branch (`422 validation_failed`): nobody works in two shops at once.
+
+        `If-Match` carries the `version` you last read: `0` the first time.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BarberScheduleUpdate"
+      responses:
+        "200":
+          description: The saved schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarberSchedule"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/staff/{staff_id}/time-off:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/StaffID"
+    get:
+      operationId: listTimeOff
+      tags: [scheduling]
+      summary: A staff member's upcoming time off (the person, the owner or a manager of one of their branches)
+      description: Time off that hasn't ended yet, earliest first.
+      responses:
+        "200":
+          description: The time off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeOffList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: addTimeOff
+      tags: [scheduling]
+      summary: Record time off (the person, the owner or a manager of one of their branches)
+      description: |
+        Real instants, at every branch the person works at. At most a year
+        long. Overlapping existing time off gets `409 time_off_overlaps`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TimeOffCreate"
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeOff"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/staff/{staff_id}/time-off/{time_off_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/StaffID"
+      - $ref: "#/components/parameters/TimeOffID"
+    delete:
+      operationId: deleteTimeOff
+      tags: [scheduling]
+      summary: Remove time off (the person, the owner or a manager of one of their branches)
+      responses:
+        "204":
+          description: Removed
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/businesses/{business_id}/verification/documents:
     parameters:
       - $ref: "#/components/parameters/BusinessID"
@@ -975,6 +1084,22 @@ components:
         type: string
         format: uuid
 
+    StaffID:
+      name: staff_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    TimeOffID:
+      name: time_off_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
     InvitationID:
       name: invitation_id
       in: path
@@ -1037,7 +1162,7 @@ components:
             `version_conflict`, `unsupported_media_type`, `payload_too_large`,
             `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
             `branch_required`, `cr_number_taken`, `invitation_invalid`,
-            `invitation_closed`, `already_staff`, `plan_limit_reached`.
+            `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`.
           example: otp_cooldown
         detail:
           type: string
@@ -1950,3 +2075,112 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    DateHours:
+      type: object
+      additionalProperties: false
+      required: [date, intervals]
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2026-10-08"
+        intervals:
+          type: array
+          maxItems: 4
+          description: Empty for a day off.
+          items:
+            $ref: "#/components/schemas/TimeRange"
+
+    BarberScheduleUpdate:
+      type: object
+      additionalProperties: false
+      required: [weekly]
+      properties:
+        weekly:
+          type: array
+          maxItems: 7
+          description: Days left out are days off.
+          items:
+            $ref: "#/components/schemas/DayHours"
+        overrides:
+          type: array
+          maxItems: 400
+          items:
+            $ref: "#/components/schemas/DateHours"
+
+    BarberSchedule:
+      type: object
+      required: [staff_id, branch_id, weekly, overrides, version]
+      properties:
+        staff_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        weekly:
+          type: array
+          description: All seven days, Sunday first.
+          items:
+            $ref: "#/components/schemas/DayHours"
+        overrides:
+          type: array
+          description: By date.
+          items:
+            $ref: "#/components/schemas/DateHours"
+        version:
+          type: integer
+          description: 0 until first set; send it as `If-Match`.
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    TimeOffCreate:
+      type: object
+      additionalProperties: false
+      required: [starts_at, ends_at]
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          example: "2026-10-05T10:00:00+03:00"
+        ends_at:
+          type: string
+          format: date-time
+          example: "2026-10-05T12:00:00+03:00"
+        reason:
+          type: string
+          maxLength: 200
+
+    TimeOff:
+      type: object
+      required: [id, staff_id, starts_at, ends_at, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        staff_id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TimeOffList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeOff"

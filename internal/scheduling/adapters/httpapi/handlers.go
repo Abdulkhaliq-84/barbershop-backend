@@ -24,18 +24,20 @@ import (
 // Handlers serves the scheduling operations.
 type Handlers struct {
 	calendars *app.CalendarHandlers
+	schedules *app.ScheduleHandlers
 	logger    *slog.Logger
 }
 
 // NewHandlers wires the HTTP adapter to the use cases.
-func NewHandlers(calendars *app.CalendarHandlers, logger *slog.Logger) *Handlers {
-	return &Handlers{calendars: calendars, logger: logger}
+func NewHandlers(calendars *app.CalendarHandlers, schedules *app.ScheduleHandlers, logger *slog.Logger) *Handlers {
+	return &Handlers{calendars: calendars, schedules: schedules, logger: logger}
 }
 
 var (
-	errNoPrincipal = errors.New("no authenticated caller")
-	errBadIfMatch  = errors.New("if-match: not a version")
-	errBadTime     = errors.New("not an HH:MM time")
+	errNoPrincipal   = errors.New("no authenticated caller")
+	errBadIfMatch    = errors.New("if-match: not a version")
+	errBadTime       = errors.New("not an HH:MM time")
+	errDuplicateDate = errors.New("a date is listed twice")
 )
 
 // weekdays maps the API's names to time.Weekday (Sunday = 0).
@@ -112,24 +114,31 @@ func fromAPIDays(days []apigen.DayHours) ([]domain.WeeklyInterval, error) {
 }
 
 func toAPIOpeningHours(cal *domain.BranchCalendar) apigen.OpeningHours {
-	byDay := map[time.Weekday][]apigen.TimeRange{}
-	for _, i := range cal.OpeningHours().Intervals() {
-		opens, closes := i.Clock()
-		byDay[i.Day] = append(byDay[i.Day], apigen.TimeRange{Opens: formatClock(opens), Closes: formatClock(closes)})
-	}
-	out := apigen.OpeningHours{Days: make([]apigen.DayHours, 0, 7), Version: cal.Version()}
-	for name, day := range orderedWeekdays() {
-		ranges := byDay[day]
-		if ranges == nil {
-			ranges = []apigen.TimeRange{}
-		}
-		out.Days = append(out.Days, apigen.DayHours{Weekday: name, Intervals: ranges})
-	}
+	out := apigen.OpeningHours{Days: toAPIWeek(cal.OpeningHours()), Version: cal.Version()}
 	if !cal.UpdatedAt().IsZero() {
 		at := cal.UpdatedAt()
 		out.UpdatedAt = &at
 	}
 	return out
+}
+
+// toAPIWeek returns all seven days, Sunday first; a day without intervals
+// is closed (or a day off).
+func toAPIWeek(w domain.WeeklyHours) []apigen.DayHours {
+	byDay := map[time.Weekday][]apigen.TimeRange{}
+	for _, i := range w.Intervals() {
+		opens, closes := i.Clock()
+		byDay[i.Day] = append(byDay[i.Day], apigen.TimeRange{Opens: formatClock(opens), Closes: formatClock(closes)})
+	}
+	days := make([]apigen.DayHours, 0, 7)
+	for name, day := range orderedWeekdays() {
+		ranges := byDay[day]
+		if ranges == nil {
+			ranges = []apigen.TimeRange{}
+		}
+		days = append(days, apigen.DayHours{Weekday: name, Intervals: ranges})
+	}
+	return days
 }
 
 // orderedWeekdays yields the week, Sunday first.
@@ -179,8 +188,14 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, domain.ErrVersionConflict):
 		status, code, detail = http.StatusPreconditionFailed, "version_conflict", "it changed since you read it; reload and try again"
+	case errors.Is(err, domain.ErrTimeOffOverlaps):
+		status, code, detail = http.StatusConflict, "time_off_overlaps", "it overlaps other time off; change or remove that first"
+	case errors.Is(err, errDuplicateDate):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "overrides: each date at most once"
 	case errors.Is(err, domain.ErrInvalidWeekday), errors.Is(err, domain.ErrInvalidInterval),
-		errors.Is(err, domain.ErrTooManyIntervals), errors.Is(err, domain.ErrOverlappingIntervals):
+		errors.Is(err, domain.ErrTooManyIntervals), errors.Is(err, domain.ErrOverlappingIntervals),
+		errors.Is(err, domain.ErrInvalidDate), errors.Is(err, domain.ErrTooManyOverrides),
+		errors.Is(err, domain.ErrScheduleClash), errors.Is(err, domain.ErrInvalidTimeOff), errors.Is(err, domain.ErrReasonTooLong):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", strings.TrimPrefix(err.Error(), "scheduling: ")
 	default:
 		h.logger.ErrorContext(ctx, "scheduling request failed", slog.String("error_type", fmt.Sprintf("%T", err)))

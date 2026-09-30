@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -80,6 +81,36 @@ func (m *Module) AuthorizeBranch(ctx context.Context, actor shared.UserID, busin
 		return fmt.Errorf("authorize branch: %w", err)
 	}
 	return m.access.Branch(ctx, actor, business, branch, role)
+}
+
+// StaffInfo is a staff member as other modules see them.
+type StaffInfo struct {
+	ID       shared.StaffID
+	Role     string            // RoleOwner, RoleManager or RoleBarber
+	Branches []shared.BranchID // empty for the owner, who works at every branch
+}
+
+// WorksAt reports whether the member works at branch.
+func (s StaffInfo) WorksAt(branch shared.BranchID) bool {
+	return s.Role == RoleOwner || slices.Contains(s.Branches, branch)
+}
+
+// MemberOf returns actor's own active membership of business: who "me" is
+// in that business. ErrNotFound if actor isn't active staff there.
+func (m *Module) MemberOf(ctx context.Context, actor shared.UserID, business shared.BusinessID) (StaffInfo, error) {
+	member, err := m.access.MemberOf(ctx, actor, business)
+	return toStaffInfo(member), err
+}
+
+// StaffMember returns an active staff member of business, or ErrNotFound.
+// Callers have already authorized the actor.
+func (m *Module) StaffMember(ctx context.Context, business shared.BusinessID, staff shared.StaffID) (StaffInfo, error) {
+	member, err := m.access.StaffMember(ctx, business, staff)
+	return toStaffInfo(member), err
+}
+
+func toStaffInfo(m app.Member) StaffInfo {
+	return StaffInfo{ID: m.ID, Role: string(m.Role), Branches: m.Branches}
 }
 
 // StaffAtBranch checks that every staff ID is active staff of business

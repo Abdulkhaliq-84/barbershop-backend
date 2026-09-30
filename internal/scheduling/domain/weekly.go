@@ -100,3 +100,20 @@ func (i WeeklyInterval) Clock() (opens, closes int) {
 	}
 	return i.Start, end % MinutesPerDay
 }
+
+// Overlaps reports whether any interval of w overlaps any interval of o on
+// the weekly clock (a Saturday-night shift reaches into Sunday). Used so one
+// person's schedules at two branches can't put them in both at once.
+func (w WeeklyHours) Overlaps(o WeeklyHours) bool {
+	for _, a := range w.intervals {
+		for _, b := range o.intervals {
+			as, bs := a.weekStart(), b.weekStart()
+			for _, shift := range [3]int{-MinutesPerWeek, 0, MinutesPerWeek} {
+				if as < bs+shift+b.Minutes && bs+shift < as+a.Minutes {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

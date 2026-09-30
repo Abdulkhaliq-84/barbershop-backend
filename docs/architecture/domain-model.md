@@ -188,6 +188,12 @@ Public API used by `booking`: `WorkingWindows(ctx, branchID, staffIDs, from, to)
 whole week of `opens`/`closes` intervals in branch-local time (a `closes` at or before `opens` is the
 next day; at most 4 per day; no overlaps, including Saturday into Sunday). Version 0 until first set.
 
+**Live since M4.4:** barber schedules per (staff, branch) — a weekly template plus date overrides
+(other hours, or a day off); one person's templates at two branches can't overlap. Time off per person
+as instants, never overlapping (a Postgres exclusion constraint). Who: the person, the owner, or a
+manager of the branch (schedules) or of one of their branches (time off); colleagues at the branch
+can read schedules.
+
 Events: `OpeningHoursChanged`, `ClosureAdded`, `BarberScheduleChanged`, `TimeOffAdded`, `TimeOffRemoved`.
 
 ### 3.5 `booking` — Appointments ★

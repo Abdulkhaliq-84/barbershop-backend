@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/domain"
@@ -26,6 +27,29 @@ const (
 // the business's, domain.ErrForbidden for staff without the role there.
 type Access interface {
 	Branch(ctx context.Context, actor shared.UserID, business shared.BusinessID, branch shared.BranchID, need Role) error
+	// MemberOf returns actor's own membership of business; ErrNotFound if
+	// they aren't active staff there.
+	MemberOf(ctx context.Context, actor shared.UserID, business shared.BusinessID) (Member, error)
+	// StaffMember returns an active staff member of business, or ErrNotFound.
+	StaffMember(ctx context.Context, business shared.BusinessID, staff shared.StaffID) (Member, error)
+}
+
+// Member is a staff member, as business describes them.
+type Member struct {
+	ID       shared.StaffID
+	Owner    bool
+	Manager  bool
+	Branches []shared.BranchID // empty for the owner, who works at all
+}
+
+// WorksAt reports whether the member works at branch.
+func (m Member) WorksAt(branch shared.BranchID) bool {
+	return m.Owner || slices.Contains(m.Branches, branch)
+}
+
+// sharesBranchWith reports whether m works at any branch o works at.
+func (m Member) sharesBranchWith(o Member) bool {
+	return slices.ContainsFunc(o.Branches, m.WorksAt)
 }
 
 // BranchRef names a branch, on behalf of Actor.

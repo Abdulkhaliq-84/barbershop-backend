@@ -31,6 +31,22 @@ func (a *BusinessAccess) Branch(ctx context.Context, actor shared.UserID, busine
 	return translate(a.business.AuthorizeBranch(ctx, actor, businessID, branch, role))
 }
 
+// MemberOf returns actor's own membership of the business.
+func (a *BusinessAccess) MemberOf(ctx context.Context, actor shared.UserID, businessID shared.BusinessID) (app.Member, error) {
+	m, err := a.business.MemberOf(ctx, actor, businessID)
+	return toMember(m), translate(err)
+}
+
+// StaffMember returns an active staff member of the business.
+func (a *BusinessAccess) StaffMember(ctx context.Context, businessID shared.BusinessID, staff shared.StaffID) (app.Member, error) {
+	m, err := a.business.StaffMember(ctx, businessID, staff)
+	return toMember(m), translate(err)
+}
+
+func toMember(s business.StaffInfo) app.Member {
+	return app.Member{ID: s.ID, Owner: s.Role == business.RoleOwner, Manager: s.Role == business.RoleManager, Branches: s.Branches}
+}
+
 func translate(err error) error {
 	switch {
 	case errors.Is(err, business.ErrNotFound):

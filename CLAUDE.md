@@ -26,7 +26,8 @@ branches and staff (ADR-0019). M3 is complete. M4 (catalog + scheduling) is in p
 `catalog` module — service categories and each branch's services — and `business.AuthorizeBranch`
 for modules that keep data per branch (ADR-0020); M4.2 offerings — who performs each service, with
 their own price or duration; M4.3 the `scheduling` module — branch opening hours in branch-local
-wall-clock time, shifts past midnight (ADR-0021).
+wall-clock time, shifts past midnight (ADR-0021); M4.4 barber schedules (weekly template + date
+overrides, no overlap across branches) and time off (a Postgres exclusion constraint).
 
 ## 2. Where things are
 

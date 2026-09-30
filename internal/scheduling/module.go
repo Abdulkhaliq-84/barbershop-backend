@@ -38,7 +38,8 @@ type Module struct {
 func New(d Deps) *Module {
 	access := acl.NewBusinessAccess(d.Business)
 	calendars := app.NewCalendarHandlers(postgres.NewCalendars(d.Pool), access, d.Clock)
-	return &Module{http: httpapi.NewHandlers(calendars, d.Logger)}
+	schedules := app.NewScheduleHandlers(postgres.NewSchedules(d.Pool), postgres.NewTimeOffs(d.Pool), access, d.Clock)
+	return &Module{http: httpapi.NewHandlers(calendars, schedules, d.Logger)}
 }
 
 // HTTP returns the handlers for the scheduling API operations.

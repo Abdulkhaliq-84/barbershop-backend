@@ -128,8 +128,8 @@ Client flow (Flutter):
 | GET / POST | `/v1/businesses/{business_id}/staff/invitations` — live (M3.5): invite by phone, texts a 7-day link | owner |
 | DELETE | `/v1/businesses/{business_id}/staff/invitations/{invitation_id}` — live (M3.5): revoke | owner |
 | POST | `/v1/invitations/accept` `{token}` — live (M3.5): signed in with the invited phone; `404 invitation_invalid`, `409 already_staff` | invited user |
-| GET / PUT | `/v1/businesses/{business_id}/staff/{staff_id}/schedule` | manager / the barber |
-| GET / POST / DELETE | `/v1/businesses/{business_id}/staff/{staff_id}/time-off` | manager / the barber |
+| GET / PUT | `…/branches/{branch_id}/staff/{staff_id}/schedule` — live (M4.4): weekly template + date overrides; GET anyone at the branch; PUT the person, the owner or the branch's manager (`If-Match`, `0` first) | manager / the barber |
+| GET / POST / DELETE | `/v1/businesses/{business_id}/staff/{staff_id}/time-off[/{time_off_id}]` — live (M4.4): instants; `409 time_off_overlaps` | manager / the barber |
 | GET | `…/branches/{branch_id}/day?date=` — per-barber timeline + KPIs (dashboard) | barber (own) / manager |
 | POST | `…/branches/{branch_id}/appointments` — staff booking / walk-in | barber |
 | POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` | barber (own) / manager |

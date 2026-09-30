@@ -34,6 +34,25 @@ and Friday nights. Branches keep their own IANA time zone (M3.2).
   `time.Date(y, m, d, 0, start, 0, 0, loc)` to `time.Date(y, m, d, 0, start+length, 0, 0, loc)`.
   Go normalizes minutes past 24:00 into the next day in wall-clock terms. Time off and
   appointments are instants (`timestamptz`).
+- **Barber schedules (M4.4)** belong to a (staff, branch) pair:
+  `/branches/{branch_id}/staff/{staff_id}/schedule`.
+  - Each has a weekly template (the same `WeeklyHours`) and date overrides.
+  - An override replaces the intervals that start on its date; with none, it is a day off.
+  - One person's templates at two branches may not overlap. This is checked under a per-person
+    advisory lock (`pg_advisory_xact_lock`), so two branches can't both book the same hours at
+    once.
+  - Anyone at the branch reads a schedule. The person themselves, the owner, or a manager of
+    that branch changes it.
+- **Time off (M4.4)** is per person, across all branches.
+  - It is stored as real instants (`timestamptz`), at most a year long.
+  - A Postgres exclusion constraint on
+    `(business_id, staff_id, tstzrange(starts_at, ends_at))` makes overlapping time off
+    impossible, even from two requests at once. That is `409 time_off_overlaps`.
+  - It is managed by the person, the owner, or a manager of one of their branches.
+- `business` exposes `MemberOf` (who "me" is) and `StaffMember` (who "they" are), so
+  `scheduling` can apply these rules itself. `StaffAtBranch` now also checks that the branch
+  belongs to the business: with no staff caller (customer booking, M5), the owner "works at"
+  any branch ID.
 - `scheduling` depends only on `business` (through its root package). It must not import
   `catalog`: booking combines the two.
 

@@ -29,7 +29,8 @@ business.businesses, business.branches, business.staff_members, business.staff_b
 business.verification_documents, business.invitations
 catalog.services, catalog.service_offerings  (categories are reference data in code — ADR-0020)
 scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures (the owner's exercise),
-scheduling.barber_schedules, scheduling.schedule_intervals, scheduling.time_off
+scheduling.barber_schedules, scheduling.barber_hours, scheduling.schedule_overrides,
+scheduling.override_hours, scheduling.time_off (EXCLUDE: no overlapping time off per person)
 booking.appointments, booking.appointment_items, booking.idempotency_keys
 discovery.branch_listings, discovery.cities
 billing.subscriptions  (plans are reference data in code — ADR-0019)
