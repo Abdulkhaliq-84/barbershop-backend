@@ -191,6 +191,9 @@ watch the second call end the session (`refresh_token_reused`).
 | **Composition root**: `main` subscribes one module to another's events, so neither imports the other | `cmd/server/main.go` `subscribe` | wiring event listeners in `index.ts` |
 | Proving "same transaction" with Postgres's `xmin` | `adapters/postgres/events_test.go` | — (hard to see from an ORM) |
 
+| One module **asking another for permission** through its root package, errors translated at the edge | `catalog/adapters/acl/business.go` → `business.Module.AuthorizeBranch` | calling another service's SDK and mapping its error codes |
+| **Range-checked integer narrowing** (`int` → `int16`) instead of a silent cast | `catalog/adapters/postgres` `toInt16` | nothing: JS numbers are all float64 |
+
 Try this: register a business, then call `GET /v1/businesses/{id}` with another user's token and
 compare the answer with an ID that doesn't exist. They should be identical.
 

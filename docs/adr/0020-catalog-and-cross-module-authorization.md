@@ -1,0 +1,60 @@
+# ADR-0020: Catalog as its own module; other modules ask business who may work on a branch
+
+- Status: Accepted · Date: 2026-09-30 · Builds on [ADR-0015](0015-business-tenancy-and-authorization.md)
+
+## Context
+M4.1 adds the service menu: what each branch sells, for how long and at what price. Services
+belong to branches, and branches and staff belong to `business`. This is the first module
+outside `business` that keeps tenant data. It needs the same membership-first authorization
+without copying staff data or reading `business`'s tables.
+
+## Decision
+- **`catalog` is its own module** with its own schema (`catalog.services`).
+  - It stores `business_id` and `branch_id` without foreign keys into `business` (ADR-0015),
+    and every query is scoped by both.
+  - Categories (haircut, beard, shave, kids, skin care, colour, packages) are reference data in
+    code, like plans. Platform admins will manage them later.
+- **`business.Module.AuthorizeBranch(actor, business, branch, role)`** is the one question other
+  modules ask. It checks three things, in this order:
+  1. The caller is active staff of the business with the role. Otherwise `ErrNotFound`, so
+     strangers learn nothing; a role that is too small gets `ErrForbidden`.
+  2. The branch is the business's. Otherwise `ErrNotFound`. Without this, an owner (who "works
+     at every branch") could write into another shop's branch by putting its ID under their own
+     business. A mutation test shows exactly that.
+  3. The caller works at the branch (the owner works at all of them). Otherwise `ErrForbidden`.
+- `catalog` calls it through `adapters/acl`, translating `business`'s errors into its own.
+  Lint rules forbid `catalog` from importing `business` internals, and forbid `business` from
+  importing `catalog` (that would be an import cycle).
+- **Who may do what:** anyone working at the branch lists its services. The owner, or a manager
+  of that branch, adds and edits them.
+- **Services are never deleted**, only deactivated (`active: false`): appointments will point
+  at them. Edits use the same `If-Match` version check as branches.
+- **Offerings (M4.2): who performs a service.**
+  - They are part of the `Service` aggregate. `PUT …/offerings` replaces the whole list, under
+    the service's `If-Match` version.
+  - Each offering may set its own price or duration, following the same rules as the service.
+  - Anyone on the staff may be listed (owners and managers who also cut hair included), but
+    only people working at that branch.
+  - `business.Module.StaffAtBranch` checks that before anything is saved.
+  - `staff_id` has no foreign key into `business`. A composite key `(business_id, service_id)`
+    keeps offerings inside their business.
+- **Rules:**
+  - duration 5–480 minutes, in 5-minute steps;
+  - price 0–100,000 SAR, in halalas, VAT-inclusive, SAR only;
+  - Arabic name required; name ≤ 80 characters, description ≤ 500;
+  - sort order 0–1000.
+
+  The database repeats each rule as a `CHECK`.
+
+## Consequences
+- Every catalog request makes one extra call into `business` (two indexed reads). That is
+  cheap, and it keeps one source of truth for who works where.
+- Later, `business` will need to know whether a branch has active services before it can be
+  published. It can't import `catalog`, so that will come through an event or a function wired
+  in `main`, like billing's trial (ADR-0019).
+- `scheduling` (M4.3) uses the same `AuthorizeBranch`.
+- When someone leaves a branch or is deactivated, their offerings stay in the table. Booking
+  (M5) will only offer people who are active staff at the branch at booking time, so a stale
+  offering can't be booked.
+- No catalog events yet (`ServiceCreated`…). They arrive with their first subscriber, discovery
+  (M6).

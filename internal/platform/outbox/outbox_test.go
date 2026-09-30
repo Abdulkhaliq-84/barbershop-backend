@@ -208,3 +208,95 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatalf("river_job tables = %d, %v", tables, err)
 	}
 }
+
+// Shutdown: a stop (SIGTERM) lets running handlers finish within the
+// shutdown timeout instead of cancelling them at once.
+func TestRunFinishesRunningHandlersOnStop(t *testing.T) {
+	t.Parallel()
+	pool := migrated(t)
+	bus, err := outbox.New(pool, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, finished := make(chan struct{}), make(chan struct{})
+	bus.Subscribe("slow", "test.greeted", func(ctx context.Context, _ outbox.Event) error {
+		close(started)
+		select {
+		case <-time.After(300 * time.Millisecond):
+			close(finished)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	e, _ := outbox.NewEvent("test.greeted", t0, greeting{})
+	publish(t, pool, bus, true, e)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- bus.Run(ctx, 5*time.Second) }()
+	<-started
+	cancel() // SIGTERM while the handler runs
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	select {
+	case <-finished:
+	default:
+		t.Fatal("the running handler was cancelled instead of allowed to finish")
+	}
+	var state string
+	if err := pool.QueryRow(t.Context(), `SELECT state FROM river.river_job`).Scan(&state); err != nil || state != "completed" {
+		t.Errorf("job state = %q, %v; want completed", state, err)
+	}
+}
+
+// A handler still running after the shutdown timeout is cancelled; its job
+// stays to be retried, and Run returns cleanly.
+func TestRunCancelsHandlersAfterTheTimeout(t *testing.T) {
+	t.Parallel()
+	pool := migrated(t)
+	bus, err := outbox.New(pool, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	bus.Subscribe("stuck", "test.greeted", func(ctx context.Context, _ outbox.Event) error {
+		close(started)
+		<-ctx.Done() // only a cancellation ends it
+		return ctx.Err()
+	})
+	e, _ := outbox.NewEvent("test.greeted", t0, greeting{})
+	publish(t, pool, bus, true, e)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- bus.Run(ctx, 200*time.Millisecond) }()
+	<-started
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var state string
+	if err := pool.QueryRow(t.Context(), `SELECT state FROM river.river_job`).Scan(&state); err != nil || state == "completed" {
+		t.Errorf("job state = %q, %v; want it left for a retry", state, err)
+	}
+}
+
+// A stop that arrives while the worker is still starting is a clean stop,
+// not a startup error.
+func TestRunStoppedDuringStartup(t *testing.T) {
+	t.Parallel()
+	pool := migrated(t)
+	for range 5 {
+		bus, err := outbox.New(pool, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := bus.Run(ctx, time.Second); err != nil {
+			t.Fatalf("Run with a cancelled context: %v", err)
+		}
+	}
+}

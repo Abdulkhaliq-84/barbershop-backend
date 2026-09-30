@@ -143,6 +143,17 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 6. M3.6 — River outbox + `worker` role with its first consumer; `billing`: plans, trial subscription
    on `BusinessApproved`, entitlements (branch / staff limits) ([ADR-0019](adr/0019-outbox-delivery-and-billing-trial.md)).
 
+**M4 in slices** (one PR each):
+
+1. M4.1 — `catalog` module: service categories, each branch's services (add, list, edit,
+   deactivate); `business.AuthorizeBranch` for other modules ([ADR-0020](adr/0020-catalog-and-cross-module-authorization.md)).
+2. M4.2 — barber offerings: which barbers do which service, with their own price or duration.
+3. M4.3 — `scheduling` module: branch opening hours (weekly, branch-local wall clock, shifts past
+   midnight). *Your turn:* branch closures end-to-end.
+4. M4.4 — barber schedules (weekly template and date overrides) and time off.
+5. M4.5 — `WorkingWindows(branch, staff, from, to)`: the pure calculation booking will use
+   (property tests, time zones).
+
 ### Design track (in parallel, in Figma)
 
 | # | Deliverable | Feeds |

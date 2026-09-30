@@ -22,7 +22,10 @@ membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the 
 review and the platform-admin review queue (approve / reject, keyset pagination — ADR-0017); M3.5 staff
 invitations by SMS link, accepted by the invited phone, and branch-scoped managers (ADR-0018); M3.6 the
 River outbox and `worker` role, and the `billing` module — a 30-day trial on approval, plan limits on
-branches and staff (ADR-0019). M3 is complete.
+branches and staff (ADR-0019). M3 is complete. M4 (catalog + scheduling) is in progress: M4.1 the
+`catalog` module — service categories and each branch's services — and `business.AuthorizeBranch`
+for modules that keep data per branch (ADR-0020); M4.2 offerings — who performs each service, with
+their own price or duration.
 
 ## 2. Where things are
 
@@ -34,7 +37,7 @@ branches and staff (ADR-0019). M3 is complete.
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0019) |
+| Why a decision was made | `docs/adr/` (0001–0020) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
