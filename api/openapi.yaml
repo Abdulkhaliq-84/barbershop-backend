@@ -32,6 +32,8 @@ tags:
     description: What a branch sells — its service menu, with prices and durations
   - name: scheduling
     description: When work can happen — branch opening hours, barber schedules, time off
+  - name: booking
+    description: Customers — when a branch can do some services, and booking them
   - name: media
     description: Stored files, served through short-lived signed links
   - name: admin
@@ -568,6 +570,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Membership"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/branches/{branch_id}/availability:
+    parameters:
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: getAvailability
+      tags: [booking]
+      security: []
+      summary: When a branch can do some services on a day (public)
+      description: |
+        Start times on `date` (in the branch's time zone) at which a barber
+        who performs *all* of `service_ids` — back to back, plus the
+        branch's buffer — is working and not booked. Omit `barber_id` for
+        any barber: each slot lists who is free then. The list is advisory:
+        someone may book a slot first (booking answers
+        `409 slot_unavailable`, then ask again).
+
+        Only a published branch of an active business answers; anything
+        else is `404`. A date before today or past the booking horizon has
+        no slots. A service the branch doesn't offer:
+        `422 service_unavailable`; a `barber_id` who doesn't perform them
+        all: `422 barber_unavailable`.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: The day, in the branch's time zone.
+          schema:
+            type: string
+            format: date
+            example: "2026-10-04"
+        - name: service_ids
+          in: query
+          required: true
+          description: 1 to 5 different services, comma-separated.
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 5
+            items:
+              type: string
+              format: uuid
+        - name: barber_id
+          in: query
+          description: One barber (a staff ID); omit for any barber.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The barbers who could do it, and the free start times
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Availability"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -1266,7 +1327,8 @@ components:
             `document_limit_reached`, `download_link_invalid`, `cr_document_required`,
             `branch_required`, `cr_number_taken`, `invitation_invalid`,
             `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`,
-            `registration_limit_reached`, `branch_not_ready`, `business_not_active`.
+            `registration_limit_reached`, `branch_not_ready`, `business_not_active`,
+            `service_unavailable`, `barber_unavailable`.
           example: otp_cooldown
         detail:
           type: string
@@ -1940,6 +2002,62 @@ components:
           type: integer
           description: Managers and barbers, including pending invitations. The owner is free.
           example: 30
+
+    Availability:
+      type: object
+      required: [branch_id, date, time_zone, barbers, slots]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+        time_zone:
+          type: string
+          description: The branch's IANA time zone, e.g. Asia/Riyadh.
+          example: Asia/Riyadh
+        barbers:
+          type: array
+          description: Every barber who performs all the services, with their total.
+          items:
+            $ref: "#/components/schemas/BarberOffer"
+        slots:
+          type: array
+          description: Free start times, in order.
+          items:
+            $ref: "#/components/schemas/Slot"
+
+    BarberOffer:
+      type: object
+      required: [id, display_name, duration_minutes, price]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        duration_minutes:
+          type: integer
+          description: The services together, without the branch's buffer.
+          example: 45
+        price:
+          $ref: "#/components/schemas/Money"
+
+    Slot:
+      type: object
+      required: [starts_at, barber_ids]
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          description: UTC.
+        barber_ids:
+          type: array
+          description: Who is free to start then.
+          items:
+            type: string
+            format: uuid
 
     Money:
       type: object

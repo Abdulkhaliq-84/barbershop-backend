@@ -142,6 +142,43 @@ func (m *Module) StaffAtBranch(ctx context.Context, business shared.BusinessID, 
 	return m.access.StaffAtBranch(ctx, business, branch, staff)
 }
 
+// PolicyRules is how a branch takes bookings: lead time, horizon, slot
+// interval, buffer, cancellation window and the rest.
+type PolicyRules = domain.PolicyRules
+
+// BookableBranch is a branch customers can book at, with what booking needs
+// to know about it.
+type BookableBranch struct {
+	BusinessID shared.BusinessID
+	BranchID   shared.BranchID
+	Location   *time.Location
+	Policy     PolicyRules
+}
+
+// BookableBranch returns a published branch of an active business, found by
+// ID alone (customers don't know the business); ErrNotFound otherwise. It
+// authorizes nobody: a published branch is public.
+func (m *Module) BookableBranch(ctx context.Context, branch shared.BranchID) (BookableBranch, error) {
+	b, err := m.access.BookableBranch(ctx, branch)
+	if err != nil {
+		return BookableBranch{}, err
+	}
+	loc, err := time.LoadLocation(b.Profile().Timezone)
+	if err != nil {
+		return BookableBranch{}, fmt.Errorf("bookable branch: %w", err)
+	}
+	return BookableBranch{BusinessID: b.BusinessID(), BranchID: b.ID(), Location: loc, Policy: b.Policy().Rules()}, nil
+}
+
+// Barber is a staff member as customers see them.
+type Barber = app.Barber
+
+// BranchBarbers returns which of staff are active staff working at the
+// branch, with their names, in the order asked. It authorizes nobody.
+func (m *Module) BranchBarbers(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) ([]Barber, error) {
+	return m.access.BranchBarbers(ctx, business, branch, staff)
+}
+
 // New wires the repositories, use cases and HTTP handlers.
 func New(d Deps) *Module {
 	store := postgres.NewStore(d.Pool, d.Events)

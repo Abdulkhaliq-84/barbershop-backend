@@ -31,7 +31,8 @@ overrides, no overlap across branches) and time off (a Postgres exclusion constr
 windows — opening hours ∩ schedule − time off as real instants, the pure function booking (M5) will
 call through `scheduling.Module.WorkingWindows`. M5 (booking) is in progress: M5.1 branch publishing,
 with readiness from catalog and scheduling answered in `main` so `business` imports neither
-(ADR-0022).
+(ADR-0022); M5.2 the `booking` module and public availability — a pure slot calculator over
+business, catalog and scheduling (ADR-0023).
 
 ## 2. Where things are
 

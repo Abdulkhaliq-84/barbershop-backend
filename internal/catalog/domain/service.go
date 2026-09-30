@@ -10,11 +10,12 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
-// ServiceTag marks service IDs.
-type ServiceTag struct{}
+// ServiceTag marks service IDs. Booking refers to services too, so the
+// marker lives in shared.
+type ServiceTag = shared.ServiceTag
 
 // ServiceID identifies a service.
-type ServiceID = shared.ID[ServiceTag]
+type ServiceID = shared.ServiceID
 
 // Service rules.
 const (

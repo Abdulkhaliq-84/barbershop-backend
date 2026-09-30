@@ -84,6 +84,8 @@ linters:
           files:
             - "**/internal/business/**"
           deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
+              desc: booking depends on business, so business must not depend on booking
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/
               desc: use the iam root package, never its internals
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media/
@@ -100,6 +102,8 @@ linters:
           files:
             - "**/internal/catalog/**"
           deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
+              desc: booking depends on catalog, so catalog must not depend on booking
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
               desc: use the business root package (through adapters/acl), never its internals
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
@@ -116,6 +120,8 @@ linters:
           files:
             - "**/internal/scheduling/**"
           deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
+              desc: booking depends on scheduling, so scheduling must not depend on booking
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
               desc: use the business root package (through adapters/acl), never its internals
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
@@ -126,6 +132,24 @@ linters:
               desc: scheduling must not depend on media
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog
               desc: scheduling must not depend on catalog (booking combines them)
+        # booking combines business, catalog and scheduling, through their root
+        # packages in adapters/acl (M5, ADR-0022).
+        booking-keeps-to-itself:
+          files:
+            - "**/internal/booking/**"
+          deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
+              desc: use the business root package (through adapters/acl), never its internals
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/
+              desc: use the catalog root package (through adapters/acl), never its internals
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/
+              desc: use the scheduling root package (through adapters/acl), never its internals
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
+              desc: booking must not depend on iam
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/billing
+              desc: booking must not depend on billing
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media
+              desc: booking must not depend on media
         # billing depends on no other module: it hears about businesses through
         # events that main subscribes it to (ADR-0019).
         billing-keeps-to-itself:

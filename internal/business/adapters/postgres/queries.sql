@@ -72,6 +72,13 @@ INSERT INTO business.branches (
 -- Always by (business_id, id): another business's branch ID finds nothing.
 SELECT * FROM business.branches WHERE business_id = $1 AND id = $2;
 
+-- name: BookableBranch :one
+-- The one lookup by branch ID alone: customers don't know the business. It
+-- finds only a published branch of an active business.
+SELECT b.* FROM business.branches b
+WHERE b.id = $1 AND b.status = 'published'
+  AND EXISTS (SELECT 1 FROM business.businesses biz WHERE biz.id = b.business_id AND biz.status = 'active');
+
 -- name: BranchByIDForUpdate :one
 SELECT * FROM business.branches WHERE business_id = $1 AND id = $2 FOR NO KEY UPDATE;
 

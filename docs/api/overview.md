@@ -102,7 +102,7 @@ Client flow (Flutter):
 
 | Method | Path |
 |---|---|
-| GET | `/v1/branches/{branch_id}/availability?date=&service_ids=&barber_id=` (omit `barber_id` = any barber) |
+| GET | `/v1/branches/{branch_id}/availability?date=&service_ids=&barber_id=` (omit `barber_id` = any barber) — live (M5.2): public; slots `[{starts_at, barber_ids}]` and each barber's total duration and price; `422 service_unavailable` / `barber_unavailable` |
 | POST | `/v1/appointments` (Idempotency-Key) |
 | GET | `/v1/me/appointments?status=upcoming\|past&cursor=` |
 | GET | `/v1/me/appointments/{appointment_id}` |

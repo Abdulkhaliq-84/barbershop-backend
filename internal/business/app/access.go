@@ -123,3 +123,42 @@ func (h *AccessHandler) BranchLocation(ctx context.Context, business shared.Busi
 	}
 	return loc, nil
 }
+
+// BookableBranch returns a published branch of an active business, found by
+// ID alone: customers don't know the business. ErrNotFound otherwise.
+func (h *AccessHandler) BookableBranch(ctx context.Context, branch shared.BranchID) (*domain.Branch, error) {
+	b, err := h.branches.Bookable(ctx, branch)
+	if err != nil {
+		return nil, fmt.Errorf("bookable branch: %w", err)
+	}
+	return b, nil
+}
+
+// Barber is a staff member as customers see them.
+type Barber struct {
+	ID   shared.StaffID
+	Name string
+}
+
+// BranchBarbers returns which of staff are active staff working at the
+// branch, with their names, in the order asked. Anyone may see who cuts
+// hair where; it authorizes nobody.
+func (h *AccessHandler) BranchBarbers(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) ([]Barber, error) {
+	members, err := h.staff.List(ctx, business)
+	if err != nil {
+		return nil, fmt.Errorf("branch barbers: %w", err)
+	}
+	byID := make(map[shared.StaffID]*domain.StaffMember, len(members))
+	for _, m := range members {
+		if m.IsActive() && m.WorksAt(branch) {
+			byID[m.ID()] = m
+		}
+	}
+	out := make([]Barber, 0, len(staff))
+	for _, id := range staff {
+		if m, ok := byID[id]; ok {
+			out = append(out, Barber{ID: id, Name: m.DisplayName()})
+		}
+	}
+	return out, nil
+}

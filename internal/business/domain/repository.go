@@ -67,6 +67,9 @@ type Branches interface {
 	ByID(ctx context.Context, business shared.BusinessID, id shared.BranchID) (*Branch, error)
 	// List returns the business's branches, oldest first.
 	List(ctx context.Context, business shared.BusinessID) ([]*Branch, error)
+	// Bookable returns a published branch of an active business, found by
+	// ID alone (customers don't know the business), or ErrNotFound.
+	Bookable(ctx context.Context, id shared.BranchID) (*Branch, error)
 	// Update locks the branch, checks its version (ErrVersionConflict), calls
 	// fn and saves — in one transaction. ErrNotFound when there is no such
 	// branch in the business.

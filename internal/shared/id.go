@@ -25,6 +25,7 @@ type (
 	BranchTag   struct{}
 	StaffTag    struct{}
 	MediaTag    struct{} // a stored file (media module), referenced by others
+	ServiceTag  struct{} // a catalog service, snapshotted by booking
 )
 
 // Cross-module IDs.
@@ -34,6 +35,7 @@ type (
 	BranchID   = ID[BranchTag]
 	StaffID    = ID[StaffTag]
 	MediaID    = ID[MediaTag]
+	ServiceID  = ID[ServiceTag]
 )
 
 // NewID returns a new UUIDv7 ID. Version 7 UUIDs start with a timestamp, so

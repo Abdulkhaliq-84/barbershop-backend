@@ -56,6 +56,10 @@ func (s *branchStore) ByID(_ context.Context, business shared.BusinessID, id sha
 	return nil, domain.ErrNotFound
 }
 
+func (s *branchStore) Bookable(context.Context, shared.BranchID) (*domain.Branch, error) {
+	panic("not used")
+}
+
 func (s *branchStore) List(_ context.Context, business shared.BusinessID) ([]*domain.Branch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -284,3 +284,42 @@ func (h *ServiceHandlers) PerformingStaff(ctx context.Context, business shared.B
 	slices.SortFunc(staff, func(a, b shared.StaffID) int { return cmp.Compare(a.String(), b.String()) })
 	return slices.Compact(staff), nil
 }
+
+// MenuItem is an active service as booking needs it: what it's called and,
+// for each barber who performs it, how long it takes and what it costs
+// (their own duration and price, or the service's).
+type MenuItem struct {
+	ID         domain.ServiceID
+	Name       shared.LocalizedText
+	Performers []Performer
+}
+
+// Performer is one barber's version of a service.
+type Performer struct {
+	Staff    shared.StaffID
+	Duration time.Duration
+	Price    shared.Money
+}
+
+// Menu returns the branch's active services with who performs them. It
+// authorizes nobody: a published branch's menu is public, and booking asks
+// only after finding the branch bookable.
+func (h *ServiceHandlers) Menu(ctx context.Context, business shared.BusinessID, branch shared.BranchID) ([]MenuItem, error) {
+	services, err := h.services.List(ctx, business, branch)
+	if err != nil {
+		return nil, fmt.Errorf("menu: %w", err)
+	}
+	var menu []MenuItem
+	for _, s := range services {
+		if !s.IsActive() {
+			continue
+		}
+		d := s.Details()
+		item := MenuItem{ID: s.ID(), Name: d.Name}
+		for _, o := range s.Offerings() {
+			item.Performers = append(item.Performers, Performer{Staff: o.Staff, Duration: o.DurationOr(d.Duration), Price: o.PriceOr(d.Price)})
+		}
+		menu = append(menu, item)
+	}
+	return menu, nil
+}

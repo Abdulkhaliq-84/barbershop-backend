@@ -27,3 +27,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0020](0020-catalog-and-cross-module-authorization.md) | Catalog as its own module; other modules ask business who may work on a branch | Accepted |
 | [0021](0021-scheduling-time-model.md) | Scheduling keeps weekly hours in branch-local wall-clock time, with shifts past midnight | Accepted |
 | [0022](0022-branch-publishing-and-readiness.md) | Publishing a branch asks catalog and scheduling through main | Accepted |
+| [0023](0023-availability.md) | Availability is a pure calculation over three modules, public and advisory | Accepted |

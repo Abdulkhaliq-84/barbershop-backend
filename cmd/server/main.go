@@ -23,6 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/billing"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/booking"
+	bookinghttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/booking/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business"
 	businesshttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog"
@@ -127,6 +129,7 @@ type (
 	mediaAPI      = mediahttp.Handlers
 	catalogAPI    = cataloghttp.Handlers
 	schedulingAPI = schedulinghttp.Handlers
+	bookingAPI    = bookinghttp.Handlers
 )
 
 type apiServer struct {
@@ -135,6 +138,7 @@ type apiServer struct {
 	*mediaAPI      // media: /v1/media/* (signed downloads)
 	*catalogAPI    // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
 	*schedulingAPI // scheduling: /v1/businesses/{id}/branches/{id}/opening-hours
+	*bookingAPI    // booking: /v1/branches/{id}/availability
 }
 
 // application is every module, wired: the API for the api role, the outbox
@@ -179,10 +183,14 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
 	schedulingModule := scheduling.New(scheduling.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
 	readiness.catalog, readiness.scheduling = catalogModule, schedulingModule
+	bookingModule := booking.New(booking.Deps{
+		Pool: pool, Clock: clock.System{}, Logger: logger,
+		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule,
+	})
 	subscribe(bus, billingModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP()}
+	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP(), bookingModule.HTTP()}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}

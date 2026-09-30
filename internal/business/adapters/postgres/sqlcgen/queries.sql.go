@@ -23,6 +23,45 @@ func (q *Queries) AdvisoryLock(ctx context.Context, name string) error {
 	return err
 }
 
+const bookableBranch = `-- name: BookableBranch :one
+SELECT b.id, b.business_id, b.name_ar, b.name_en, b.city_code, b.district, b.address, b.latitude, b.longitude, b.phone, b.timezone, b.status, b.min_lead_minutes, b.horizon_days, b.slot_interval_minutes, b.buffer_minutes, b.cancellation_minutes, b.auto_confirm, b.pending_expiry_minutes, b.max_active_bookings, b.version, b.created_at, b.updated_at FROM business.branches b
+WHERE b.id = $1 AND b.status = 'published'
+  AND EXISTS (SELECT 1 FROM business.businesses biz WHERE biz.id = b.business_id AND biz.status = 'active')
+`
+
+// The one lookup by branch ID alone: customers don't know the business. It
+// finds only a published branch of an active business.
+func (q *Queries) BookableBranch(ctx context.Context, id uuid.UUID) (BusinessBranch, error) {
+	row := q.db.QueryRow(ctx, bookableBranch, id)
+	var i BusinessBranch
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.NameAr,
+		&i.NameEn,
+		&i.CityCode,
+		&i.District,
+		&i.Address,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Phone,
+		&i.Timezone,
+		&i.Status,
+		&i.MinLeadMinutes,
+		&i.HorizonDays,
+		&i.SlotIntervalMinutes,
+		&i.BufferMinutes,
+		&i.CancellationMinutes,
+		&i.AutoConfirm,
+		&i.PendingExpiryMinutes,
+		&i.MaxActiveBookings,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const branchByID = `-- name: BranchByID :one
 SELECT id, business_id, name_ar, name_en, city_code, district, address, latitude, longitude, phone, timezone, status, min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings, version, created_at, updated_at FROM business.branches WHERE business_id = $1 AND id = $2
 `

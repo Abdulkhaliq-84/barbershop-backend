@@ -19,6 +19,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/app"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
@@ -41,6 +42,22 @@ type Module struct {
 func New(d Deps) *Module {
 	services := app.NewServiceHandlers(postgres.NewServices(d.Pool), acl.NewBusinessAccess(d.Business), d.Clock)
 	return &Module{services: services, http: httpapi.NewHandlers(services, d.Logger)}
+}
+
+// ServiceID identifies a service.
+type ServiceID = domain.ServiceID
+
+// MenuItem is an active service and who performs it, for how long and at
+// what price.
+type MenuItem = app.MenuItem
+
+// Performer is one barber's version of a service.
+type Performer = app.Performer
+
+// Menu returns the branch's active services with who performs them, for
+// booking. It authorizes nobody: callers check the branch is bookable first.
+func (m *Module) Menu(ctx context.Context, business shared.BusinessID, branch shared.BranchID) ([]MenuItem, error) {
+	return m.services.Menu(ctx, business, branch)
 }
 
 // PerformingStaff returns who performs at least one active service at the

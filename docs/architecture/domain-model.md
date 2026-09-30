@@ -280,6 +280,14 @@ any barber      → union of start times; each keeps the list of barbers free at
   with the fewest booked minutes that day (spreads load fairly); tie → stable order by id.
   If the insert hits the constraint, try the next free barber before giving up.
 
+**Live since M5.2 (ADR-0023):** the `booking` module and availability.
+- `domain.Slots` is the pure calculator above, with one change: the grid walks the day's real
+  instants, so the repeated hour when clocks go back offers both of its instants.
+- `GET /v1/branches/{id}/availability` is public. It combines business (the bookable branch, its
+  barbers), catalog (the menu) and scheduling (working windows) through `adapters/acl`, and loads
+  windows and appointments at the same time (`errgroup`).
+- The appointments table (with the exclusion constraint) exists; booking writes to it from M5.3.
+
 ### 3.6 `discovery` — Search read model
 
 A denormalised `branch_listing` per published branch: names {ar,en} (+ normalised search text),
