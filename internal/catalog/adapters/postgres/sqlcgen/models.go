@@ -123,6 +123,15 @@ type CatalogService struct {
 	UpdatedAt       time.Time
 }
 
+type CatalogServiceOffering struct {
+	BusinessID      uuid.UUID
+	ServiceID       uuid.UUID
+	StaffID         uuid.UUID
+	PriceAmount     pgtype.Int8
+	PriceCurrency   pgtype.Text
+	DurationMinutes pgtype.Int2
+}
+
 type IamOtpChallenge struct {
 	ID         uuid.UUID
 	Phone      string

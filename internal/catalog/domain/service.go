@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -53,10 +54,10 @@ func (d ServiceDetails) check() (ServiceDetails, error) {
 	if utf8.RuneCountInString(d.Description.Ar) > MaxDescriptionLen || utf8.RuneCountInString(d.Description.En) > MaxDescriptionLen {
 		return d, ErrTextTooLong
 	}
-	if d.Duration < MinDuration || d.Duration > MaxDuration || d.Duration%DurationStep != 0 {
+	if !validDuration(d.Duration) {
 		return d, ErrInvalidDuration
 	}
-	if d.Price.Currency() != shared.SAR || d.Price.IsNegative() || d.Price.Amount() > MaxPriceHalalas {
+	if !validPrice(d.Price) {
 		return d, ErrInvalidPrice
 	}
 	if d.SortOrder < 0 || d.SortOrder > MaxSortOrder {
@@ -72,6 +73,7 @@ type Service struct {
 	business  shared.BusinessID
 	branch    shared.BranchID
 	details   ServiceDetails
+	offerings []Offering // who performs it; empty until the manager assigns someone
 	active    bool
 	version   int
 	createdAt time.Time
@@ -100,10 +102,29 @@ func (s *Service) Edit(d ServiceDetails, active bool, now time.Time) error {
 	return nil
 }
 
-// RehydrateService rebuilds a service loaded from storage.
-func RehydrateService(id ServiceID, business shared.BusinessID, branch shared.BranchID, d ServiceDetails, active bool, version int, createdAt, updatedAt time.Time) *Service {
-	return &Service{id: id, business: business, branch: branch, details: d, active: active, version: version, createdAt: createdAt, updatedAt: updatedAt}
+// SetOfferings replaces who performs the service. The caller has checked
+// that every staff member works at the service's branch.
+func (s *Service) SetOfferings(offerings []Offering, now time.Time) error {
+	checked, err := checkOfferings(offerings)
+	if err != nil {
+		return err
+	}
+	s.offerings = checked
+	s.version++
+	s.updatedAt = dbTime(now)
+	return nil
 }
+
+// RehydrateService rebuilds a service loaded from storage.
+func RehydrateService(id ServiceID, business shared.BusinessID, branch shared.BranchID, d ServiceDetails, offerings []Offering, active bool, version int, createdAt, updatedAt time.Time) *Service {
+	return &Service{
+		id: id, business: business, branch: branch, details: d, offerings: slices.Clone(offerings),
+		active: active, version: version, createdAt: createdAt, updatedAt: updatedAt,
+	}
+}
+
+// Offerings returns who performs the service, by staff ID.
+func (s *Service) Offerings() []Offering { return slices.Clone(s.offerings) }
 
 // ID returns the service ID.
 func (s *Service) ID() ServiceID { return s.id }

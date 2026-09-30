@@ -602,6 +602,42 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/businesses/{business_id}/branches/{branch_id}/services/{service_id}/offerings:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+      - $ref: "#/components/parameters/ServiceID"
+    put:
+      operationId: setServiceOfferings
+      tags: [services]
+      summary: Set who performs a service (owner, or a manager of the branch)
+      description: |
+        Replaces the whole list. Everyone listed must be active staff working
+        at this branch (`422 validation_failed` otherwise) — owners and
+        managers who also cut hair included. An offering may set its own
+        `price` or `duration_minutes`; omitted, the service's apply. An empty
+        list means nobody performs it (customers can't book it).
+
+        Offerings are part of the service, so this takes the service's
+        `If-Match` version and returns the service with a new one.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OfferingsUpdate"
+      responses:
+        "200":
+          description: The service, with its offerings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Service"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/businesses/{business_id}/verification/documents:
     parameters:
       - $ref: "#/components/parameters/BusinessID"
@@ -1722,9 +1758,37 @@ components:
         active:
           type: boolean
 
+    Offering:
+      type: object
+      additionalProperties: false
+      required: [staff_id]
+      properties:
+        staff_id:
+          type: string
+          format: uuid
+          description: A staff member's `id` from `GET /v1/businesses/{business_id}/staff`.
+        price:
+          $ref: "#/components/schemas/Money"
+        duration_minutes:
+          type: integer
+          minimum: 5
+          maximum: 480
+          multipleOf: 5
+
+    OfferingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [offerings]
+      properties:
+        offerings:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Offering"
+
     Service:
       type: object
-      required: [id, branch_id, category, name, duration_minutes, price, active, sort_order, version, created_at, updated_at]
+      required: [id, branch_id, category, name, duration_minutes, price, offerings, active, sort_order, version, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1744,6 +1808,11 @@ components:
           example: 30
         price:
           $ref: "#/components/schemas/Money"
+        offerings:
+          type: array
+          description: Who performs it, with their own price or duration when set.
+          items:
+            $ref: "#/components/schemas/Offering"
         active:
           type: boolean
         sort_order:

@@ -8,7 +8,9 @@ import (
 	"math"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/adapters/postgres/sqlcgen"
@@ -38,15 +40,29 @@ func (r *Services) Add(ctx context.Context, s *domain.Service) error {
 	return nil
 }
 
-// List returns the branch's services in display order.
+// List returns the branch's services in display order, with their
+// offerings: two queries, whatever the number of services.
 func (r *Services) List(ctx context.Context, business shared.BusinessID, branch shared.BranchID) ([]*domain.Service, error) {
-	rows, err := sqlcgen.New(r.pool).ServicesByBranch(ctx, sqlcgen.ServicesByBranchParams{BusinessID: business.UUID(), BranchID: branch.UUID()})
+	q := sqlcgen.New(r.pool)
+	rows, err := q.ServicesByBranch(ctx, sqlcgen.ServicesByBranchParams{BusinessID: business.UUID(), BranchID: branch.UUID()})
 	if err != nil {
 		return nil, fmt.Errorf("list services: %w", err)
 	}
+	offRows, err := q.OfferingsByBranch(ctx, sqlcgen.OfferingsByBranchParams{BusinessID: business.UUID(), BranchID: branch.UUID()})
+	if err != nil {
+		return nil, fmt.Errorf("list offerings: %w", err)
+	}
+	offerings := map[uuid.UUID][]domain.Offering{}
+	for _, o := range offRows {
+		off, err := toOffering(o)
+		if err != nil {
+			return nil, err
+		}
+		offerings[o.ServiceID] = append(offerings[o.ServiceID], off)
+	}
 	out := make([]*domain.Service, 0, len(rows))
 	for _, row := range rows {
-		s, err := toService(row)
+		s, err := toService(row, offerings[row.ID])
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +88,19 @@ func (r *Services) Update(ctx context.Context, business shared.BusinessID, branc
 		if int(row.Version) != expectedVersion {
 			return domain.ErrVersionConflict
 		}
-		s, err := toService(row)
+		offRows, err := q.OfferingsByService(ctx, sqlcgen.OfferingsByServiceParams{BusinessID: business.UUID(), ServiceID: id.UUID()})
+		if err != nil {
+			return fmt.Errorf("load offerings: %w", err)
+		}
+		offerings := make([]domain.Offering, 0, len(offRows))
+		for _, o := range offRows {
+			off, err := toOffering(o)
+			if err != nil {
+				return err
+			}
+			offerings = append(offerings, off)
+		}
+		s, err := toService(row, offerings)
 		if err != nil {
 			return err
 		}
@@ -96,8 +124,50 @@ func (r *Services) Update(ctx context.Context, business shared.BusinessID, branc
 		if n == 0 {
 			return domain.ErrVersionConflict
 		}
-		return nil
+		return saveOfferings(ctx, q, s)
 	})
+}
+
+// saveOfferings replaces the service's offerings with its current ones.
+func saveOfferings(ctx context.Context, q *sqlcgen.Queries, s *domain.Service) error {
+	business, service := s.BusinessID().UUID(), s.ID().UUID()
+	if err := q.DeleteOfferings(ctx, sqlcgen.DeleteOfferingsParams{BusinessID: business, ServiceID: service}); err != nil {
+		return fmt.Errorf("clear offerings: %w", err)
+	}
+	for _, o := range s.Offerings() {
+		p := sqlcgen.InsertOfferingParams{BusinessID: business, ServiceID: service, StaffID: o.Staff.UUID()}
+		if o.Price != nil {
+			p.PriceAmount = pgtype.Int8{Int64: o.Price.Amount(), Valid: true}
+			p.PriceCurrency = pgtype.Text{String: string(o.Price.Currency()), Valid: true}
+		}
+		if o.Duration != nil {
+			minutes, err := toInt16(int(*o.Duration / time.Minute))
+			if err != nil {
+				return err
+			}
+			p.DurationMinutes = pgtype.Int2{Int16: minutes, Valid: true}
+		}
+		if err := q.InsertOffering(ctx, p); err != nil {
+			return fmt.Errorf("insert offering: %w", err)
+		}
+	}
+	return nil
+}
+
+func toOffering(row sqlcgen.CatalogServiceOffering) (domain.Offering, error) {
+	o := domain.Offering{Staff: shared.IDFromUUID[shared.StaffTag](row.StaffID)}
+	if row.PriceAmount.Valid {
+		p, err := shared.NewMoney(row.PriceAmount.Int64, shared.Currency(row.PriceCurrency.String))
+		if err != nil {
+			return o, fmt.Errorf("stored offering price: %w", err)
+		}
+		o.Price = &p
+	}
+	if row.DurationMinutes.Valid {
+		d := time.Duration(row.DurationMinutes.Int16) * time.Minute
+		o.Duration = &d
+	}
+	return o, nil
 }
 
 // toRow flattens a service into the table's columns, in order.
@@ -141,7 +211,7 @@ func toInt16(n int) (int16, error) {
 	return int16(n), nil
 }
 
-func toService(row sqlcgen.CatalogService) (*domain.Service, error) {
+func toService(row sqlcgen.CatalogService, offerings []domain.Offering) (*domain.Service, error) {
 	name, err := shared.NewLocalizedText(row.NameAr, row.NameEn)
 	if err != nil {
 		return nil, fmt.Errorf("stored service name: %w", err)
@@ -158,6 +228,6 @@ func toService(row sqlcgen.CatalogService) (*domain.Service, error) {
 			Description: domain.Description{Ar: row.DescriptionAr, En: row.DescriptionEn},
 			Duration:    time.Duration(row.DurationMinutes) * time.Minute, Price: price, SortOrder: int(row.SortOrder),
 		},
-		row.Active, int(row.Version), row.CreatedAt, row.UpdatedAt,
+		offerings, row.Active, int(row.Version), row.CreatedAt, row.UpdatedAt,
 	), nil
 }

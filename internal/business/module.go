@@ -82,6 +82,13 @@ func (m *Module) AuthorizeBranch(ctx context.Context, actor shared.UserID, busin
 	return m.access.Branch(ctx, actor, business, branch, role)
 }
 
+// StaffAtBranch checks that every staff ID is active staff of business
+// working at branch (the owner works at all of them); ErrNotFound if not.
+// Callers have already authorized the actor with AuthorizeBranch.
+func (m *Module) StaffAtBranch(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) error {
+	return m.access.StaffAtBranch(ctx, business, branch, staff)
+}
+
 // New wires the repositories, use cases and HTTP handlers.
 func New(d Deps) *Module {
 	store := postgres.NewStore(d.Pool, d.Events)

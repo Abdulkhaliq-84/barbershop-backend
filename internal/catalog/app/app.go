@@ -29,6 +29,9 @@ const (
 // the role or not working at the branch.
 type Access interface {
 	Branch(ctx context.Context, actor shared.UserID, business shared.BusinessID, branch shared.BranchID, need Role) error
+	// StaffAtBranch checks that each staff member works at the branch;
+	// domain.ErrUnknownStaff if not.
+	StaffAtBranch(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) error
 }
 
 // BranchRef names a branch, on behalf of Actor.
@@ -74,10 +77,26 @@ type UpdateService struct {
 	Active          *bool
 }
 
+// OfferingInput is one person performing a service, as the client sent it.
+// Nil Price or Duration means the service's own.
+type OfferingInput struct {
+	Staff    shared.StaffID
+	Price    *Money
+	Duration *time.Duration
+}
+
+// SetOfferings replaces who performs a service.
+type SetOfferings struct {
+	BranchRef
+	ServiceID       domain.ServiceID
+	ExpectedVersion int
+	Offerings       []OfferingInput
+}
+
 // ServiceHandlers are the service use cases. Who may do what:
 //
-//	list           anyone working at the branch (and the owner)
-//	create, edit   the owner, or a manager of the branch
+//	list                          anyone working at the branch (and the owner)
+//	create, edit, set offerings   the owner, or a manager of the branch
 type ServiceHandlers struct {
 	services domain.Services
 	access   Access
@@ -143,6 +162,47 @@ func (h *ServiceHandlers) Update(ctx context.Context, cmd UpdateService) (*domai
 	})
 	if err != nil {
 		return nil, fmt.Errorf("update service: %w", err)
+	}
+	return updated, nil
+}
+
+// SetOfferings replaces who performs the service. Everyone listed must work
+// at the branch; the version check is the service's, as offerings are part
+// of it.
+func (h *ServiceHandlers) SetOfferings(ctx context.Context, cmd SetOfferings) (*domain.Service, error) {
+	if err := h.access.Branch(ctx, cmd.Actor, cmd.BusinessID, cmd.BranchID, RoleManager); err != nil {
+		return nil, err
+	}
+	offerings := make([]domain.Offering, 0, len(cmd.Offerings))
+	staff := make([]shared.StaffID, 0, len(cmd.Offerings))
+	for _, in := range cmd.Offerings {
+		o := domain.Offering{Staff: in.Staff, Duration: in.Duration}
+		if in.Price != nil {
+			p, err := money(*in.Price)
+			if err != nil {
+				return nil, err
+			}
+			o.Price = &p
+		}
+		offerings = append(offerings, o)
+		staff = append(staff, in.Staff)
+	}
+	if len(offerings) > domain.MaxOfferings {
+		return nil, domain.ErrTooManyOfferings // before asking business about each of them
+	}
+	if err := h.access.StaffAtBranch(ctx, cmd.BusinessID, cmd.BranchID, staff); err != nil {
+		return nil, err
+	}
+	var updated *domain.Service
+	err := h.services.Update(ctx, cmd.BusinessID, cmd.BranchID, cmd.ServiceID, cmd.ExpectedVersion, func(s *domain.Service) error {
+		if err := s.SetOfferings(offerings, h.clock.Now()); err != nil {
+			return err
+		}
+		updated = s
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("set offerings: %w", err)
 	}
 	return updated, nil
 }

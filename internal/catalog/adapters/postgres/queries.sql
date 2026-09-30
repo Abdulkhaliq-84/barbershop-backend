@@ -27,3 +27,21 @@ UPDATE catalog.services SET
     duration_minutes = @duration_minutes, price_amount = @price_amount, price_currency = @price_currency,
     active = @active, sort_order = @sort_order, version = @version, updated_at = @updated_at
 WHERE id = @id AND version = @expected_version;
+
+-- name: OfferingsByBranch :many
+SELECT o.* FROM catalog.service_offerings o
+JOIN catalog.services s ON s.business_id = o.business_id AND s.id = o.service_id
+WHERE s.business_id = $1 AND s.branch_id = $2
+ORDER BY o.service_id, o.staff_id;
+
+-- name: OfferingsByService :many
+SELECT * FROM catalog.service_offerings
+WHERE business_id = $1 AND service_id = $2
+ORDER BY staff_id;
+
+-- name: DeleteOfferings :exec
+DELETE FROM catalog.service_offerings WHERE business_id = $1 AND service_id = $2;
+
+-- name: InsertOffering :exec
+INSERT INTO catalog.service_offerings (business_id, service_id, staff_id, price_amount, price_currency, duration_minutes)
+VALUES (@business_id, @service_id, @staff_id, sqlc.narg(price_amount), sqlc.narg(price_currency), sqlc.narg(duration_minutes));

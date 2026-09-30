@@ -38,3 +38,28 @@ func (h *AccessHandler) Branch(ctx context.Context, actor shared.UserID, busines
 	}
 	return member.AuthorizeBranch(need, branch)
 }
+
+// StaffAtBranch checks that every one of staff is active staff of business
+// working at branch (the owner works at all of them). ErrNotFound names no
+// one in particular: the caller already knows who they asked about.
+func (h *AccessHandler) StaffAtBranch(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) error {
+	if len(staff) == 0 {
+		return nil
+	}
+	members, err := h.staff.List(ctx, business)
+	if err != nil {
+		return fmt.Errorf("staff at branch: %w", err)
+	}
+	working := make(map[shared.StaffID]bool, len(members))
+	for _, m := range members {
+		if m.IsActive() && m.WorksAt(branch) {
+			working[m.ID()] = true
+		}
+	}
+	for _, id := range staff {
+		if !working[id] {
+			return domain.ErrNotFound
+		}
+	}
+	return nil
+}

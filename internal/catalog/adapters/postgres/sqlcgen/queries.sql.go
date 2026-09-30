@@ -10,7 +10,48 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const deleteOfferings = `-- name: DeleteOfferings :exec
+DELETE FROM catalog.service_offerings WHERE business_id = $1 AND service_id = $2
+`
+
+type DeleteOfferingsParams struct {
+	BusinessID uuid.UUID
+	ServiceID  uuid.UUID
+}
+
+func (q *Queries) DeleteOfferings(ctx context.Context, arg DeleteOfferingsParams) error {
+	_, err := q.db.Exec(ctx, deleteOfferings, arg.BusinessID, arg.ServiceID)
+	return err
+}
+
+const insertOffering = `-- name: InsertOffering :exec
+INSERT INTO catalog.service_offerings (business_id, service_id, staff_id, price_amount, price_currency, duration_minutes)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertOfferingParams struct {
+	BusinessID      uuid.UUID
+	ServiceID       uuid.UUID
+	StaffID         uuid.UUID
+	PriceAmount     pgtype.Int8
+	PriceCurrency   pgtype.Text
+	DurationMinutes pgtype.Int2
+}
+
+func (q *Queries) InsertOffering(ctx context.Context, arg InsertOfferingParams) error {
+	_, err := q.db.Exec(ctx, insertOffering,
+		arg.BusinessID,
+		arg.ServiceID,
+		arg.StaffID,
+		arg.PriceAmount,
+		arg.PriceCurrency,
+		arg.DurationMinutes,
+	)
+	return err
+}
 
 const insertService = `-- name: InsertService :exec
 
@@ -64,6 +105,83 @@ func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) er
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const offeringsByBranch = `-- name: OfferingsByBranch :many
+SELECT o.business_id, o.service_id, o.staff_id, o.price_amount, o.price_currency, o.duration_minutes FROM catalog.service_offerings o
+JOIN catalog.services s ON s.business_id = o.business_id AND s.id = o.service_id
+WHERE s.business_id = $1 AND s.branch_id = $2
+ORDER BY o.service_id, o.staff_id
+`
+
+type OfferingsByBranchParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+}
+
+func (q *Queries) OfferingsByBranch(ctx context.Context, arg OfferingsByBranchParams) ([]CatalogServiceOffering, error) {
+	rows, err := q.db.Query(ctx, offeringsByBranch, arg.BusinessID, arg.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CatalogServiceOffering{}
+	for rows.Next() {
+		var i CatalogServiceOffering
+		if err := rows.Scan(
+			&i.BusinessID,
+			&i.ServiceID,
+			&i.StaffID,
+			&i.PriceAmount,
+			&i.PriceCurrency,
+			&i.DurationMinutes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const offeringsByService = `-- name: OfferingsByService :many
+SELECT business_id, service_id, staff_id, price_amount, price_currency, duration_minutes FROM catalog.service_offerings
+WHERE business_id = $1 AND service_id = $2
+ORDER BY staff_id
+`
+
+type OfferingsByServiceParams struct {
+	BusinessID uuid.UUID
+	ServiceID  uuid.UUID
+}
+
+func (q *Queries) OfferingsByService(ctx context.Context, arg OfferingsByServiceParams) ([]CatalogServiceOffering, error) {
+	rows, err := q.db.Query(ctx, offeringsByService, arg.BusinessID, arg.ServiceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CatalogServiceOffering{}
+	for rows.Next() {
+		var i CatalogServiceOffering
+		if err := rows.Scan(
+			&i.BusinessID,
+			&i.ServiceID,
+			&i.StaffID,
+			&i.PriceAmount,
+			&i.PriceCurrency,
+			&i.DurationMinutes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const serviceForUpdate = `-- name: ServiceForUpdate :one

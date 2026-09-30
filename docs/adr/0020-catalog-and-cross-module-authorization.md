@@ -29,6 +29,15 @@ without copying staff data or reading `business`'s tables.
   of that branch, adds and edits them.
 - **Services are never deleted**, only deactivated (`active: false`): appointments will point
   at them. Edits use the same `If-Match` version check as branches.
+- **Offerings (M4.2): who performs a service.**
+  - They are part of the `Service` aggregate. `PUT …/offerings` replaces the whole list, under
+    the service's `If-Match` version.
+  - Each offering may set its own price or duration, following the same rules as the service.
+  - Anyone on the staff may be listed (owners and managers who also cut hair included), but
+    only people working at that branch.
+  - `business.Module.StaffAtBranch` checks that before anything is saved.
+  - `staff_id` has no foreign key into `business`. A composite key `(business_id, service_id)`
+    keeps offerings inside their business.
 - **Rules:**
   - duration 5–480 minutes, in 5-minute steps;
   - price 0–100,000 SAR, in halalas, VAT-inclusive, SAR only;
@@ -43,6 +52,9 @@ without copying staff data or reading `business`'s tables.
 - Later, `business` will need to know whether a branch has active services before it can be
   published. It can't import `catalog`, so that will come through an event or a function wired
   in `main`, like billing's trial (ADR-0019).
-- `scheduling` (M4.3) and barber offerings (M4.2) use the same `AuthorizeBranch`.
+- `scheduling` (M4.3) uses the same `AuthorizeBranch`.
+- When someone leaves a branch or is deactivated, their offerings stay in the table. Booking
+  (M5) will only offer people who are active staff at the branch at booking time, so a stale
+  offering can't be booked.
 - No catalog events yet (`ServiceCreated`…). They arrive with their first subscriber, discovery
   (M6).

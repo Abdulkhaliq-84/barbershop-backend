@@ -142,6 +142,44 @@ func (h *Handlers) UpdateService(ctx context.Context, req apigen.UpdateServiceRe
 	return apigen.UpdateService200JSONResponse(toAPIService(s)), nil
 }
 
+// SetServiceOfferings handles PUT …/services/{service_id}/offerings.
+func (h *Handlers) SetServiceOfferings(ctx context.Context, req apigen.SetServiceOfferingsRequestObject) (apigen.SetServiceOfferingsResponseObject, error) {
+	fail := func(err error) (apigen.SetServiceOfferingsResponseObject, error) {
+		problem, headers := h.problem(ctx, err)
+		return apigen.SetServiceOfferingsdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return fail(errNoPrincipal)
+	}
+	version, err := parseIfMatch(req.Params.IfMatch)
+	if err != nil {
+		return fail(err)
+	}
+	cmd := app.SetOfferings{
+		BranchRef:       branchRef(p.UserID, req.BusinessId, req.BranchId),
+		ServiceID:       shared.IDFromUUID[domain.ServiceTag](req.ServiceId),
+		ExpectedVersion: version,
+		Offerings:       make([]app.OfferingInput, 0, len(req.Body.Offerings)),
+	}
+	for _, o := range req.Body.Offerings {
+		in := app.OfferingInput{Staff: shared.IDFromUUID[shared.StaffTag](o.StaffId)}
+		if o.Price != nil {
+			in.Price = &app.Money{Amount: o.Price.Amount, Currency: string(o.Price.Currency)}
+		}
+		if o.DurationMinutes != nil {
+			d := time.Duration(*o.DurationMinutes) * time.Minute
+			in.Duration = &d
+		}
+		cmd.Offerings = append(cmd.Offerings, in)
+	}
+	s, err := h.services.SetOfferings(ctx, cmd)
+	if err != nil {
+		return fail(err)
+	}
+	return apigen.SetServiceOfferings200JSONResponse(toAPIService(s)), nil
+}
+
 // problem maps a use-case error to an API error. Unknown errors are bugs or
 // outages: logged, and answered with a generic 500.
 func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apigen.ProblemResponseHeaders) {
@@ -174,6 +212,12 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "price: 0 to 10,000,000 halalas (100,000 SAR)"
 	case errors.Is(err, domain.ErrInvalidSort):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "sort_order: 0 to 1000"
+	case errors.Is(err, domain.ErrUnknownStaff):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "offerings: everyone listed must be active staff working at this branch"
+	case errors.Is(err, domain.ErrDuplicateOffering):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "offerings: each staff member at most once"
+	case errors.Is(err, domain.ErrTooManyOfferings):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "offerings: at most 100"
 	default:
 		h.logger.ErrorContext(ctx, "catalog request failed", slog.String("error_type", fmt.Sprintf("%T", err)))
 	}
@@ -209,12 +253,25 @@ func toAPIService(s *domain.Service) apigen.Service {
 		Category:        string(d.Category),
 		Name:            toAPIText(d.Name),
 		DurationMinutes: int(d.Duration / time.Minute),
-		Price:           apigen.Money{Amount: d.Price.Amount(), Currency: apigen.MoneyCurrency(d.Price.Currency())},
+		Price:           toAPIMoney(d.Price),
+		Offerings:       make([]apigen.Offering, 0, len(s.Offerings())),
 		Active:          s.IsActive(),
 		SortOrder:       d.SortOrder,
 		Version:         s.Version(),
 		CreatedAt:       s.CreatedAt(),
 		UpdatedAt:       s.UpdatedAt(),
+	}
+	for _, o := range s.Offerings() {
+		off := apigen.Offering{StaffId: o.Staff.UUID()}
+		if o.Price != nil {
+			p := toAPIMoney(*o.Price)
+			off.Price = &p
+		}
+		if o.Duration != nil {
+			m := int(*o.Duration / time.Minute)
+			off.DurationMinutes = &m
+		}
+		out.Offerings = append(out.Offerings, off)
 	}
 	if d.Description != (domain.Description{}) {
 		desc := apigen.ServiceDescription{}
@@ -227,6 +284,10 @@ func toAPIService(s *domain.Service) apigen.Service {
 		out.Description = &desc
 	}
 	return out
+}
+
+func toAPIMoney(m shared.Money) apigen.Money {
+	return apigen.Money{Amount: m.Amount(), Currency: apigen.MoneyCurrency(m.Currency())}
 }
 
 func toAPIText(t shared.LocalizedText) apigen.LocalizedText {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type BillingSubscription struct {
@@ -120,6 +121,15 @@ type CatalogService struct {
 	Version         int32
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type CatalogServiceOffering struct {
+	BusinessID      uuid.UUID
+	ServiceID       uuid.UUID
+	StaffID         uuid.UUID
+	PriceAmount     pgtype.Int8
+	PriceCurrency   pgtype.Text
+	DurationMinutes pgtype.Int2
 }
 
 type IamOtpChallenge struct {

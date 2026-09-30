@@ -14,4 +14,8 @@ var (
 	ErrInvalidDuration = errors.New("catalog: duration must be 5 to 480 minutes, in steps of 5")
 	ErrInvalidPrice    = errors.New("catalog: price must be 0 to 100,000 SAR")
 	ErrInvalidSort     = errors.New("catalog: sort order must be 0 to 1000")
+
+	ErrUnknownStaff      = errors.New("catalog: not someone working at this branch")
+	ErrDuplicateOffering = errors.New("catalog: a staff member is listed twice")
+	ErrTooManyOfferings  = errors.New("catalog: too many offerings")
 )

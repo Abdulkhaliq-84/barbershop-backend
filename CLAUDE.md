@@ -24,7 +24,8 @@ invitations by SMS link, accepted by the invited phone, and branch-scoped manage
 River outbox and `worker` role, and the `billing` module — a 30-day trial on approval, plan limits on
 branches and staff (ADR-0019). M3 is complete. M4 (catalog + scheduling) is in progress: M4.1 the
 `catalog` module — service categories and each branch's services — and `business.AuthorizeBranch`
-for modules that keep data per branch (ADR-0020).
+for modules that keep data per branch (ADR-0020); M4.2 offerings — who performs each service, with
+their own price or duration.
 
 ## 2. Where things are
 

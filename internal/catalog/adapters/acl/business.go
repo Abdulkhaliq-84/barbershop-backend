@@ -37,3 +37,12 @@ func (a *BusinessAccess) Branch(ctx context.Context, actor shared.UserID, busine
 	}
 	return err
 }
+
+// StaffAtBranch checks that each staff member works at the branch.
+func (a *BusinessAccess) StaffAtBranch(ctx context.Context, businessID shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) error {
+	err := a.business.StaffAtBranch(ctx, businessID, branch, staff)
+	if errors.Is(err, business.ErrNotFound) {
+		return domain.ErrUnknownStaff
+	}
+	return err
+}

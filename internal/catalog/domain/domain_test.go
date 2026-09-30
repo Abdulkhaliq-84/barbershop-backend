@@ -109,3 +109,66 @@ func TestEditService(t *testing.T) {
 		t.Errorf("bad edit changed the service: %v, %+v", err, s)
 	}
 }
+
+func TestSetOfferings(t *testing.T) {
+	t.Parallel()
+	s, err := domain.NewService(shared.NewID[domain.ServiceTag](), shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag](), details(t), t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := shared.NewID[shared.StaffTag](), shared.NewID[shared.StaffTag]()
+	price, longer := shared.Halalas(9000), 45*time.Minute
+	later := t0.Add(time.Hour)
+	if err := s.SetOfferings([]domain.Offering{{Staff: b, Price: &price}, {Staff: a, Duration: &longer}}, later); err != nil {
+		t.Fatal(err)
+	}
+	offs := s.Offerings()
+	if s.Version() != 2 || !s.UpdatedAt().Equal(later.Truncate(time.Microsecond)) || len(offs) != 2 {
+		t.Fatalf("service = %+v, offerings %+v", s, offs)
+	}
+	if offs[0].Staff.String() > offs[1].Staff.String() {
+		t.Error("offerings are not in staff order")
+	}
+	for _, o := range offs {
+		switch o.Staff {
+		case a:
+			if o.PriceOr(s.Details().Price).Amount() != 6000 || o.DurationOr(s.Details().Duration) != longer {
+				t.Errorf("a = %+v", o)
+			}
+		case b:
+			if o.PriceOr(s.Details().Price).Amount() != 9000 || o.DurationOr(s.Details().Duration) != 30*time.Minute {
+				t.Errorf("b = %+v", o)
+			}
+		}
+	}
+
+	sar := func(n int64) *shared.Money { m, _ := shared.NewMoney(n, shared.SAR); return &m }
+	dur := func(d time.Duration) *time.Duration { return &d }
+	tooMany := make([]domain.Offering, domain.MaxOfferings+1)
+	for i := range tooMany {
+		tooMany[i] = domain.Offering{Staff: shared.NewID[shared.StaffTag]()}
+	}
+	for name, tt := range map[string]struct {
+		offerings []domain.Offering
+		want      error
+	}{
+		"twice":          {[]domain.Offering{{Staff: a}, {Staff: a}}, domain.ErrDuplicateOffering},
+		"nobody":         {[]domain.Offering{{}}, domain.ErrUnknownStaff},
+		"7 minutes":      {[]domain.Offering{{Staff: a, Duration: dur(7 * time.Minute)}}, domain.ErrInvalidDuration},
+		"negative price": {[]domain.Offering{{Staff: a, Price: sar(-1)}}, domain.ErrInvalidPrice},
+		"no currency":    {[]domain.Offering{{Staff: a, Price: &shared.Money{}}}, domain.ErrInvalidPrice},
+		"too many":       {tooMany, domain.ErrTooManyOfferings},
+	} {
+		if err := s.SetOfferings(tt.offerings, later); !errors.Is(err, tt.want) {
+			t.Errorf("%s: error = %v, want %v", name, err, tt.want)
+		}
+	}
+	if s.Version() != 2 || len(s.Offerings()) != 2 {
+		t.Error("refused offerings changed the service")
+	}
+	// A copy: changing what Offerings returned changes nothing.
+	s.Offerings()[0].Staff = shared.StaffID{}
+	if s.Offerings()[0].Staff.IsZero() {
+		t.Error("Offerings returned the service's own slice")
+	}
+}

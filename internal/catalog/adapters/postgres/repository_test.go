@@ -192,3 +192,87 @@ func TestSchemaConstraints(t *testing.T) {
 		}
 	}
 }
+
+func TestOfferingsRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	repo := postgres.NewServices(pool)
+	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
+	first, second := newService(t, business, branch, 0, t0), newService(t, business, branch, 1, t0)
+	for _, s := range []*domain.Service{first, second} {
+		if err := repo.Add(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := shared.NewID[shared.StaffTag](), shared.NewID[shared.StaffTag]()
+	price, longer := shared.Halalas(9000), 45*time.Minute
+	set := func(s *domain.Service, version int, offerings ...domain.Offering) error {
+		return repo.Update(ctx, business, branch, s.ID(), version, func(svc *domain.Service) error {
+			return svc.SetOfferings(offerings, t0.Add(time.Hour))
+		})
+	}
+	if err := set(first, 1, domain.Offering{Staff: a, Price: &price}, domain.Offering{Staff: b, Duration: &longer}); err != nil {
+		t.Fatal(err)
+	}
+	if err := set(second, 1, domain.Offering{Staff: a}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.List(ctx, business, branch)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("List = %d, %v", len(list), err)
+	}
+	got := map[domain.ServiceID][]domain.Offering{list[0].ID(): list[0].Offerings(), list[1].ID(): list[1].Offerings()}
+	if len(got[first.ID()]) != 2 || len(got[second.ID()]) != 1 {
+		t.Fatalf("offerings = %+v", got)
+	}
+	for _, o := range got[first.ID()] {
+		switch o.Staff {
+		case a:
+			if o.Price == nil || o.Price.Amount() != 9000 || o.Duration != nil {
+				t.Errorf("a = %+v", o)
+			}
+		case b:
+			if o.Price != nil || o.Duration == nil || *o.Duration != longer {
+				t.Errorf("b = %+v", o)
+			}
+		default:
+			t.Errorf("unexpected staff %v", o.Staff)
+		}
+	}
+	// Replacing keeps nothing of the old list; an ordinary edit keeps it.
+	if err := set(first, 2, domain.Offering{Staff: b}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Update(ctx, business, branch, first.ID(), 3, func(svc *domain.Service) error {
+		return svc.Edit(svc.Details(), false, t0.Add(2*time.Hour))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = repo.List(ctx, business, branch)
+	for _, s := range list {
+		if s.ID() == first.ID() && (len(s.Offerings()) != 1 || s.Offerings()[0].Staff != b || s.Offerings()[0].Price != nil) {
+			t.Errorf("after replace and edit = %+v", s.Offerings())
+		}
+	}
+	// An offering can't point at another business's service, and its
+	// override follows the same rules as the service.
+	for name, tt := range map[string]struct {
+		business shared.BusinessID
+		columns  string
+	}{
+		"service_offerings_business_id_service_id_fkey": {shared.NewID[shared.BusinessTag](), ""},
+		"service_offerings_duration_minutes_check":      {business, ", duration_minutes) VALUES ($1, $2, $3, 7"},
+		"service_offerings_check":                       {business, ", price_amount) VALUES ($1, $2, $3, 100"},
+	} {
+		sql := `INSERT INTO catalog.service_offerings (business_id, service_id, staff_id` + tt.columns + `)`
+		if tt.columns == "" {
+			sql = `INSERT INTO catalog.service_offerings (business_id, service_id, staff_id) VALUES ($1, $2, $3)`
+		}
+		_, err := pool.Exec(ctx, sql, tt.business.UUID(), second.ID().UUID(), shared.NewID[shared.StaffTag]().UUID())
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != name {
+			t.Errorf("%s: error = %v", name, err)
+		}
+	}
+}

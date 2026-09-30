@@ -15,9 +15,22 @@ import (
 
 var t0 = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 
-// access answers from a table: (actor, branch) → the highest role there.
+// access answers from a table: (actor, branch) → the highest role there,
+// and which staff work at which branch.
 type access struct {
-	roles map[shared.UserID]map[shared.BranchID]app.Role
+	roles  map[shared.UserID]map[shared.BranchID]app.Role
+	staff  map[shared.StaffID]shared.BranchID
+	checks *int // StaffAtBranch calls
+}
+
+func (a access) StaffAtBranch(_ context.Context, _ shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) error {
+	*a.checks++
+	for _, id := range staff {
+		if a.staff[id] != branch {
+			return domain.ErrUnknownStaff
+		}
+	}
+	return nil
 }
 
 func (a access) Branch(_ context.Context, actor shared.UserID, _ shared.BusinessID, branch shared.BranchID, need app.Role) error {
@@ -71,7 +84,7 @@ func (s *store) Update(_ context.Context, business shared.BusinessID, branch sha
 		if svc.Version() != expected {
 			return domain.ErrVersionConflict
 		}
-		c := domain.RehydrateService(svc.ID(), svc.BusinessID(), svc.BranchID(), svc.Details(), svc.IsActive(), svc.Version(), svc.CreatedAt(), svc.UpdatedAt())
+		c := domain.RehydrateService(svc.ID(), svc.BusinessID(), svc.BranchID(), svc.Details(), svc.Offerings(), svc.IsActive(), svc.Version(), svc.CreatedAt(), svc.UpdatedAt())
 		if err := fn(c); err != nil {
 			return err
 		}
@@ -82,6 +95,8 @@ func (s *store) Update(_ context.Context, business shared.BusinessID, branch sha
 }
 
 type fixture struct {
+	barberStaff, otherStaff  shared.StaffID
+	staffChecks              int
 	store                    *store
 	h                        *app.ServiceHandlers
 	business                 shared.BusinessID
@@ -95,10 +110,15 @@ func newFixture() *fixture {
 		branch: shared.NewID[shared.BranchTag](), other: shared.NewID[shared.BranchTag](),
 		manager: shared.NewID[shared.UserTag](), barber: shared.NewID[shared.UserTag](), visitor: shared.NewID[shared.UserTag](),
 	}
-	a := access{roles: map[shared.UserID]map[shared.BranchID]app.Role{
-		f.manager: {f.branch: app.RoleManager},
-		f.barber:  {f.branch: app.RoleBarber},
-	}}
+	f.barberStaff, f.otherStaff = shared.NewID[shared.StaffTag](), shared.NewID[shared.StaffTag]()
+	a := access{
+		roles: map[shared.UserID]map[shared.BranchID]app.Role{
+			f.manager: {f.branch: app.RoleManager},
+			f.barber:  {f.branch: app.RoleBarber},
+		},
+		staff:  map[shared.StaffID]shared.BranchID{f.barberStaff: f.branch, f.otherStaff: f.other},
+		checks: &f.staffChecks,
+	}
 	f.h = app.NewServiceHandlers(f.store, a, clock.NewFake(t0))
 	return f
 }
@@ -213,5 +233,63 @@ func TestUpdate(t *testing.T) {
 	}
 	if list, _ := f.h.List(ctx, f.ref(f.manager, f.branch)); list[0].Version() != 2 {
 		t.Errorf("refused updates changed the service")
+	}
+}
+
+func TestSetOfferings(t *testing.T) {
+	t.Parallel()
+	f := newFixture()
+	ctx := t.Context()
+	s, err := f.h.Create(ctx, f.createCmd(f.manager))
+	if err != nil {
+		t.Fatal(err)
+	}
+	senior := app.Money{Amount: 9000, Currency: "SAR"}
+	longer := 45 * time.Minute
+	cmd := func(version int, offerings ...app.OfferingInput) app.SetOfferings {
+		return app.SetOfferings{BranchRef: f.ref(f.manager, f.branch), ServiceID: s.ID(), ExpectedVersion: version, Offerings: offerings}
+	}
+	up, err := f.h.SetOfferings(ctx, cmd(1, app.OfferingInput{Staff: f.barberStaff, Price: &senior, Duration: &longer}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	offs := up.Offerings()
+	if up.Version() != 2 || len(offs) != 1 || offs[0].Staff != f.barberStaff ||
+		offs[0].PriceOr(up.Details().Price).Amount() != 9000 || offs[0].DurationOr(up.Details().Duration) != longer {
+		t.Fatalf("offerings = %+v (version %d)", offs, up.Version())
+	}
+
+	// Someone from another branch, or nobody at all: refused before saving.
+	f.store.calls = 0
+	for name, off := range map[string]app.OfferingInput{
+		"other branch's barber": {Staff: f.otherStaff},
+		"made-up staff":         {Staff: shared.NewID[shared.StaffTag]()},
+	} {
+		if _, err := f.h.SetOfferings(ctx, cmd(2, off)); !errors.Is(err, domain.ErrUnknownStaff) {
+			t.Errorf("%s: error = %v", name, err)
+		}
+	}
+	if f.store.calls != 0 {
+		t.Errorf("refused offerings reached the store %d times", f.store.calls)
+	}
+	// Listed twice, or a bad override: the domain refuses.
+	bad := 7 * time.Minute
+	if _, err := f.h.SetOfferings(ctx, cmd(2, app.OfferingInput{Staff: f.barberStaff}, app.OfferingInput{Staff: f.barberStaff})); !errors.Is(err, domain.ErrDuplicateOffering) {
+		t.Errorf("twice: %v", err)
+	}
+	if _, err := f.h.SetOfferings(ctx, cmd(2, app.OfferingInput{Staff: f.barberStaff, Duration: &bad})); !errors.Is(err, domain.ErrInvalidDuration) {
+		t.Errorf("bad duration: %v", err)
+	}
+	// An empty list clears them.
+	if up, err := f.h.SetOfferings(ctx, cmd(2)); err != nil || len(up.Offerings()) != 0 || up.Version() != 3 {
+		t.Errorf("clear: %v", err)
+	}
+	// Barbers don't assign services, and nobody is checked for them.
+	f.staffChecks = 0
+	if _, err := f.h.SetOfferings(ctx, app.SetOfferings{BranchRef: f.ref(f.barber, f.branch), ServiceID: s.ID(), ExpectedVersion: 3}); !errors.Is(err, domain.ErrForbidden) {
+		t.Errorf("barber: %v", err)
+	}
+	if f.staffChecks != 0 {
+		t.Error("staff were looked up for an unauthorized caller")
 	}
 }

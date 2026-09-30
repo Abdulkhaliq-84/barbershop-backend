@@ -123,6 +123,7 @@ Client flow (Flutter):
 | GET / POST / DELETE | `…/branches/{branch_id}/closures` | manager |
 | GET / POST / PATCH | `…/branches/{branch_id}/services[/{service_id}]` — live (M4.1): GET anyone working at the branch; POST/PATCH owner or a manager of the branch (`If-Match`); deactivate with `"active": false` | manager |
 | GET | `/v1/service-categories` — live (M4.1), public reference data | — |
+| PUT | `…/branches/{branch_id}/services/{service_id}/offerings` — live (M4.2): who performs it, with optional own price/duration; replaces the list; `If-Match` | manager |
 | GET | `/v1/businesses/{business_id}/staff` — live (M3.5) | manager |
 | GET / POST | `/v1/businesses/{business_id}/staff/invitations` — live (M3.5): invite by phone, texts a 7-day link | owner |
 | DELETE | `/v1/businesses/{business_id}/staff/invitations/{invitation_id}` — live (M3.5): revoke | owner |

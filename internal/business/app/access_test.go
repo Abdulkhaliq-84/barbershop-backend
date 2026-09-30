@@ -59,3 +59,48 @@ func TestAccessBranch(t *testing.T) {
 		}
 	}
 }
+
+func TestStaffAtBranch(t *testing.T) {
+	t.Parallel()
+	f := newBranchFixture(t)
+	ctx := t.Context()
+	mine, err := f.branches.Create(ctx, createCmd(f.owner, f.business))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := f.branches.Create(ctx, createCmd(f.owner, f.business))
+	if err != nil {
+		t.Fatal(err)
+	}
+	barber, elsewhere, former := shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag]()
+	f.store.addStaff(f.business, barber, domain.RoleBarber, true, mine.ID())
+	f.store.addStaff(f.business, elsewhere, domain.RoleBarber, true, other.ID())
+	f.store.addStaff(f.business, former, domain.RoleBarber, false, mine.ID())
+	staffID := func(user shared.UserID) shared.StaffID {
+		t.Helper()
+		m, err := f.store.Membership(ctx, f.business, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.ID()
+	}
+	access := app.NewAccessHandler(f.store, f.branchStore)
+
+	// The owner works at every branch; a barber at their own.
+	if err := access.StaffAtBranch(ctx, f.business, mine.ID(), []shared.StaffID{staffID(f.owner), staffID(barber)}); err != nil {
+		t.Errorf("owner and barber: %v", err)
+	}
+	if err := access.StaffAtBranch(ctx, f.business, mine.ID(), nil); err != nil {
+		t.Errorf("nobody: %v", err)
+	}
+	for name, id := range map[string]shared.StaffID{
+		"barber of another branch": staffID(elsewhere),
+		"former barber":            staffID(former),
+		"made-up staff":            shared.NewID[shared.StaffTag](),
+	} {
+		err := access.StaffAtBranch(ctx, f.business, mine.ID(), []shared.StaffID{staffID(barber), id})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("%s: error = %v, want ErrNotFound", name, err)
+		}
+	}
+}
