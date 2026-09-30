@@ -19,4 +19,5 @@ var (
 	ErrInvalidTimeOff   = errors.New("scheduling: time off must end after it starts and last at most a year")
 	ErrReasonTooLong    = errors.New("scheduling: reason is at most 200 characters")
 	ErrTimeOffOverlaps  = errors.New("scheduling: overlaps other time off")
+	ErrInvalidRange     = errors.New("scheduling: the range must end after it starts and span at most 62 days")
 )

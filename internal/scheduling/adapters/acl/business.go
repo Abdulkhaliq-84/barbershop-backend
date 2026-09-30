@@ -5,6 +5,7 @@ package acl
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/app"
@@ -41,6 +42,18 @@ func (a *BusinessAccess) MemberOf(ctx context.Context, actor shared.UserID, busi
 func (a *BusinessAccess) StaffMember(ctx context.Context, businessID shared.BusinessID, staff shared.StaffID) (app.Member, error) {
 	m, err := a.business.StaffMember(ctx, businessID, staff)
 	return toMember(m), translate(err)
+}
+
+// StaffAtBranch checks that the branch is the business's and each staff
+// member works there.
+func (a *BusinessAccess) StaffAtBranch(ctx context.Context, businessID shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) error {
+	return translate(a.business.StaffAtBranch(ctx, businessID, branch, staff))
+}
+
+// BranchLocation returns the branch's time zone.
+func (a *BusinessAccess) BranchLocation(ctx context.Context, businessID shared.BusinessID, branch shared.BranchID) (*time.Location, error) {
+	loc, err := a.business.BranchLocation(ctx, businessID, branch)
+	return loc, translate(err)
 }
 
 func toMember(s business.StaffInfo) app.Member {

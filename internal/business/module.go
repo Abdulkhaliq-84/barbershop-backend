@@ -113,6 +113,13 @@ func toStaffInfo(m app.Member) StaffInfo {
 	return StaffInfo{ID: m.ID, Role: string(m.Role), Branches: m.Branches}
 }
 
+// BranchLocation returns the branch's time zone (its opening hours and
+// schedules are wall-clock times there). ErrNotFound if the branch isn't
+// the business's.
+func (m *Module) BranchLocation(ctx context.Context, business shared.BusinessID, branch shared.BranchID) (*time.Location, error) {
+	return m.access.BranchLocation(ctx, business, branch)
+}
+
 // StaffAtBranch checks that every staff ID is active staff of business
 // working at branch (the owner works at all of them); ErrNotFound if not.
 // Callers have already authorized the actor with AuthorizeBranch.

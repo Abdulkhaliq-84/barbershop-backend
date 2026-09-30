@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/business/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -107,4 +108,18 @@ func (h *AccessHandler) StaffMember(ctx context.Context, business shared.Busines
 		}
 	}
 	return Member{}, domain.ErrNotFound
+}
+
+// BranchLocation returns the branch's time zone. ErrNotFound if the branch
+// isn't the business's.
+func (h *AccessHandler) BranchLocation(ctx context.Context, business shared.BusinessID, branch shared.BranchID) (*time.Location, error) {
+	b, err := h.branches.ByID(ctx, business, branch)
+	if err != nil {
+		return nil, fmt.Errorf("branch location: %w", err)
+	}
+	loc, err := time.LoadLocation(b.Profile().Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("branch location %q: %w", b.Profile().Timezone, err)
+	}
+	return loc, nil
 }

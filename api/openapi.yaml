@@ -745,6 +745,46 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/businesses/{business_id}/branches/{branch_id}/staff/{staff_id}/working-windows:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+      - $ref: "#/components/parameters/StaffID"
+    get:
+      operationId: getWorkingWindows
+      tags: [scheduling]
+      summary: When a staff member can work at a branch (anyone working at the branch)
+      description: |
+        The branch's opening hours ∩ the person's schedule (overrides
+        included), minus their time off — as real instants within
+        [`from`, `to`), sorted and merged. A shift that started the night
+        before `from` is included from `from`. This is the calculation
+        booking uses before offering slots. At most 62 days per query.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          example: "2026-10-01T00:00:00+03:00"
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          example: "2026-10-08T00:00:00+03:00"
+      responses:
+        "200":
+          description: The windows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkingWindows"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/businesses/{business_id}/staff/{staff_id}/time-off:
     parameters:
       - $ref: "#/components/parameters/BusinessID"
@@ -2184,3 +2224,30 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TimeOff"
+
+    TimeWindow:
+      type: object
+      required: [starts_at, ends_at]
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+
+    WorkingWindows:
+      type: object
+      required: [staff_id, time_zone, data]
+      properties:
+        staff_id:
+          type: string
+          format: uuid
+        time_zone:
+          type: string
+          description: The branch's time zone, for showing the windows in local time.
+          example: Asia/Riyadh
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeWindow"

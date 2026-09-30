@@ -182,7 +182,7 @@ Time modelling (see also [persistence](persistence.md#time)):
 - Barber working windows are *intersected* with branch opening hours at calculation time (a barber
   can't work when the branch is closed); the UI warns when they don't fit.
 
-Public API used by `booking`: `WorkingWindows(ctx, branchID, staffIDs, from, to) → map[staffID][]Interval`.
+Public API used by `booking`: `WorkingWindows(ctx, businessID, branchID, staffIDs, from, to) → map[staffID][]Interval`.
 
 **Live since M4.3 (ADR-0021):** branch opening hours — `GET`/`PUT …/branches/{id}/opening-hours`, a
 whole week of `opens`/`closes` intervals in branch-local time (a `closes` at or before `opens` is the
@@ -193,6 +193,13 @@ next day; at most 4 per day; no overlaps, including Saturday into Sunday). Versi
 as instants, never overlapping (a Postgres exclusion constraint). Who: the person, the owner, or a
 manager of the branch (schedules) or of one of their branches (time off); colleagues at the branch
 can read schedules.
+
+**Live since M4.5:** working windows — for each date from the day before `from` (a shift starting
+then may run into the range), opening hours ∩ the barber's intervals starting that date (template, or
+the date's override), turned into instants in the branch's zone; minus time off; clipped to
+`[from, to)`, sorted and merged. At most 62 days per call. `GET
+…/branches/{branch_id}/staff/{staff_id}/working-windows?from=&to=` shows one person's to anyone at the
+branch; booking calls `scheduling.Module.WorkingWindows` after its own checks.
 
 Events: `OpeningHoursChanged`, `ClosureAdded`, `BarberScheduleChanged`, `TimeOffAdded`, `TimeOffRemoved`.
 

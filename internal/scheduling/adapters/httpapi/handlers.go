@@ -25,12 +25,13 @@ import (
 type Handlers struct {
 	calendars *app.CalendarHandlers
 	schedules *app.ScheduleHandlers
+	windows   *app.WindowsHandlers
 	logger    *slog.Logger
 }
 
 // NewHandlers wires the HTTP adapter to the use cases.
-func NewHandlers(calendars *app.CalendarHandlers, schedules *app.ScheduleHandlers, logger *slog.Logger) *Handlers {
-	return &Handlers{calendars: calendars, schedules: schedules, logger: logger}
+func NewHandlers(calendars *app.CalendarHandlers, schedules *app.ScheduleHandlers, windows *app.WindowsHandlers, logger *slog.Logger) *Handlers {
+	return &Handlers{calendars: calendars, schedules: schedules, windows: windows, logger: logger}
 }
 
 var (
@@ -188,6 +189,8 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, domain.ErrVersionConflict):
 		status, code, detail = http.StatusPreconditionFailed, "version_conflict", "it changed since you read it; reload and try again"
+	case errors.Is(err, domain.ErrInvalidRange):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "to must be after from, at most 62 days later"
 	case errors.Is(err, domain.ErrTimeOffOverlaps):
 		status, code, detail = http.StatusConflict, "time_off_overlaps", "it overlaps other time off; change or remove that first"
 	case errors.Is(err, errDuplicateDate):

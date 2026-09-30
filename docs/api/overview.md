@@ -130,6 +130,7 @@ Client flow (Flutter):
 | POST | `/v1/invitations/accept` `{token}` — live (M3.5): signed in with the invited phone; `404 invitation_invalid`, `409 already_staff` | invited user |
 | GET / PUT | `…/branches/{branch_id}/staff/{staff_id}/schedule` — live (M4.4): weekly template + date overrides; GET anyone at the branch; PUT the person, the owner or the branch's manager (`If-Match`, `0` first) | manager / the barber |
 | GET / POST / DELETE | `/v1/businesses/{business_id}/staff/{staff_id}/time-off[/{time_off_id}]` — live (M4.4): instants; `409 time_off_overlaps` | manager / the barber |
+| GET | `…/branches/{branch_id}/staff/{staff_id}/working-windows?from=&to=` — live (M4.5): when they can work (opening hours ∩ schedule − time off), UTC instants, at most 62 days (`422` beyond) | anyone at the branch |
 | GET | `…/branches/{branch_id}/day?date=` — per-barber timeline + KPIs (dashboard) | barber (own) / manager |
 | POST | `…/branches/{branch_id}/appointments` — staff booking / walk-in | barber |
 | POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` | barber (own) / manager |

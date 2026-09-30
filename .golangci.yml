@@ -186,6 +186,11 @@ linters:
       - path: _test\.go
         linters: [gosec]
         text: G101
+      # Property tests draw from a seeded math/rand on purpose, so a failing
+      # case replays; production code still must use crypto/rand.
+      - path: _test\.go
+        linters: [gosec]
+        text: G404
 
 issues:
   max-issues-per-linter: 0

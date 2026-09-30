@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http"
+	"net/url"
+	"slices"
 	"testing"
 )
 
@@ -246,6 +248,80 @@ func TestTimeOffAPI(t *testing.T) {
 	// Another business sees nothing.
 	other, _ := a.register(t, "0559876543", "1010000002")
 	if r := a.do(t, http.MethodGet, mine, other, ""); r.status != http.StatusNotFound {
+		t.Errorf("another business: %d", r.status)
+	}
+}
+
+func TestWorkingWindowsAPI(t *testing.T) {
+	t.Parallel()
+	a := newAPI(t)
+	tm := newTeam(t, a)
+	branch := tm.biz + "/branches/" + tm.branches[0]
+	// Riyadh (UTC+3). Open Thursday 16:00 to Friday 02:00, Friday 14:00–24:00.
+	if r := a.do(t, http.MethodPut, branch+"/opening-hours", tm.owner, `{"days":[
+		{"weekday":"thursday","intervals":[{"opens":"16:00","closes":"02:00"}]},
+		{"weekday":"friday","intervals":[{"opens":"14:00","closes":"24:00"}]}]}`, "If-Match", "0"); r.status != http.StatusOK {
+		t.Fatalf("opening hours: %d %v", r.status, r.body)
+	}
+	// The barber works Thursday 18:00 to Friday 03:00 (past closing) and
+	// Friday 15:00–20:00, with an hour off on Friday 4 October 2030.
+	if r := a.do(t, http.MethodPut, tm.schedule(0, tm.barberID), tm.barber, `{"weekly":[
+		{"weekday":"thursday","intervals":[{"opens":"18:00","closes":"03:00"}]},
+		{"weekday":"friday","intervals":[{"opens":"15:00","closes":"20:00"}]}]}`, "If-Match", "0"); r.status != http.StatusOK {
+		t.Fatalf("schedule: %d %v", r.status, r.body)
+	}
+	if r := a.do(t, http.MethodPost, tm.biz+"/staff/"+tm.barberID+"/time-off", tm.barber,
+		`{"starts_at":"2030-10-04T16:00:00+03:00","ends_at":"2030-10-04T17:00:00+03:00"}`); r.status != http.StatusCreated {
+		t.Fatalf("time off: %d %v", r.status, r.body)
+	}
+	windows := func(staff, from, to string) string {
+		return branch + "/staff/" + staff + "/working-windows?from=" + url.QueryEscape(from) + "&to=" + url.QueryEscape(to)
+	}
+	thuFri := windows(tm.barberID, "2030-10-03T00:00:00+03:00", "2030-10-05T00:00:00+03:00")
+
+	// Opening hours ∩ schedule − time off, in UTC.
+	r := a.do(t, http.MethodGet, thuFri, tm.manager, "")
+	if r.status != http.StatusOK || r.body["staff_id"] != tm.barberID || r.body["time_zone"] != "Asia/Riyadh" {
+		t.Fatalf("windows: %d %v", r.status, r.body)
+	}
+	var got []string
+	for _, w := range r.body["data"].([]any) {
+		m := w.(map[string]any)
+		got = append(got, m["starts_at"].(string)+"/"+m["ends_at"].(string))
+	}
+	want := []string{
+		"2030-10-03T15:00:00Z/2030-10-03T23:00:00Z", // Thursday 18:00 – Friday 02:00 (closing)
+		"2030-10-04T12:00:00Z/2030-10-04T13:00:00Z", // Friday 15:00–16:00
+		"2030-10-04T14:00:00Z/2030-10-04T17:00:00Z", // Friday 17:00–20:00
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("windows = %v, want %v", got, want)
+	}
+	// Someone with no schedule has no windows (not an error).
+	if r := a.do(t, http.MethodGet, windows(tm.managerID, "2030-10-03T00:00:00+03:00", "2030-10-05T00:00:00+03:00"), tm.manager, ""); r.status != http.StatusOK || len(r.body["data"].([]any)) != 0 {
+		t.Errorf("no schedule: %d %v", r.status, r.body)
+	}
+
+	for name, tt := range map[string]struct {
+		token, path string
+		status      int
+	}{
+		"the barber":                 {tm.barber, thuFri, http.StatusOK},
+		"the owner":                  {tm.owner, thuFri, http.StatusOK},
+		"barber of another branch":   {tm.otherBarber, thuFri, http.StatusForbidden},
+		"someone not at this branch": {tm.owner, windows(tm.otherID, "2030-10-03T00:00:00Z", "2030-10-04T00:00:00Z"), http.StatusNotFound},
+		"to before from":             {tm.owner, windows(tm.barberID, "2030-10-04T00:00:00Z", "2030-10-03T00:00:00Z"), http.StatusUnprocessableEntity},
+		"more than 62 days":          {tm.owner, windows(tm.barberID, "2030-10-01T00:00:00Z", "2030-12-03T00:00:00Z"), http.StatusUnprocessableEntity},
+		"no time zone":               {tm.owner, windows(tm.barberID, "2030-10-03T00:00:00", "2030-10-04T00:00:00"), http.StatusBadRequest},
+		"from missing":               {tm.owner, branch + "/staff/" + tm.barberID + "/working-windows?to=2030-10-04T00:00:00Z", http.StatusBadRequest},
+	} {
+		if r := a.do(t, http.MethodGet, tt.path, tt.token, ""); r.status != tt.status {
+			t.Errorf("%s: %d %v, want %d", name, r.status, r.body, tt.status)
+		}
+	}
+	// Another business sees nothing.
+	other, _ := a.register(t, "0559876543", "1010000002")
+	if r := a.do(t, http.MethodGet, thuFri, other, ""); r.status != http.StatusNotFound {
 		t.Errorf("another business: %d", r.status)
 	}
 }

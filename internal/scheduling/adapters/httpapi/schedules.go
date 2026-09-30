@@ -147,6 +147,29 @@ func (h *Handlers) DeleteTimeOff(ctx context.Context, req apigen.DeleteTimeOffRe
 	return apigen.DeleteTimeOff204Response{}, nil
 }
 
+// GetWorkingWindows handles GET …/staff/{staff_id}/working-windows.
+func (h *Handlers) GetWorkingWindows(ctx context.Context, req apigen.GetWorkingWindowsRequestObject) (apigen.GetWorkingWindowsResponseObject, error) {
+	fail := func(err error) (apigen.GetWorkingWindowsResponseObject, error) {
+		problem, headers := h.problem(ctx, err)
+		return apigen.GetWorkingWindowsdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return fail(errNoPrincipal)
+	}
+	windows, loc, err := h.windows.ForStaff(ctx, app.WindowsQuery{
+		StaffRef: staffRef(p.UserID, req.BusinessId, req.BranchId, req.StaffId), From: req.Params.From, To: req.Params.To,
+	})
+	if err != nil {
+		return fail(err)
+	}
+	out := apigen.GetWorkingWindows200JSONResponse{StaffId: req.StaffId, TimeZone: loc.String(), Data: make([]apigen.TimeWindow, 0, len(windows))}
+	for _, w := range windows {
+		out.Data = append(out.Data, apigen.TimeWindow{StartsAt: w.Start().UTC(), EndsAt: w.End().UTC()})
+	}
+	return out, nil
+}
+
 func toAPISchedule(s *domain.BarberSchedule) apigen.BarberSchedule {
 	out := apigen.BarberSchedule{
 		StaffId: s.StaffID().UUID(), BranchId: s.BranchID().UUID(),

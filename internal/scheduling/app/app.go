@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/domain"
@@ -32,6 +33,12 @@ type Access interface {
 	MemberOf(ctx context.Context, actor shared.UserID, business shared.BusinessID) (Member, error)
 	// StaffMember returns an active staff member of business, or ErrNotFound.
 	StaffMember(ctx context.Context, business shared.BusinessID, staff shared.StaffID) (Member, error)
+	// StaffAtBranch checks that the branch is the business's and every one
+	// of staff works there; ErrNotFound if not.
+	StaffAtBranch(ctx context.Context, business shared.BusinessID, branch shared.BranchID, staff []shared.StaffID) error
+	// BranchLocation returns the branch's time zone; ErrNotFound if the
+	// branch isn't the business's.
+	BranchLocation(ctx context.Context, business shared.BusinessID, branch shared.BranchID) (*time.Location, error)
 }
 
 // Member is a staff member, as business describes them.

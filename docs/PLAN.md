@@ -152,7 +152,7 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    midnight). *Your turn:* branch closures end-to-end.
 4. M4.4 — barber schedules (weekly template and date overrides) and time off.
 5. M4.5 — `WorkingWindows(branch, staff, from, to)`: the pure calculation booking will use
-   (property tests, time zones).
+   (property tests, time zones), and `GET …/staff/{staff_id}/working-windows` for the dashboard.
 
 ### Design track (in parallel, in Figma)
 

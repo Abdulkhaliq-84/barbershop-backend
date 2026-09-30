@@ -53,6 +53,19 @@ and Friday nights. Branches keep their own IANA time zone (M3.2).
   `scheduling` can apply these rules itself. `StaffAtBranch` now also checks that the branch
   belongs to the business: with no staff caller (customer booking, M5), the owner "works at"
   any branch ID.
+- **Working windows (M4.5)** are a pure function, `domain.WorkingWindows`:
+  - for each date from the day before `from` to the day of `to` (a shift starting the day before
+    may run into the range), intersect the opening intervals and the barber's intervals starting
+    that date, in wall-clock minutes; then turn them into instants with `time.Date` in the
+    branch's zone;
+  - subtract time off; clip to `[from, to)`; sort and merge touching windows.
+  - It's checked against a minute-by-minute oracle (property test over four zones, two with DST)
+    and fuzzed.
+  - One call covers at most 62 days (`422` beyond): booking asks a day at a time, and the
+    dashboard a week or a month.
+  - `scheduling.Module.WorkingWindows` is for booking, which does its own checks first. It
+    authorizes no caller, but refuses staff who don't work at the branch (`ErrNotFound`). The
+    `GET …/working-windows` endpoint shows one person's windows to anyone at the branch.
 - `scheduling` depends only on `business` (through its root package). It must not import
   `catalog`: booking combines the two.
 
