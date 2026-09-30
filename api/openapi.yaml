@@ -22,6 +22,10 @@ tags:
     description: Phone number + one-time code login, tokens and sessions
   - name: me
     description: The signed-in user
+  - name: businesses
+    description: Business mode — register and run a barbershop business (tenant)
+  - name: branches
+    description: Business mode — a business's shops, with location and booking policy
 
 # Protected by default: an operation is public only if it says `security: []`.
 security:
@@ -156,6 +160,210 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/me/memberships:
+    get:
+      operationId: listMyMemberships
+      tags: [me]
+      summary: The businesses the signed-in user works in, and their role
+      description: |
+        Drives the app's "Business mode" switch: an empty list means the user
+        is only a customer. Every business a user registers appears here with
+        the role `owner`. A user belongs to a handful of businesses at most,
+        so the list is not paginated.
+      responses:
+        "200":
+          description: The memberships, newest business first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses:
+    post:
+      operationId: registerBusiness
+      tags: [businesses]
+      summary: Register a business (starts as a draft)
+      description: |
+        Creates a business in `draft` status with the caller as its owner.
+        A draft is private to its staff; customers see nothing until the
+        platform approves it (submission and review arrive later in M3).
+
+        The CR number (Saudi Commercial Registration, 10 digits) is checked
+        for format only. It is claimed — made unique across the platform —
+        when the business is submitted for review, so nobody can block a
+        real shop by registering its number as a draft (ADR-0015). Registering
+        the same CR number twice as the same owner is refused with
+        `409 business_already_registered`, which also makes a retried request
+        safe: list `/v1/me/memberships` to find the business.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessRegistration"
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: getBusiness
+      tags: [businesses]
+      summary: A business, for its owner
+      description: |
+        Owner only. Callers who are not staff of the business get
+        `404 not_found` — the same answer as for a business that doesn't
+        exist, so IDs can't be probed. Staff without the owner role get
+        `403 forbidden`.
+      responses:
+        "200":
+          description: The business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateBusiness
+      tags: [businesses]
+      summary: Edit a business's names (owner, while draft or rejected)
+      description: |
+        Owner only, with the same `404` / `403` rules as `GET`. Send only the
+        fields that change; `display_name` is replaced as a whole (an omitted
+        `en` clears the English name).
+
+        Names can change only while the business is `draft` or `rejected`
+        (`409 invalid_state_transition` otherwise): after submission the
+        reviewer checks them against the CR document.
+
+        `If-Match` carries the `version` you last read. If someone changed the
+        business since, nothing is saved and you get
+        `412 version_conflict`: reload, reapply, retry. On success `version`
+        goes up by one.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessUpdate"
+      responses:
+        "200":
+          description: The updated business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Business"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+    get:
+      operationId: listBranches
+      tags: [branches]
+      summary: The business's branches
+      description: |
+        Any active staff member of the business may list its branches;
+        everyone else gets `404 not_found`. A business has a handful of
+        branches (its plan caps them), so the list is not paginated.
+      responses:
+        "200":
+          description: The branches, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createBranch
+      tags: [branches]
+      summary: Add a branch (owner)
+      description: |
+        Creates a `draft` branch. Customers can't see it until it is
+        published, which needs an approved business, services and barbers
+        (later milestones). Omitted `timezone` means `Asia/Riyadh`; omitted
+        `booking_policy` means the defaults shown in the `BookingPolicy` schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: getBranch
+      tags: [branches]
+      summary: One branch (any staff of the business)
+      description: |
+        A branch is only found inside its own business: a branch ID from
+        another business gets `404 not_found`, like an ID that doesn't exist.
+      responses:
+        "200":
+          description: The branch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateBranch
+      tags: [branches]
+      summary: Edit a branch (owner)
+      description: |
+        Send only the fields that change. `name`, `location` and
+        `booking_policy` are replaced as a whole; an empty `district` or
+        `phone` clears it. `If-Match` carries the `version` you last read
+        (`412 version_conflict` if the branch changed since).
+
+        Owners only for now: managers will edit the branches they are
+        assigned to once staff invitations exist (M3.5).
+      parameters:
+        - $ref: "#/components/parameters/IfMatchVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchUpdate"
+      responses:
+        "200":
+          description: The updated branch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -173,6 +381,33 @@ components:
       schema:
         type: string
         example: ar-SA
+
+    BusinessID:
+      name: business_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    BranchID:
+      name: branch_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    IfMatchVersion:
+      name: If-Match
+      in: header
+      required: true
+      description: The `version` you last read, e.g. `3` or `"3"`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 20
+        example: '"3"'
 
   responses:
     Problem:
@@ -212,7 +447,9 @@ components:
             `validation_failed`, `not_found`, `method_not_allowed`, `internal`,
             `not_ready`, `rate_limited`, `otp_cooldown`, `otp_invalid`,
             `otp_expired`, `otp_too_many_attempts`, `otp_locked`, `user_blocked`,
-            `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`.
+            `unauthorized`, `refresh_token_invalid`, `refresh_token_reused`,
+            `forbidden`, `business_already_registered`, `invalid_state_transition`,
+            `version_conflict`.
           example: otp_cooldown
         detail:
           type: string
@@ -323,3 +560,317 @@ components:
         created_at:
           type: string
           format: date-time
+
+    LocalizedText:
+      type: object
+      additionalProperties: false
+      required: [ar]
+      description: Text in Arabic (required) and English (optional).
+      properties:
+        ar:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: صالون الأناقة
+        en:
+          type: string
+          maxLength: 100
+          example: Elegance Barbers
+
+    BusinessRegistration:
+      type: object
+      additionalProperties: false
+      required: [display_name, legal_name, cr_number]
+      properties:
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The name on the Commercial Registration.
+          example: مؤسسة الأناقة للحلاقة
+        cr_number:
+          type: string
+          minLength: 10
+          maxLength: 20
+          description: 10-digit Commercial Registration number (Western or Arabic-Indic digits; spaces allowed).
+          example: "1010123456"
+
+    BusinessUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: The fields to change; at least one.
+      properties:
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    BusinessStatus:
+      type: string
+      enum: [draft, pending_review, active, rejected, suspended]
+      description: |
+        `draft` → `pending_review` (submitted) → `active` (approved) or
+        `rejected` (fix and resubmit); `active` ↔ `suspended` by the platform.
+
+    StaffRole:
+      type: string
+      enum: [owner, manager, barber]
+
+    Business:
+      type: object
+      required: [id, display_name, legal_name, cr_number, status, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        legal_name:
+          type: string
+        cr_number:
+          type: string
+          example: "1010123456"
+        status:
+          $ref: "#/components/schemas/BusinessStatus"
+        version:
+          type: integer
+          description: Increases on every change; send it as `If-Match` when editing.
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BusinessSummary:
+      type: object
+      required: [id, display_name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          $ref: "#/components/schemas/LocalizedText"
+        status:
+          $ref: "#/components/schemas/BusinessStatus"
+
+    Membership:
+      type: object
+      required: [business, staff_id, role]
+      properties:
+        business:
+          $ref: "#/components/schemas/BusinessSummary"
+        staff_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/StaffRole"
+
+    MembershipList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Membership"
+
+    GeoPoint:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          example: 24.6911
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          example: 46.6851
+
+    BookingPolicy:
+      type: object
+      additionalProperties: false
+      description: How a branch takes bookings. Defaults are shown as examples.
+      required: [min_lead_minutes, horizon_days, slot_interval_minutes, buffer_minutes, cancellation_window_minutes, auto_confirm, pending_expiry_minutes, max_active_bookings]
+      properties:
+        min_lead_minutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+          description: Earliest booking is now + this.
+          example: 30
+        horizon_days:
+          type: integer
+          minimum: 1
+          maximum: 180
+          description: Latest booking is today + this.
+          example: 30
+        slot_interval_minutes:
+          type: integer
+          enum: [5, 10, 15, 20, 30, 60]
+          description: Start times are offered every this many minutes.
+          example: 15
+        buffer_minutes:
+          type: integer
+          minimum: 0
+          maximum: 60
+          description: Cleanup time after each appointment.
+          example: 0
+        cancellation_window_minutes:
+          type: integer
+          minimum: 0
+          maximum: 2880
+          description: Customers may cancel until this long before the start.
+          example: 120
+        auto_confirm:
+          type: boolean
+          description: False means the shop confirms each booking.
+          example: true
+        pending_expiry_minutes:
+          type: integer
+          minimum: 5
+          maximum: 120
+          description: An unconfirmed booking expires after this (only when auto_confirm is false).
+          example: 15
+        max_active_bookings:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Future bookings one customer may hold at this branch.
+          example: 2
+
+    BranchCreate:
+      type: object
+      additionalProperties: false
+      required: [name, city_code, address, location]
+      properties:
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city_code:
+          type: string
+          pattern: "^[a-z][a-z_]{1,39}$"
+          description: A city from the app's list, e.g. `riyadh`, `jeddah`, `al_khobar`.
+          example: riyadh
+        district:
+          type: string
+          maxLength: 80
+          example: العليا
+        address:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: شارع العليا العام
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        phone:
+          type: string
+          maxLength: 64
+          description: Saudi mobile number in any common format.
+          example: "0551234567"
+        timezone:
+          type: string
+          maxLength: 64
+          description: IANA time zone of the branch (default `Asia/Riyadh`).
+          example: Asia/Riyadh
+        booking_policy:
+          $ref: "#/components/schemas/BookingPolicy"
+
+    BranchUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: The fields to change; at least one.
+      properties:
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city_code:
+          type: string
+          pattern: "^[a-z][a-z_]{1,39}$"
+        district:
+          type: string
+          maxLength: 80
+          description: Empty clears it.
+        address:
+          type: string
+          minLength: 1
+          maxLength: 200
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        phone:
+          type: string
+          maxLength: 64
+          description: Empty clears it.
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        booking_policy:
+          $ref: "#/components/schemas/BookingPolicy"
+
+    BranchStatus:
+      type: string
+      enum: [draft, published, unpublished]
+
+    Branch:
+      type: object
+      required: [id, business_id, name, city_code, address, location, timezone, booking_policy, status, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        business_id:
+          type: string
+          format: uuid
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city_code:
+          type: string
+          example: riyadh
+        district:
+          type: string
+          nullable: true
+        address:
+          type: string
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        phone:
+          type: string
+          nullable: true
+          example: "+966551234567"
+        timezone:
+          type: string
+          example: Asia/Riyadh
+        booking_policy:
+          $ref: "#/components/schemas/BookingPolicy"
+        status:
+          $ref: "#/components/schemas/BranchStatus"
+        version:
+          type: integer
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BranchList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Branch"

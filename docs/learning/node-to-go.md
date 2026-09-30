@@ -152,6 +152,28 @@ read the code from the log, and verify it with `/v1/auth/otp/verify`. Then guess
 Try this: sign in, then call `GET /v1/me` with the token, refresh twice with the *same* refresh token and
 watch the second call end the session (`refresh_token_reused`).
 
+## 2g. What M3 introduces — part 1: a second module and authorization
+
+| Idiom | Where | Node.js equivalent |
+|---|---|---|
+| **Authorize first, in the use case**: load the caller's membership, check the role, then load data | `internal/business/app/policy.go` | a `canAccess(user, shopId)` guard at the top of each service method, not only in Express middleware |
+| **404 for strangers, 403 for staff**, so IDs can't be probed | same | returning 404 instead of 403 in a NestJS guard |
+| A factory that returns **two objects created together** (business + owner) and one transaction that saves both | `domain/business.go` `RegisterBusiness`, `adapters/postgres` `Register` | `prisma.$transaction([createShop, createOwner])` |
+| **Let the database decide duplicates**: map a unique-index violation (`23505` + constraint name) to a domain error | `adapters/postgres/repository.go` | catching Prisma `P2002` |
+| **Partial unique index**: unique only for some statuses | `migrations/00005_business_onboarding.sql` | the same SQL; ORMs rarely express it |
+| **Read model**: a query-shaped struct for one screen, never saved back | `app.MembershipView`, `ForUser` | a hand-written `SELECT … JOIN` next to the ORM models |
+| **Embedding two types with the same name** needs aliases (`type iamAPI = iamhttp.Handlers`) | `cmd/server/main.go` | mixing two classes into one object with `Object.assign` |
+| Module boundaries enforced by the linter (depguard) | `.golangci.yml` | `eslint-plugin-boundaries` |
+| A whole-server test through HTTP only | `cmd/server/api_test.go` | supertest against the real `app` |
+
+| **Optimistic concurrency**: `If-Match: <version>`, a row lock, and `UPDATE … WHERE version = $n` (412 on a stale version) | `adapters/postgres` `Update`, `TestStoreParallelUpdatesOfTheSameVersion` | Mongoose's `versionKey` / `__v` check |
+| A **value object** compared with `==` (`BookingPolicy`, `BranchProfile`): all fields are comparable values | `domain/booking_policy.go` | deep-equal on a frozen object |
+| **Struct conversion** between two types with identical fields (`sqlcgen.InsertBranchParams(row)`), checked by the compiler | `adapters/postgres/branches.go` | a spread `{...row}` that nothing checks |
+| An error type carrying a safe message (`*PolicyError`) matched with `errors.As` | `domain/booking_policy.go` | `class PolicyError extends Error` + `instanceof` |
+
+Try this: register a business, then call `GET /v1/businesses/{id}` with another user's token and
+compare the answer with an ID that doesn't exist. They should be identical.
+
 ## 3. Pointers vs values (the question everyone asks)
 
 - Use **values** for small immutable things: value objects (`Money`, `PhoneNumber`, `Interval`).

@@ -100,7 +100,7 @@ membership in `business` (below) — the authorization check lives in each modul
 
 | Aggregate | Key fields | Invariants |
 |---|---|---|
-| `Business` | id, owner user id, display name {ar,en}, legal name, CR number, VAT number?, logo, status, verification (documents, submitted/reviewed at, reviewer, rejection reason) | CR is 10 digits and unique; only `Draft`/`Rejected` can be submitted; submission needs CR document + ≥ 1 branch with a location |
+| `Business` | id, owner user id, display name {ar,en}, legal name, CR number, VAT number?, logo, status, verification (documents, submitted/reviewed at, reviewer, rejection reason) | CR is 10 digits; unique among submitted/active/suspended businesses (drafts don't claim it — ADR-0015); created together with its owner; only `Draft`/`Rejected` can be submitted; submission needs CR document + ≥ 1 branch with a location |
 | `Branch` | id, business id, name {ar,en}, slug, city, district, address, location (lat/lng), phone, timezone (IANA), photos, status, **booking policy** | publishable only when business is `Active`, location set, ≥ 1 active service, ≥ 1 barber with working hours; branch count ≤ plan entitlement |
 | `StaffMember` | id, business id, user id (null until invite accepted), role, branch ids, display name, avatar, bio, active | exactly one owner; barber count ≤ plan entitlement; a barber belongs to ≥ 1 branch |
 | `Invitation` | business id, phone, role, branch ids, token hash, status, expires at | one pending invitation per phone per business |
@@ -117,6 +117,12 @@ stateDiagram-v2
   Active --> Suspended: admin suspends
   Suspended --> Active: admin reactivates
 ```
+
+**Branch (M3.2).** City is a code from the app's list (`riyadh`, `jeddah`, …), not free text, so
+customers can search by it. The location is stored as plain latitude/longitude here; map search runs
+on discovery's PostGIS read model (M6). A branch is always loaded by `(business_id, branch_id)`, so
+another business's branch ID is "not found". Any staff may read branches; only the owner creates or
+edits them until managers are assigned branches (M3.5).
 
 **Booking policy** (value object on `Branch`, defaults in brackets): minimum lead time [30 min],
 booking horizon [30 days], slot interval [15 min], buffer between appointments [0 min], customer
@@ -286,8 +292,9 @@ owner      — everything in the business: branches, staff, billing, verificatio
 platform admin — approve/reject/suspend businesses, plans, reference data
 ```
 
-Checks live in the **application layer** of each module (a `Policy` per use case), never in HTTP
-handlers only. Every business-mode request carries the tenant in the path
+Checks live in the **application layer** of each module (`authorize` in
+`internal/business/app/policy.go` opens every business-mode use case), never in HTTP handlers only.
+Non-staff get `404 not_found`, staff with too small a role `403 forbidden` (ADR-0015). Every business-mode request carries the tenant in the path
 (`/v1/businesses/{businessId}/…`) and the membership check is the first thing the use case does.
 
 ### IAM phone-level OTP security

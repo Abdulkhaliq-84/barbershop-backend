@@ -64,6 +64,20 @@ linters:
             - $gostd
             - github.com/google/uuid
             - github.com/Abdulkhaliq-84/barbershop-backend/internal/shared
+        # Modules meet only through each other's root package (module.go):
+        # never another module's domain, app or adapters (overview.md §3).
+        iam-keeps-to-itself:
+          files:
+            - "**/internal/iam/**"
+          deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
+              desc: use the business root package, never its internals
+        business-keeps-to-itself:
+          files:
+            - "**/internal/business/**"
+          deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/
+              desc: use the iam root package, never its internals
         # Platform plumbing must never depend on business modules.
         platform-has-no-business:
           files:

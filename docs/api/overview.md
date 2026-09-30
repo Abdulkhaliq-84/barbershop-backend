@@ -37,9 +37,9 @@ Error example:
 
 Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `forbidden`,
 `not_found`, `conflict`, `rate_limited`, `internal`, `otp_invalid`, `otp_expired`, `otp_too_many_attempts`,
-`otp_cooldown`, `user_blocked`, `refresh_token_reused`, `business_not_active`, `plan_limit_reached`, `slot_unavailable`,
+`otp_cooldown`, `user_blocked`, `refresh_token_reused`, `business_already_registered`, `business_not_active`, `plan_limit_reached`, `slot_unavailable`,
 `outside_booking_window`, `outside_cancellation_window`, `too_many_active_bookings`,
-`invalid_state_transition`.
+`invalid_state_transition`, `version_conflict` (412: the resource changed since you read it).
 
 ## 2. Endpoint inventory
 
@@ -52,7 +52,7 @@ Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `
 | POST | `/v1/auth/refresh` | public (refresh token) |
 | POST | `/v1/auth/logout` | user |
 | GET / PATCH | `/v1/me` | user (PATCH: owner exercise) |
-| GET | `/v1/me/memberships` → businesses & roles (drives "Business mode" switch) | user |
+| GET | `/v1/me/memberships` → businesses & roles (drives "Business mode" switch) — live (M3.1) | user |
 | POST / DELETE | `/v1/me/devices` (FCM token) | user — M7 |
 
 **Phone OTP login (M2.2).** Request and verify are live; verify returns `{user, is_new_user, tokens}`.
@@ -110,12 +110,12 @@ Client flow (Flutter):
 
 | Method | Path | Min role |
 |---|---|---|
-| POST | `/v1/businesses` (register → Draft) | user |
-| GET / PATCH | `/v1/businesses/{business_id}` | owner |
+| POST | `/v1/businesses` (register → Draft) — live (M3.1) | user |
+| GET / PATCH | `/v1/businesses/{business_id}` — live (M3.1); PATCH edits names while draft/rejected, needs `If-Match: <version>` | owner |
 | POST | `/v1/businesses/{business_id}/verification/documents` (CR upload) | owner |
 | POST | `/v1/businesses/{business_id}/verification/submit` | owner |
-| GET / POST | `/v1/businesses/{business_id}/branches` | owner |
-| GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) | manager |
+| GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
+| GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner until managers get branches (M3.5) | manager |
 | POST | `…/branches/{branch_id}/publish` · `…/unpublish` | owner |
 | PUT | `…/branches/{branch_id}/opening-hours` | manager |
 | GET / POST / DELETE | `…/branches/{branch_id}/closures` | manager |
@@ -128,6 +128,13 @@ Client flow (Flutter):
 | POST | `…/branches/{branch_id}/appointments` — staff booking / walk-in | barber |
 | POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` | barber (own) / manager |
 | GET | `/v1/businesses/{business_id}/subscription` | owner |
+
+**Authorization (M3.1, ADR-0015).** Every business-mode use case checks the caller's membership
+first. A caller who is not active staff of `{business_id}` gets `404 not_found` — the same as for a
+business that doesn't exist — and staff whose role is too small get `403 forbidden`. Roles:
+`owner` ⊃ `manager` ⊃ `barber`. A CR number is only format-checked for a draft (10 digits, Arabic-Indic
+digits accepted); it becomes unique platform-wide when the business is submitted. Registering the same
+CR number twice as the same owner gets `409 business_already_registered`.
 
 ### Platform admin — M3
 

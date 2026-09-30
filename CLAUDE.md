@@ -14,7 +14,10 @@ one or more services, and pay at the shop. Businesses pay a **subscription plan*
 **Status**: the current milestone is the first unchecked item in the README roadmap. M1 delivered
 the walking skeleton (config, logging, HTTP server, health checks, migrations) and CI; M1.5 the
 delivery pipeline (Docker image, security scans, GHCR publishing, release-please releases); M2 the
-shared kernel and IAM (phone OTP login, access + rotating refresh tokens, `GET /v1/me`).
+shared kernel and IAM (phone OTP login, access + rotating refresh tokens, `GET /v1/me`). M3 (business
+onboarding) is in progress: M3.1 added the `business` module — register a draft business, owner
+membership, `GET /v1/me/memberships`, `PATCH` with `If-Match` versions, and the membership-first
+`authorize` policy (ADR-0015); M3.2 branches (location, city, time zone, booking policy).
 
 ## 2. Where things are
 
@@ -26,7 +29,7 @@ shared kernel and IAM (phone OTP login, access + rotating refresh tokens, `GET /
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0014) |
+| Why a decision was made | `docs/adr/` (0001–0015) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
@@ -74,7 +77,9 @@ The owner is moving from **Node.js to Go** and wants to learn, not just receive 
 
 - Layers: `domain` (stdlib + `internal/shared` only) ← `app` ← `adapters`. Never the reverse.
 - Other modules only via their **root package** public API; never another module's `domain`/`app`/`adapters`; never SQL on another module's schema.
-- Every tenant-scoped repository method takes `BusinessID`; every business-mode use case checks **membership first** (BOLA is the #1 risk).
+- Every tenant-scoped repository method takes `BusinessID`; every business-mode use case checks **membership first** (BOLA is the #1 risk):
+  `authorize` in `internal/business/app/policy.go` — non-staff get `404 not_found`, staff with too small a role `403 forbidden` (ADR-0015).
+- No foreign keys between module schemas; module boundaries are enforced by depguard. Tests that need several modules go in `cmd/server` (ADR-0015).
 - Domain events are written to the outbox **in the same transaction** as the state change; handlers are idempotent.
 - API changes start in `api/openapi.yaml`; generated code (sqlc, oapi-codegen) is never edited by hand.
 - A new architectural decision needs a new ADR in the same PR.
