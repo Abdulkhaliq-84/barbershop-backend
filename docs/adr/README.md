@@ -20,3 +20,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0013](0013-otp-phone-security.md) | Serialize OTP operations and keep phone-level failures | Accepted |
 | [0014](0014-sessions-and-access-tokens.md) | Stateless access tokens, rotating refresh sessions, auth declared in the API spec | Accepted |
 | [0015](0015-business-tenancy-and-authorization.md) | Business tenancy: membership-first authorization, CR claimed on submission, no cross-module foreign keys | Accepted |
+| [0016](0016-media-storage-and-signed-links.md) | Media: files on a storage port, private files through signed links | Accepted |

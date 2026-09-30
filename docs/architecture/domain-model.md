@@ -279,6 +279,14 @@ Uploads for logos, branch photos, avatars (public) and CR documents (private —
 short-lived signed URLs to the owner and platform admins). Validates type and size. Storage port:
 local disk in development → S3-compatible (S3 / R2) later.
 
+**Live since M3.3 (ADR-0016):**
+- A file's type is read from its first bytes: PDF, JPEG or PNG only, at most 10 MiB. It is stored
+  under its object ID.
+- Signed links (HMAC, 5 min) serve private files, as attachments.
+- `business` keeps up to 5 verification documents per business. They can change only while the
+  business is `draft` or `rejected`.
+- `business` reaches media through its own `DocumentFiles` port, implemented by an ACL adapter.
+
 ## 4. Authorization model
 
 ```

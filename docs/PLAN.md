@@ -133,7 +133,8 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    `GET /v1/me/memberships`, membership-first authorization ([ADR-0015](adr/0015-business-tenancy-and-authorization.md)).
    Plus `PATCH /v1/businesses/{id}` (edit a draft's names, `If-Match: version`, `412 version_conflict`).
 2. M3.2 — branches with a map location, city, time zone and booking policy (create, list, get, edit).
-3. M3.3 — `media` module: private CR document upload, signed URLs.
+3. M3.3 — `media` module: private CR document upload, signed URLs ([ADR-0016](adr/0016-media-storage-and-signed-links.md)).
+   *Your turn:* `DELETE /v1/businesses/{id}/verification/documents/{document_id}` (draft/rejected only).
 4. M3.4 — River outbox + `worker` role; submit for review; admin approve / reject; domain events.
    *Your turn:* suspend / reactivate.
 5. M3.5 — staff invitations (SMS deep link) and accepting them.

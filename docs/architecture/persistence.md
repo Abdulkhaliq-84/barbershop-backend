@@ -25,7 +25,7 @@ Each bounded context owns a Postgres **schema** used as a namespace:
 
 ```
 iam.users, iam.otp_challenges, iam.otp_phone_guards, iam.sessions, iam.refresh_tokens
-business.businesses, business.branches, business.staff_members, business.invitations
+business.businesses, business.branches, business.staff_members, business.verification_documents, business.invitations
 catalog.categories, catalog.services, catalog.service_offerings
 scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures,
 scheduling.barber_schedules, scheduling.schedule_intervals, scheduling.time_off

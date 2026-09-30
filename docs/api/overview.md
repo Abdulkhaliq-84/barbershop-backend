@@ -39,7 +39,8 @@ Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `
 `not_found`, `conflict`, `rate_limited`, `internal`, `otp_invalid`, `otp_expired`, `otp_too_many_attempts`,
 `otp_cooldown`, `user_blocked`, `refresh_token_reused`, `business_already_registered`, `business_not_active`, `plan_limit_reached`, `slot_unavailable`,
 `outside_booking_window`, `outside_cancellation_window`, `too_many_active_bookings`,
-`invalid_state_transition`, `version_conflict` (412: the resource changed since you read it).
+`invalid_state_transition`, `version_conflict` (412: the resource changed since you read it),
+`unsupported_media_type` (415), `payload_too_large` (413), `document_limit_reached`, `download_link_invalid` (403).
 
 ## 2. Endpoint inventory
 
@@ -112,7 +113,7 @@ Client flow (Flutter):
 |---|---|---|
 | POST | `/v1/businesses` (register → Draft) — live (M3.1) | user |
 | GET / PATCH | `/v1/businesses/{business_id}` — live (M3.1); PATCH edits names while draft/rejected, needs `If-Match: <version>` | owner |
-| POST | `/v1/businesses/{business_id}/verification/documents` (CR upload) | owner |
+| GET / POST | `/v1/businesses/{business_id}/verification/documents` (CR upload, `application/octet-stream`, ≤ 10 MiB, PDF/JPEG/PNG) — live (M3.3) | owner |
 | POST | `/v1/businesses/{business_id}/verification/submit` | owner |
 | GET / POST | `/v1/businesses/{business_id}/branches` — live (M3.2): GET any staff, POST owner | owner |
 | GET / PATCH | `/v1/businesses/{business_id}/branches/{branch_id}` (profile, location, policy) — live (M3.2): GET any staff, PATCH owner until managers get branches (M3.5) | manager |
@@ -145,6 +146,15 @@ CR number twice as the same owner gets `409 business_already_registered`.
 | POST | `/v1/admin/businesses/{business_id}/{approve\|reject\|suspend\|reactivate}` |
 | PUT | `/v1/admin/businesses/{business_id}/subscription` (assign plan) |
 | CRUD | `/v1/admin/categories`, `/v1/admin/plans`, `/v1/admin/cities` |
+
+### Media — M3.3
+
+| Method | Path | Who |
+|---|---|---|
+| GET | `/v1/media/{media_id}?expires=…&signature=…` — download through a signed link (5 min), always as an attachment | whoever holds the link |
+
+Private files (CR documents) are never in a JSON body: responses carry a relative `download_url`
+signed for 5 minutes, and the use case that returns it decides who may have it (ADR-0016).
 
 ### Operations
 
