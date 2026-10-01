@@ -12,6 +12,42 @@ import (
 	"github.com/google/uuid"
 )
 
+const keepHours = `-- name: KeepHours :execrows
+INSERT INTO discovery.branch_hours (branch_id, business_id, version, open, updated_at)
+VALUES ($1, $2, $3, ($4::text)::int4multirange, $5)
+ON CONFLICT (branch_id) DO UPDATE SET
+    business_id = excluded.business_id,
+    version     = excluded.version,
+    open        = excluded.open,
+    updated_at  = excluded.updated_at
+WHERE discovery.branch_hours.version < excluded.version
+`
+
+type KeepHoursParams struct {
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+	Version    int32
+	Open       string
+	UpdatedAt  time.Time
+}
+
+// Saves discovery's copy of a branch's opening hours, unless the copy
+// already holds this version or a newer one. open is the week as text,
+// e.g. '{[540,1260),[1980,2700)}'.
+func (q *Queries) KeepHours(ctx context.Context, arg KeepHoursParams) (int64, error) {
+	result, err := q.db.Exec(ctx, keepHours,
+		arg.BranchID,
+		arg.BusinessID,
+		arg.Version,
+		arg.Open,
+		arg.UpdatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const keepListing = `-- name: KeepListing :execrows
 
 INSERT INTO discovery.branch_listings (
@@ -132,25 +168,30 @@ func (q *Queries) KeepService(ctx context.Context, arg KeepServiceParams) (int64
 }
 
 const listingsInCity = `-- name: ListingsInCity :many
-SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
-       latitude, longitude, phone, timezone, updated_at,
+SELECT l.branch_id, l.business_id, l.version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, l.updated_at,
        (SELECT min(s.price_from) FROM discovery.branch_services s
         WHERE s.branch_id = l.branch_id AND s.offered
-          AND ($1::text IS NULL OR s.category_code = $1::text))::bigint AS price_from
+          AND ($1::text IS NULL OR s.category_code = $1::text))::bigint AS price_from,
+       coalesce(discovery.open_at(h.open, $2::timestamptz, l.timezone), false)::bool AS open_now
 FROM discovery.branch_listings l
-WHERE listed AND city_code = $2
+LEFT JOIN discovery.branch_hours h ON h.branch_id = l.branch_id
+WHERE listed AND city_code = $3
+  AND (NOT $4::bool OR discovery.open_at(h.open, $2::timestamptz, l.timezone))
   AND EXISTS (SELECT FROM discovery.branch_services s
               WHERE s.branch_id = l.branch_id AND s.offered
                 AND ($1::text IS NULL OR s.category_code = $1::text))
-  AND ($3::text IS NULL
-       OR (name_ar, branch_id) > ($3::text, $4::uuid))
-ORDER BY name_ar, branch_id
-LIMIT $5
+  AND ($5::text IS NULL
+       OR (name_ar, l.branch_id) > ($5::text, $6::uuid))
+ORDER BY name_ar, l.branch_id
+LIMIT $7
 `
 
 type ListingsInCityParams struct {
 	Category  *string
+	At        time.Time
 	CityCode  string
+	OpenOnly  bool
 	AfterName *string
 	AfterID   *uuid.UUID
 	PageSize  int32
@@ -172,16 +213,20 @@ type ListingsInCityRow struct {
 	Timezone   string
 	UpdatedAt  time.Time
 	PriceFrom  int64
+	OpenNow    bool
 }
 
 // A page of a city's listed branches, by Arabic name then ID, after the
 // last one of the previous page (none for the first page). Like every
 // search, only branches offering a service (in category, if given), each
-// with the least one costs: its price_from.
+// with the least one costs (price_from) and whether it is open at the
+// instant at, in its own time zone (open_now); open_only keeps only those.
 func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) ([]ListingsInCityRow, error) {
 	rows, err := q.db.Query(ctx, listingsInCity,
 		arg.Category,
+		arg.At,
 		arg.CityCode,
+		arg.OpenOnly,
 		arg.AfterName,
 		arg.AfterID,
 		arg.PageSize,
@@ -209,6 +254,7 @@ func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) 
 			&i.Timezone,
 			&i.UpdatedAt,
 			&i.PriceFrom,
+			&i.OpenNow,
 		); err != nil {
 			return nil, err
 		}
@@ -221,31 +267,36 @@ func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) 
 }
 
 const listingsMatching = `-- name: ListingsMatching :many
-SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
-       latitude, longitude, phone, timezone, updated_at,
+SELECT l.branch_id, l.business_id, l.version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, l.updated_at,
        (SELECT min(s.price_from) FROM discovery.branch_services s
         WHERE s.branch_id = l.branch_id AND s.offered
           AND ($1::text IS NULL OR s.category_code = $1::text))::bigint AS price_from,
-       word_similarity($2::text, search_text)::float8 AS sort_key
+       coalesce(discovery.open_at(h.open, $2::timestamptz, l.timezone), false)::bool AS open_now,
+       word_similarity($3::text, search_text)::float8 AS sort_key
 FROM discovery.branch_listings l
+LEFT JOIN discovery.branch_hours h ON h.branch_id = l.branch_id
 WHERE listed
-  AND (search_text LIKE '%' || $3::text || '%' OR $2::text <% search_text)
+  AND (search_text LIKE '%' || $4::text || '%' OR $3::text <% search_text)
+  AND (NOT $5::bool OR discovery.open_at(h.open, $2::timestamptz, l.timezone))
   AND EXISTS (SELECT FROM discovery.branch_services s
               WHERE s.branch_id = l.branch_id AND s.offered
                 AND ($1::text IS NULL OR s.category_code = $1::text))
-  AND ($4::text IS NULL OR city_code = $4::text)
-  AND ($5::float8 IS NULL
-       OR word_similarity($2::text, search_text)::float8 < $5::float8
-       OR (word_similarity($2::text, search_text)::float8 = $5::float8
-           AND branch_id > $6::uuid))
-ORDER BY word_similarity($2::text, search_text)::float8 DESC, branch_id
-LIMIT $7
+  AND ($6::text IS NULL OR city_code = $6::text)
+  AND ($7::float8 IS NULL
+       OR word_similarity($3::text, search_text)::float8 < $7::float8
+       OR (word_similarity($3::text, search_text)::float8 = $7::float8
+           AND l.branch_id > $8::uuid))
+ORDER BY word_similarity($3::text, search_text)::float8 DESC, l.branch_id
+LIMIT $9
 `
 
 type ListingsMatchingParams struct {
 	Category   *string
+	At         time.Time
 	Text       string
 	TextLike   string
+	OpenOnly   bool
 	CityCode   *string
 	AfterScore *float64
 	AfterID    *uuid.UUID
@@ -268,6 +319,7 @@ type ListingsMatchingRow struct {
 	Timezone   string
 	UpdatedAt  time.Time
 	PriceFrom  int64
+	OpenNow    bool
 	SortKey    float64
 }
 
@@ -277,12 +329,14 @@ type ListingsMatchingRow struct {
 // it contains the search, or a part of it is close to the search
 // (word_similarity at least pg_trgm.word_similarity_threshold, which the
 // caller sets). The trigram index finds both. sort_key is the match, 0–1.
-// Offering a service and price_from as in ListingsInCity.
+// Offering a service, price_from and open_now as in ListingsInCity.
 func (q *Queries) ListingsMatching(ctx context.Context, arg ListingsMatchingParams) ([]ListingsMatchingRow, error) {
 	rows, err := q.db.Query(ctx, listingsMatching,
 		arg.Category,
+		arg.At,
 		arg.Text,
 		arg.TextLike,
+		arg.OpenOnly,
 		arg.CityCode,
 		arg.AfterScore,
 		arg.AfterID,
@@ -311,6 +365,7 @@ func (q *Queries) ListingsMatching(ctx context.Context, arg ListingsMatchingPara
 			&i.Timezone,
 			&i.UpdatedAt,
 			&i.PriceFrom,
+			&i.OpenNow,
 			&i.SortKey,
 		); err != nil {
 			return nil, err
@@ -324,34 +379,39 @@ func (q *Queries) ListingsMatching(ctx context.Context, arg ListingsMatchingPara
 }
 
 const listingsNear = `-- name: ListingsNear :many
-SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
-       latitude, longitude, phone, timezone, updated_at,
+SELECT l.branch_id, l.business_id, l.version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, l.updated_at,
        (SELECT min(s.price_from) FROM discovery.branch_services s
         WHERE s.branch_id = l.branch_id AND s.offered
           AND ($1::text IS NULL OR s.category_code = $1::text))::bigint AS price_from,
-       (location <-> ST_MakePoint($2::float8, $3::float8)::geography)::float8 AS sort_key
+       coalesce(discovery.open_at(h.open, $2::timestamptz, l.timezone), false)::bool AS open_now,
+       (location <-> ST_MakePoint($3::float8, $4::float8)::geography)::float8 AS sort_key
 FROM discovery.branch_listings l
+LEFT JOIN discovery.branch_hours h ON h.branch_id = l.branch_id
 WHERE listed
-  AND ST_DWithin(location, ST_MakePoint($2::float8, $3::float8)::geography, $4::float8, false)
+  AND ST_DWithin(location, ST_MakePoint($3::float8, $4::float8)::geography, $5::float8, false)
+  AND (NOT $6::bool OR discovery.open_at(h.open, $2::timestamptz, l.timezone))
   AND EXISTS (SELECT FROM discovery.branch_services s
               WHERE s.branch_id = l.branch_id AND s.offered
                 AND ($1::text IS NULL OR s.category_code = $1::text))
-  AND ($5::text IS NULL OR city_code = $5::text)
-  AND ($6::text IS NULL
-       OR search_text LIKE '%' || $7::text || '%'
-       OR $6::text <% search_text)
-  AND ($8::float8 IS NULL
-       OR (location <-> ST_MakePoint($2::float8, $3::float8)::geography, branch_id)
-          > ($8::float8, $9::uuid))
-ORDER BY location <-> ST_MakePoint($2::float8, $3::float8)::geography, branch_id
-LIMIT $10
+  AND ($7::text IS NULL OR city_code = $7::text)
+  AND ($8::text IS NULL
+       OR search_text LIKE '%' || $9::text || '%'
+       OR $8::text <% search_text)
+  AND ($10::float8 IS NULL
+       OR (location <-> ST_MakePoint($3::float8, $4::float8)::geography, l.branch_id)
+          > ($10::float8, $11::uuid))
+ORDER BY location <-> ST_MakePoint($3::float8, $4::float8)::geography, l.branch_id
+LIMIT $12
 `
 
 type ListingsNearParams struct {
 	Category      *string
+	At            time.Time
 	Lng           float64
 	Lat           float64
 	RadiusM       float64
+	OpenOnly      bool
 	CityCode      *string
 	Text          *string
 	TextLike      *string
@@ -376,6 +436,7 @@ type ListingsNearRow struct {
 	Timezone   string
 	UpdatedAt  time.Time
 	PriceFrom  int64
+	OpenNow    bool
 	SortKey    float64
 }
 
@@ -385,14 +446,16 @@ type ListingsNearRow struct {
 // and ST_DWithin(…, false) agree, so the radius, the order and the cursor
 // all use the same number. The GiST index finds the candidates. sort_key
 // is the distance in metres (the same name as ListingsMatching's, so the
-// two queries share a row type). Offering a service and price_from as in
-// ListingsInCity.
+// two queries share a row type). Offering a service, price_from and
+// open_now as in ListingsInCity.
 func (q *Queries) ListingsNear(ctx context.Context, arg ListingsNearParams) ([]ListingsNearRow, error) {
 	rows, err := q.db.Query(ctx, listingsNear,
 		arg.Category,
+		arg.At,
 		arg.Lng,
 		arg.Lat,
 		arg.RadiusM,
+		arg.OpenOnly,
 		arg.CityCode,
 		arg.Text,
 		arg.TextLike,
@@ -423,6 +486,7 @@ func (q *Queries) ListingsNear(ctx context.Context, arg ListingsNearParams) ([]L
 			&i.Timezone,
 			&i.UpdatedAt,
 			&i.PriceFrom,
+			&i.OpenNow,
 			&i.SortKey,
 		); err != nil {
 			return nil, err

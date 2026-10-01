@@ -185,13 +185,13 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus, Readiness: readiness,
 	})
 	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule, Events: bus})
-	schedulingModule := scheduling.New(scheduling.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
+	schedulingModule := scheduling.New(scheduling.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule, Events: bus})
 	readiness.catalog, readiness.scheduling = catalogModule, schedulingModule
 	bookingModule := booking.New(booking.Deps{
 		Pool: pool, Clock: clock.System{}, Logger: logger,
 		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule, Events: bus,
 	})
-	discoveryModule := discovery.New(discovery.Deps{Pool: pool, Logger: logger})
+	discoveryModule := discovery.New(discovery.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
 	subscribe(bus, billingModule, discoveryModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
@@ -242,6 +242,10 @@ func subscribe(bus *outbox.Bus, billingModule *billing.Module, discoveryModule *
 	// from: services added or changed, turned off, or given barbers.
 	catalog.OnServiceChanged(bus, "discovery.keep_service", func(ctx context.Context, e catalog.ServiceChanged) error {
 		return discoveryModule.KeepService(ctx, discovery.Service(e))
+	})
+	// And of when each branch is open, for "open now".
+	scheduling.OnOpeningHoursChanged(bus, "discovery.keep_hours", func(ctx context.Context, e scheduling.OpeningHoursChanged) error {
+		return discoveryModule.KeepHours(ctx, discovery.OpeningHours(e))
 	})
 }
 

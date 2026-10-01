@@ -7,17 +7,19 @@ import (
 	"fmt"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 // Handlers are discovery's use cases.
 type Handlers struct {
 	listings domain.Listings
+	clock    clock.Clock // "open now" is open at this clock's now
 }
 
 // NewHandlers wires the use cases.
-func NewHandlers(listings domain.Listings) *Handlers {
-	return &Handlers{listings: listings}
+func NewHandlers(listings domain.Listings, clk clock.Clock) *Handlers {
+	return &Handlers{listings: listings, clock: clk}
 }
 
 // Keep applies a branch event to discovery's copy. An event can arrive more
@@ -39,14 +41,24 @@ func (h *Handlers) KeepService(ctx context.Context, s domain.Service) error {
 	return nil
 }
 
+// KeepHours applies an opening hours event to discovery's copy, the same
+// way: an older version than the copy's changes nothing.
+func (h *Handlers) KeepHours(ctx context.Context, o domain.OpeningHours) error {
+	if _, err := h.listings.KeepHours(ctx, o); err != nil {
+		return fmt.Errorf("keep opening hours of %s: %w", o.Branch, err)
+	}
+	return nil
+}
+
 // Search is what a customer looks for: the branches of a city, near a
 // point, or with a name, or several of these at once; optionally only
-// those offering a kind of service.
+// those offering a kind of service, or open now.
 type Search struct {
 	City     *shared.City     // nil: any city
 	Near     *domain.Near     // nil: no place
 	Text     string           // what the customer typed to find a name; "": any name
 	Category *shared.Category // nil: any service
+	OpenNow  bool             // only branches open now
 }
 
 // Order is how a search's results are sorted, and so what a page's
@@ -83,7 +95,7 @@ type Page struct {
 // Search returns a page of results, after the given position (nil for the
 // first page), in the search's Order.
 func (h *Handlers) Search(ctx context.Context, s Search, after *domain.Position) (Page, error) {
-	f := domain.Filter{City: s.City, Category: s.Category}
+	f := domain.Filter{City: s.City, Category: s.Category, OpenNow: s.OpenNow, At: h.clock.Now()}
 	if s.Text != "" {
 		text, err := domain.ParseQuery(s.Text)
 		if err != nil {
@@ -106,7 +118,7 @@ func (h *Handlers) Search(ctx context.Context, s Search, after *domain.Position)
 		if s.City == nil {
 			return Page{}, domain.ErrNoPlace
 		}
-		found, err = h.listings.InCity(ctx, *s.City, s.Category, after, domain.PageSize+1)
+		found, err = h.listings.InCity(ctx, f, after, domain.PageSize+1)
 	}
 	if err != nil {
 		return Page{}, fmt.Errorf("search: %w", err)

@@ -32,7 +32,7 @@ scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures (the 
 scheduling.barber_schedules, scheduling.barber_hours, scheduling.schedule_overrides,
 scheduling.override_hours, scheduling.time_off (EXCLUDE: no overlapping time off per person)
 booking.appointments, booking.appointment_items, booking.idempotency_keys
-discovery.branch_listings, discovery.branch_services  (cities are reference data in code — ADR-0027)
+discovery.branch_listings, discovery.branch_services, discovery.branch_hours  (cities are reference data in code — ADR-0027)
 billing.subscriptions  (plans are reference data in code — ADR-0019)
 notification.device_tokens, notification.deliveries
 media.objects
@@ -72,7 +72,7 @@ CREATE TABLE booking.appointments (
 CREATE INDEX ON booking.appointments (business_id, branch_id, lower(during));
 CREATE INDEX ON booking.appointments (customer_id, lower(during) DESC);
 
--- Search (M6): copies kept from events, the newest version winning (ADR-0027–0030)
+-- Search (M6): copies kept from events, the newest version winning (ADR-0027–0031)
 CREATE TABLE discovery.branch_listings (
     branch_id     uuid PRIMARY KEY,
     business_id   uuid NOT NULL,
@@ -84,7 +84,7 @@ CREATE TABLE discovery.branch_listings (
     city_code     text NOT NULL,
     latitude, longitude double precision NOT NULL,
     location      geography(Point, 4326) GENERATED ALWAYS AS (…) STORED,
-    opening_hours jsonb NOT NULL,                    -- weekly, for "open now" (M6.5)
+    timezone      text NOT NULL,                     -- IANA; "open now" is in it
     updated_at    timestamptz NOT NULL
 );
 CREATE INDEX ON discovery.branch_listings (city_code, name_ar, branch_id) WHERE listed;
@@ -102,6 +102,14 @@ CREATE TABLE discovery.branch_services (
     price_from    bigint NOT NULL                    -- the cheapest performer's, in halalas
 );
 CREATE INDEX ON discovery.branch_services (branch_id, category_code, price_from) WHERE offered;
+
+-- When each branch is open: "open now" is computed per search, by
+-- discovery.open_at(open, at, timezone), in the branch's own time zone.
+CREATE TABLE discovery.branch_hours (
+    branch_id     uuid PRIMARY KEY,
+    version       integer NOT NULL,                  -- the calendar's
+    open          int4multirange NOT NULL            -- minutes after Sunday 00:00, local
+);
 
 -- Nearby query shape
 -- SELECT … FROM discovery.branch_listings

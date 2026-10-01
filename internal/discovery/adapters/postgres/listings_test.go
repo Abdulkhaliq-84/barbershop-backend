@@ -81,7 +81,7 @@ func inCity(t *testing.T, r *postgres.Listings, code string, after *domain.Posit
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := r.InCity(t.Context(), city, nil, after, limit)
+	got, err := r.InCity(t.Context(), domain.Filter{City: &city, At: t0}, after, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,8 +661,8 @@ func TestCategoryAndPriceFrom(t *testing.T) {
 		if tt.category != "" {
 			category = new(mustCategory(t, tt.category))
 		}
-		f := domain.Filter{Category: category}
-		inCity, err1 := r.InCity(ctx, riyadh, category, nil, 10)
+		f := domain.Filter{Category: category, At: t0}
+		inCity, err1 := r.InCity(ctx, domain.Filter{City: &riyadh, Category: category, At: t0}, nil, 10)
 		nearby, err2 := r.Near(ctx, near, f, nil, 10)
 		f.Text = "صالون"
 		named, err3 := r.Matching(ctx, f, nil, 10)
@@ -692,11 +692,11 @@ func TestCategoryAndPriceFrom(t *testing.T) {
 	if _, err := r.KeepService(ctx, trim); err != nil {
 		t.Fatal(err)
 	}
-	beards, err := r.InCity(ctx, riyadh, new(mustCategory(t, "beard")), nil, 10)
+	beards, err := r.InCity(ctx, domain.Filter{City: &riyadh, Category: new(mustCategory(t, "beard")), At: t0}, nil, 10)
 	if err != nil || len(beards) != 0 {
 		t.Errorf("beard trims after it was turned off: %d, %v", len(beards), err)
 	}
-	all, err := r.InCity(ctx, riyadh, nil, nil, 10)
+	all, err := r.InCity(ctx, domain.Filter{City: &riyadh, At: t0}, nil, 10)
 	if err != nil || len(all) != 2 || all[0].Branch != both.Branch || all[0].PriceFrom != shared.Halalas(6000) {
 		t.Errorf("after the trim was turned off: %+v, %v", all, err)
 	}
@@ -748,5 +748,142 @@ func TestCategoryUsesTheIndex(t *testing.T) {
 	}
 	if strings.Contains(plan.String(), "Seq Scan on branch_services") || !strings.Contains(plan.String(), "branch_services_branch_idx") {
 		t.Errorf("the plan doesn't use the services index:\n%s", plan.String())
+	}
+}
+
+// A branch's hours keep the newest version, like the branch itself.
+func TestKeepHours(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	l := listing(t, "صالون")
+	stored := func() (version int, open string) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT version, open::text FROM discovery.branch_hours WHERE branch_id = $1`, l.Branch.UUID()).Scan(&version, &open); err != nil {
+			t.Fatal(err)
+		}
+		return version, open
+	}
+	keep := func(version int, open ...[2]int) bool {
+		t.Helper()
+		saved, err := r.KeepHours(ctx, domain.OpeningHours{Branch: l.Branch, Business: l.Business, Version: version, Open: open, UpdatedAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return saved
+	}
+	// Sunday 09:00–21:00, and Saturday 22:00 into Sunday 02:00.
+	if !keep(2, [2]int{540, 1260}, [2]int{6*1440 + 1320, 6*1440 + 1560}) || keep(2) || keep(1) {
+		t.Fatal("version 2 saved once; then neither 2 again nor 1")
+	}
+	if v, open := stored(); v != 2 || open != "{[540,1260),[9960,10200)}" {
+		t.Errorf("stored v%d %s", v, open)
+	}
+	if !keep(3) {
+		t.Fatal("closed all week (v3) wasn't saved")
+	}
+	if v, open := stored(); v != 3 || open != "{}" {
+		t.Errorf("closed: v%d %s", v, open)
+	}
+	for name, bad := range map[string][2]int{"before the week": {-5, 60}, "ending as it starts": {540, 540}, "past two weeks": {0, 2*domain.MinutesPerWeek + 1}} {
+		if _, err := r.KeepHours(ctx, domain.OpeningHours{Branch: l.Branch, Version: 9, Open: [][2]int{bad}}); !errors.Is(err, domain.ErrBadHours) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// Open now is by each branch's weekly hours, in its own time zone, at the
+// instant asked about; every search says so, and can keep only the open.
+func TestOpenNow(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	riyadh, _ := shared.ParseCity("riyadh")
+	olaya, _ := shared.NewGeoPoint(24.6911, 46.6851)
+	day := func(d, opens, minutes int) [2]int { return [2]int{d*1440 + opens, d*1440 + opens + minutes} }
+	branch := func(name, tz string, open ...[2]int) domain.Listing {
+		t.Helper()
+		l := listing(t, name)
+		l.Timezone = tz
+		keepOffering(t, r, l)
+		if open != nil {
+			if _, err := r.KeepHours(ctx, domain.OpeningHours{Branch: l.Branch, Business: l.Business, Version: 1, Open: open, UpdatedAt: t0}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return l
+	}
+	var everyDay [][2]int
+	for d := range 7 {
+		everyDay = append(everyDay, day(d, 9*60, 12*60)) // 09:00–21:00
+	}
+	days := branch("صالون النهار", "Asia/Riyadh", everyDay...)
+	nights := branch("صالون الليل", "Asia/Riyadh", day(4, 16*60, 600))                                                               // Thursday 16:00 to Friday 02:00
+	weekend := branch("صالون السبت", "Asia/Riyadh", day(6, 22*60, 240))                                                              // Saturday 22:00 to Sunday 02:00
+	dubai := branch("صالون دبي", "Asia/Dubai", day(4, 9*60, 210))                                                                    // Thursday 09:00–12:30, Dubai time
+	branch("صالون بلا مواعيد", "Asia/Riyadh")                                                                                        // hours never heard of
+	if _, err := r.KeepHours(ctx, domain.OpeningHours{Branch: branch("صالون مغلق", "Asia/Riyadh").Branch, Version: 1}); err != nil { // closed all week
+		t.Fatal(err)
+	}
+	names := map[shared.BranchID]string{days.Branch: "days", nights.Branch: "nights", weekend.Branch: "weekend", dubai.Branch: "dubai"}
+
+	utc := func(day, hour, minute, second int) time.Time {
+		return time.Date(2026, 10, day, hour, minute, second, 0, time.UTC)
+	}
+	for _, tt := range []struct {
+		what string
+		at   time.Time
+		open []string
+	}{
+		// Thursday 1 October 2026; Riyadh is UTC+3, Dubai UTC+4.
+		{"Thursday noon in Riyadh, 13:00 in Dubai", utc(1, 9, 0, 0), []string{"days"}},
+		{"Thursday 11:00 in Riyadh, noon in Dubai", utc(1, 8, 0, 0), []string{"days", "dubai"}},
+		{"a second before 09:00 in Riyadh", utc(1, 5, 59, 59), []string{"dubai"}},
+		{"09:00 in Riyadh, on the dot", utc(1, 6, 0, 0), []string{"days", "dubai"}},
+		{"a second before 21:00 in Riyadh", utc(1, 17, 59, 59), []string{"days", "nights"}},
+		{"21:00 in Riyadh, on the dot", utc(1, 18, 0, 0), []string{"nights"}},
+		{"Friday 01:00 in Riyadh, past midnight", utc(1, 22, 0, 0), []string{"nights"}},
+		{"Friday 02:00 in Riyadh, closed", utc(1, 23, 0, 0), nil},
+		{"Sunday 01:00 in Riyadh, past Saturday midnight", utc(3, 22, 0, 0), []string{"weekend"}},
+		{"Sunday noon in Riyadh", utc(4, 9, 0, 0), []string{"days"}},
+	} {
+		near := domain.Near{Point: olaya, RadiusM: 10_000}
+		all, err := r.InCity(ctx, domain.Filter{City: &riyadh, At: tt.at}, nil, 20)
+		if err != nil || len(all) != 6 {
+			t.Fatalf("%s: %d found, %v", tt.what, len(all), err)
+		}
+		var flagged []string
+		for _, f := range all {
+			if f.OpenNow {
+				flagged = append(flagged, names[f.Branch])
+			}
+		}
+		only := domain.Filter{City: &riyadh, OpenNow: true, At: tt.at}
+		inCity, err1 := r.InCity(ctx, only, nil, 20)
+		nearby, err2 := r.Near(ctx, near, only, nil, 20)
+		only.Text = "صالون"
+		named, err3 := r.Matching(ctx, only, nil, 20)
+		if err := errors.Join(err1, err2, err3); err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(flagged)
+		want := slices.Sorted(slices.Values(tt.open))
+		if !slices.Equal(flagged, want) {
+			t.Errorf("%s: flagged open %v, want %v", tt.what, flagged, want)
+		}
+		for search, got := range map[string][]domain.Found{"in a city": inCity, "near": nearby, "by name": named} {
+			var open []string
+			for _, f := range got {
+				open = append(open, names[f.Branch])
+				if !f.OpenNow {
+					t.Errorf("%s, %s: %s found but not flagged open", tt.what, search, names[f.Branch])
+				}
+			}
+			if slices.Sort(open); !slices.Equal(open, want) {
+				t.Errorf("%s, %s: %v, want %v", tt.what, search, open, want)
+			}
+		}
 	}
 }

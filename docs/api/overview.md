@@ -94,8 +94,8 @@ Client flow (Flutter):
 | Method | Path |
 |---|---|
 | GET | `/v1/cities` — live (M6.1): the cities, largest first, `{code, name}` |
-| GET | `/v1/branches?city=&lat=&lng=&radius_km=&q=&category=&cursor=` — live (M6.1–M6.4): near a place (`lat`, `lng`, `radius_km` 1–50, 10 by default) nearest first with `distance_m`; by name (`q`, Arabic-normalised, a letter off still matches) best match first; or a city's branches by Arabic name. They combine (`city` narrows; `q` with a place keeps distance order; `category` keeps branches offering a service of that kind). Only branches offering a service; each with `price_from`. 20 a page; `422 unknown_city`, `422 unknown_category`; `400` for none of a city, a place or a name. Coming: `open_now` (M6.5) |
-| GET | `/v1/branches/{branch_id}` — public profile: photos, hours, services, barbers |
+| GET | `/v1/branches?city=&lat=&lng=&radius_km=&q=&category=&open_now=&cursor=` — live (M6.1–M6.5): near a place (`lat`, `lng`, `radius_km` 1–50, 10 by default) nearest first with `distance_m`; by name (`q`, Arabic-normalised, a letter off still matches) best match first; or a city's branches by Arabic name. They combine (`city` narrows; `q` with a place keeps distance order; `category` keeps branches offering a service of that kind; `open_now=true` keeps those open at this moment). Only branches offering a service; each with `price_from` and `open_now`. 20 a page; `422 unknown_city`, `422 unknown_category`; `400` for none of a city, a place or a name |
+| GET | `/v1/branches/{branch_id}` — public profile (M6.6): hours, open now, services; photos and barbers later |
 | GET | `/v1/categories` |
 
 ### Customer booking — M5

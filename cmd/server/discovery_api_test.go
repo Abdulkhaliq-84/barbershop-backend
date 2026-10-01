@@ -66,6 +66,9 @@ func TestDiscoveryAPI(t *testing.T) {
 		priceFrom(b) != 6000 || b["price_from"].(map[string]any)["currency"] != "SAR" {
 		t.Errorf("listing = %v", b)
 	}
+	if _, ok := b["open_now"].(bool); !ok {
+		t.Errorf("open_now = %v", b["open_now"])
+	}
 	// Kept for the branch's public page (M6.5), not listed yet.
 	var phone, timezone string
 	if err := a.pool.QueryRow(t.Context(), `SELECT phone, timezone FROM discovery.branch_listings WHERE branch_id = $1`, branch).Scan(&phone, &timezone); err != nil ||
@@ -157,6 +160,44 @@ func TestDiscoveryAPI(t *testing.T) {
 	until(t, "the branch back, now for beards", func() bool { return len(near("city=riyadh&category=beard")) == 1 })
 	if got := near("city=riyadh&category=haircut"); len(got) != 0 {
 		t.Errorf("no haircut any more: %v", got)
+	}
+
+	// Open now, by the hours the owner sets. Around the clock: open
+	// whenever this runs, and kept by open_now=true. Closed all week: never.
+	week := func(interval string) string {
+		days := ""
+		for i, d := range []string{"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"} {
+			if i > 0 {
+				days += ","
+			}
+			days += `{"weekday":"` + d + `","intervals":[` + interval + `]}`
+		}
+		return `{"days":[` + days + `]}`
+	}
+	openNow := func() any {
+		got := listed("riyadh")
+		if len(got) != 1 {
+			return nil
+		}
+		return got[0].(map[string]any)["open_now"]
+	}
+	if r := a.do(t, http.MethodPut, path+"/opening-hours", owner, week(`{"opens":"00:00","closes":"00:00"}`), "If-Match", "1"); r.status != http.StatusOK {
+		t.Fatalf("around the clock: %d %v", r.status, r.body)
+	}
+	until(t, "open around the clock", func() bool { return openNow() == true })
+	for _, query := range []string{"city=riyadh&open_now=true", "lat=24.70&lng=46.69&open_now=true", "q=olaya&open_now=true", "city=riyadh&open_now=false"} {
+		if got := near(query); len(got) != 1 || got[0].(map[string]any)["open_now"] != true {
+			t.Errorf("%s: %v", query, got)
+		}
+	}
+	if r := a.do(t, http.MethodPut, path+"/opening-hours", owner, `{"days":[]}`, "If-Match", "2"); r.status != http.StatusOK {
+		t.Fatalf("closed all week: %d %v", r.status, r.body)
+	}
+	until(t, "closed all week", func() bool { return openNow() == false })
+	for _, query := range []string{"city=riyadh&open_now=true", "lat=24.70&lng=46.69&open_now=true", "q=olaya&open_now=true"} {
+		if got := near(query); len(got) != 0 {
+			t.Errorf("%s, closed: %v", query, got)
+		}
 	}
 
 	// Edited: the listing follows. Unpublished: gone.
@@ -260,6 +301,7 @@ func TestDiscoveryAPI(t *testing.T) {
 		"a city not on the list": {"city=atlantis", http.StatusUnprocessableEntity, "unknown_city"},
 		"a category not on it":   {"city=riyadh&category=massage", http.StatusUnprocessableEntity, "unknown_category"},
 		"a category alone":       {"category=haircut", http.StatusBadRequest, "validation_failed"},
+		"open_now not a boolean": {"city=riyadh&open_now=yes", http.StatusBadRequest, "validation_failed"},
 		"a city in capitals":     {"city=Riyadh", http.StatusBadRequest, "validation_failed"},
 		"no city":                {"", http.StatusBadRequest, "validation_failed"},
 		"a one-letter name":      {"q=x", http.StatusBadRequest, "validation_failed"},

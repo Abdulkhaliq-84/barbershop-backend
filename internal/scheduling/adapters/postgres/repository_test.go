@@ -48,7 +48,7 @@ func set(repo *postgres.Calendars, business shared.BusinessID, branch shared.Bra
 func TestCalendarLifecycle(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	repo := postgres.NewCalendars(migrated(t))
+	repo := postgres.NewCalendars(migrated(t), discardEvents{})
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 
 	// Never set: closed, version 0.
@@ -106,7 +106,7 @@ func TestCalendarLifecycle(t *testing.T) {
 // Two first saves at once: one wins, the other is a version conflict.
 func TestParallelFirstSaves(t *testing.T) {
 	t.Parallel()
-	repo := postgres.NewCalendars(migrated(t))
+	repo := postgres.NewCalendars(migrated(t), discardEvents{})
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 	week := hours(t, domain.WeeklyInterval{Day: time.Monday, Start: 540, Minutes: 60})
 	var (

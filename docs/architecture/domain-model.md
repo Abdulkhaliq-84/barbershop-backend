@@ -208,7 +208,8 @@ the date's override), turned into instants in the branch's zone; minus time off;
 …/branches/{branch_id}/staff/{staff_id}/working-windows?from=&to=` shows one person's to anyone at the
 branch; booking calls `scheduling.Module.WorkingWindows` after its own checks.
 
-Events: `OpeningHoursChanged`, `ClosureAdded`, `BarberScheduleChanged`, `TimeOffAdded`, `TimeOffRemoved`.
+Events: `OpeningHoursChanged` (live since M6.5: the week as of the calendar's version, ADR-0031);
+later `ClosureAdded`, `BarberScheduleChanged`, `TimeOffAdded`, `TimeOffRemoved`.
 
 ### 3.5 `booking` — Appointments ★
 
@@ -369,6 +370,14 @@ Arabic normalisation for search: strip diacritics/tatweel, unify alef forms (أ 
   one of that kind. Each branch comes with `price_from`, the least a service there costs (of
   the category, if given). Both are answered at search time from one index on the services.
 - Categories are reference data in the shared kernel (`shared.Categories`), like cities.
+
+**Live since M6.5 (ADR-0031):** open now.
+- scheduling publishes `opening_hours_changed` with the week as of the calendar's version.
+  discovery keeps it per branch as an `int4multirange` of minutes after Sunday 00:00 in the
+  branch's own time zone (an interval past Saturday midnight ends after 10,080).
+- `discovery.open_at(open, at, tz)` is the one rule: the week contains the minute `at` falls on
+  in `tz`, or that minute a week later. The instant comes from the use case's clock.
+- Every search says `open_now`; `open_now=true` keeps only the open. Holidays aren't known yet.
 
 ### 3.7 `billing` — Plans and entitlements
 
