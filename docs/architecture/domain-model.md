@@ -342,8 +342,14 @@ Arabic normalisation for search: strip diacritics/tatweel, unify alef forms (أ 
 - `GET /v1/cities` lists them; `GET /v1/branches?city=` lists a city's published branches by
   Arabic name, 20 a page, with a cursor. Both are public.
 - So far the copy holds business's part: names, city, district, address, location, phone and
-  time zone. The location becomes `geography` in M6.2; catalog's and scheduling's parts come in
-  M6.4–M6.5.
+  time zone. catalog's and scheduling's parts come in M6.4–M6.5.
+
+**Live since M6.2 (ADR-0028):** nearby search.
+- `GET /v1/branches?lat=&lng=&radius_km=`: published branches within the radius (1–50 km, 10 by
+  default), nearest first, each with `distance_m`. `city` narrows it to one city.
+- The location is a generated `geography` column with a partial GiST index. Every distance
+  (radius, order, the one shown, the cursor) is measured on a sphere, so they agree.
+- Pages continue by `(distance, branch ID)`.
 
 ### 3.7 `billing` — Plans and entitlements
 

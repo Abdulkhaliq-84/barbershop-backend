@@ -70,7 +70,43 @@ func (r *Listings) InCity(ctx context.Context, city shared.City, after *domain.P
 	return out, nil
 }
 
-func toListing(row sqlcgen.DiscoveryBranchListing) (domain.Listing, error) {
+// Near returns up to limit listed branches within near's radius, nearest
+// first then by ID, after the given position.
+func (r *Listings) Near(ctx context.Context, near domain.Near, city *shared.City, after *domain.Position, limit int) ([]domain.Found, error) {
+	size, err := toInt32(limit)
+	if err != nil {
+		return nil, err
+	}
+	params := sqlcgen.ListingsNearParams{
+		Lat: near.Point.Lat(), Lng: near.Point.Lng(), RadiusM: near.RadiusM, PageSize: size,
+	}
+	if city != nil {
+		params.CityCode = new(city.Code())
+	}
+	if after != nil {
+		params.AfterDistance, params.AfterID = new(after.DistanceM), new(after.Branch.UUID())
+	}
+	rows, err := sqlcgen.New(r.pool).ListingsNear(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("listings near: %w", err)
+	}
+	out := make([]domain.Found, 0, len(rows))
+	for _, row := range rows {
+		// The same listing columns as ListingsInCity, plus the distance.
+		l, err := toListing(sqlcgen.ListingsInCityRow{
+			BranchID: row.BranchID, BusinessID: row.BusinessID, Version: row.Version, Listed: row.Listed,
+			NameAr: row.NameAr, NameEn: row.NameEn, CityCode: row.CityCode, District: row.District, Address: row.Address,
+			Latitude: row.Latitude, Longitude: row.Longitude, Phone: row.Phone, Timezone: row.Timezone, UpdatedAt: row.UpdatedAt,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, domain.Found{Listing: l, DistanceM: row.DistanceM})
+	}
+	return out, nil
+}
+
+func toListing(row sqlcgen.ListingsInCityRow) (domain.Listing, error) {
 	name, err := shared.NewLocalizedText(row.NameAr, row.NameEn)
 	if err != nil {
 		return domain.Listing{}, fmt.Errorf("listing %s: name: %w", row.BranchID, err)

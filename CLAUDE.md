@@ -42,7 +42,9 @@ owned by whoever asked — and `outbox.Bus.Every` scheduled tasks, the first exp
 pending bookings every minute with `FOR UPDATE SKIP LOCKED` (ADR-0026). M6 (discovery) is in
 progress: M6.1 the `discovery` module — its own copy of each branch, kept from business's events
 (which carry the branch; the newest version wins), cities as reference data in `shared`, and
-public `GET /v1/cities` and `GET /v1/branches?city=` (ADR-0027).
+public `GET /v1/cities` and `GET /v1/branches?city=` (ADR-0027); M6.2 nearby search — a
+generated `geography` column with a partial GiST index, sphere distances everywhere, pages by
+`(distance, branch ID)` (ADR-0028).
 
 ## 2. Where things are
 
@@ -54,7 +56,7 @@ public `GET /v1/cities` and `GET /v1/branches?city=` (ADR-0027).
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0027) |
+| Why a decision was made | `docs/adr/` (0001–0028) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 

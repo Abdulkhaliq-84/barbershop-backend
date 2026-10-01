@@ -94,7 +94,7 @@ Client flow (Flutter):
 | Method | Path |
 |---|---|
 | GET | `/v1/cities` — live (M6.1): the cities, largest first, `{code, name}` |
-| GET | `/v1/branches?city=&cursor=` — live (M6.1): a city's published branches by Arabic name, 20 a page; `422 unknown_city`. Coming: `lat`, `lng`, `radius_km` (M6.2), `q` (M6.3), `category`, `sort=distance\|price` (M6.4), `open_now` (M6.5) |
+| GET | `/v1/branches?city=&lat=&lng=&radius_km=&cursor=` — live (M6.1, M6.2): near a place (`lat`, `lng`, `radius_km` 1–50, 10 by default) nearest first with `distance_m`, optionally in one `city`; or a city's published branches by Arabic name. 20 a page; `422 unknown_city`; `400` for neither a city nor a place. Coming: `q` (M6.3), `category`, `sort=price` (M6.4), `open_now` (M6.5) |
 | GET | `/v1/branches/{branch_id}` — public profile: photos, hours, services, barbers |
 | GET | `/v1/categories` |
 
