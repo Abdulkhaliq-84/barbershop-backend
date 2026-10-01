@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +102,22 @@ func TestDiscoveryAPI(t *testing.T) {
 		t.Errorf("by city, a distance: %v", got)
 	}
 
+	// By name, however it's spelled: ى for ي, capitals, with a city or a
+	// place to narrow it.
+	for query, found := range map[string]bool{
+		"q=العلىا":                    true,
+		"q=OLAYA":                     true,
+		"q=olaya&city=riyadh":         true,
+		"q=olaya&city=jeddah":         false,
+		"q=olaya&lat=24.70&lng=46.69": true,
+		"q=الملقا":                    false,
+		"q=olaya&lat=21.54&lng=39.17": false,
+	} {
+		if got := near(query); (len(got) == 1 && got[0].(map[string]any)["id"] == branch) != found || (!found && len(got) != 0) {
+			t.Errorf("%s: %v", query, got)
+		}
+	}
+
 	// Edited: the listing follows. Unpublished: gone.
 	path := biz + "/branches/" + branch // biz is its path
 	if r := a.do(t, http.MethodPatch, path, owner, `{"name":{"ar":"فرع الملقا","en":"Malqa"}}`, "If-Match", "2"); r.status != http.StatusOK {
@@ -110,6 +127,12 @@ func TestDiscoveryAPI(t *testing.T) {
 		got := listed("riyadh")
 		return len(got) == 1 && got[0].(map[string]any)["name"].(map[string]any)["ar"] == "فرع الملقا"
 	})
+	if got := near("q=الملقا"); len(got) != 1 {
+		t.Errorf("the new name, searched: %v", got)
+	}
+	if got := near("q=olaya"); len(got) != 0 {
+		t.Errorf("the old name, searched: %v", got)
+	}
 	if r := a.do(t, http.MethodPost, path+"/unpublish", owner, "", "If-Match", "3"); r.status != http.StatusOK {
 		t.Fatalf("unpublish: %d %v", r.status, r.body)
 	}
@@ -118,8 +141,8 @@ func TestDiscoveryAPI(t *testing.T) {
 	// A city's listings come 20 a page; next_cursor leads through them.
 	for i := range 21 {
 		if _, err := a.pool.Exec(t.Context(), `INSERT INTO discovery.branch_listings
-			(branch_id, business_id, version, listed, name_ar, city_code, address, latitude, longitude, timezone, updated_at)
-			VALUES ($1, $2, 1, true, $3, 'tabuk', 'شارع الأمير', 28.38, 36.57, 'Asia/Riyadh', now())`,
+			(branch_id, business_id, version, listed, name_ar, city_code, address, latitude, longitude, timezone, updated_at, search_text)
+			VALUES ($1, $2, 1, true, $3, 'tabuk', 'شارع الأمير', 28.38, 36.57, 'Asia/Riyadh', now(), $3)`,
 			uuid.New(), uuid.New(), fmt.Sprintf("صالون %02d", i)); err != nil {
 			t.Fatal(err)
 		}
@@ -161,6 +184,27 @@ func TestDiscoveryAPI(t *testing.T) {
 	if len(seen) != 21 || shown != 21 {
 		t.Errorf("paging near them showed %d, %d different, want 21", shown, len(seen))
 	}
+	// By name: all 21 match "صالون" equally, so the IDs order them.
+	seen, shown = map[any]bool{}, 0
+	for query, pages := "q=صالون&city=tabuk", 0; ; pages++ {
+		r := a.do(t, http.MethodGet, "/v1/branches?"+query, "", "")
+		data, _ := r.body["data"].([]any)
+		for _, x := range data {
+			seen[x.(map[string]any)["id"]] = true
+		}
+		shown += len(data)
+		cursor, _ := r.body["next_cursor"].(string)
+		if r.status != http.StatusOK || cursor == "" || pages > 3 {
+			break
+		}
+		query = "q=صالون&city=tabuk&cursor=" + url.QueryEscape(cursor)
+		if r := a.do(t, http.MethodGet, "/v1/branches?city=tabuk&cursor="+url.QueryEscape(cursor), "", ""); r.status != http.StatusBadRequest {
+			t.Errorf("a cursor from a name search, by city: %d %v", r.status, r.body)
+		}
+	}
+	if len(seen) != 21 || shown != 21 {
+		t.Errorf("paging by name showed %d, %d different, want 21", shown, len(seen))
+	}
 
 	for name, tt := range map[string]struct {
 		query  string
@@ -170,6 +214,9 @@ func TestDiscoveryAPI(t *testing.T) {
 		"a city not on the list": {"city=atlantis", http.StatusUnprocessableEntity, "unknown_city"},
 		"a city in capitals":     {"city=Riyadh", http.StatusBadRequest, "validation_failed"},
 		"no city":                {"", http.StatusBadRequest, "validation_failed"},
+		"a one-letter name":      {"q=x", http.StatusBadRequest, "validation_failed"},
+		"a name of punctuation":  {"q=" + url.QueryEscape("!!"), http.StatusBadRequest, "validation_failed"},
+		"a name too long":        {"q=" + strings.Repeat("a", 61), http.StatusBadRequest, "validation_failed"},
 		"lat without lng":        {"lat=24.7", http.StatusBadRequest, "validation_failed"},
 		"a radius alone":         {"city=riyadh&radius_km=5", http.StatusBadRequest, "validation_failed"},
 		"a radius of 51 km":      {"lat=24.7&lng=46.7&radius_km=51", http.StatusBadRequest, "validation_failed"},

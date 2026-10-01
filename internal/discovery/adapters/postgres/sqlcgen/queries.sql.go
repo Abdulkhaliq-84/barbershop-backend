@@ -16,10 +16,10 @@ const keepListing = `-- name: KeepListing :execrows
 
 INSERT INTO discovery.branch_listings (
     branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
-    latitude, longitude, phone, timezone, updated_at
+    latitude, longitude, phone, timezone, updated_at, search_text
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9,
-    $10, $11, $12, $13, $14
+    $10, $11, $12, $13, $14, $15
 )
 ON CONFLICT (branch_id) DO UPDATE SET
     business_id = excluded.business_id,
@@ -34,7 +34,8 @@ ON CONFLICT (branch_id) DO UPDATE SET
     longitude   = excluded.longitude,
     phone       = excluded.phone,
     timezone    = excluded.timezone,
-    updated_at  = excluded.updated_at
+    updated_at  = excluded.updated_at,
+    search_text = excluded.search_text
 WHERE discovery.branch_listings.version < excluded.version
 `
 
@@ -53,6 +54,7 @@ type KeepListingParams struct {
 	Phone      string
 	Timezone   string
 	UpdatedAt  time.Time
+	SearchText string
 }
 
 // discovery's queries. They touch only the discovery schema.
@@ -74,6 +76,7 @@ func (q *Queries) KeepListing(ctx context.Context, arg KeepListingParams) (int64
 		arg.Phone,
 		arg.Timezone,
 		arg.UpdatedAt,
+		arg.SearchText,
 	)
 	if err != nil {
 		return 0, err
@@ -158,19 +161,114 @@ func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) 
 	return items, nil
 }
 
+const listingsMatching = `-- name: ListingsMatching :many
+SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, updated_at,
+       word_similarity($1::text, search_text)::float8 AS sort_key
+FROM discovery.branch_listings
+WHERE listed
+  AND (search_text LIKE '%' || $2::text || '%' OR $1::text <% search_text)
+  AND ($3::text IS NULL OR city_code = $3::text)
+  AND ($4::float8 IS NULL
+       OR word_similarity($1::text, search_text)::float8 < $4::float8
+       OR (word_similarity($1::text, search_text)::float8 = $4::float8
+           AND branch_id > $5::uuid))
+ORDER BY word_similarity($1::text, search_text)::float8 DESC, branch_id
+LIMIT $6
+`
+
+type ListingsMatchingParams struct {
+	Text       string
+	TextLike   string
+	CityCode   *string
+	AfterScore *float64
+	AfterID    *uuid.UUID
+	PageSize   int32
+}
+
+type ListingsMatchingRow struct {
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+	Version    int32
+	Listed     bool
+	NameAr     string
+	NameEn     string
+	CityCode   string
+	District   string
+	Address    string
+	Latitude   float64
+	Longitude  float64
+	Phone      string
+	Timezone   string
+	UpdatedAt  time.Time
+	SortKey    float64
+}
+
+// A page of the listed branches whose names match a search (normalised),
+// best match first, then by ID, after the last one of the previous page
+// (none for the first page); optionally only one city's. A name matches if
+// it contains the search, or a part of it is close to the search
+// (word_similarity at least pg_trgm.word_similarity_threshold, which the
+// caller sets). The trigram index finds both. sort_key is the match, 0–1.
+func (q *Queries) ListingsMatching(ctx context.Context, arg ListingsMatchingParams) ([]ListingsMatchingRow, error) {
+	rows, err := q.db.Query(ctx, listingsMatching,
+		arg.Text,
+		arg.TextLike,
+		arg.CityCode,
+		arg.AfterScore,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListingsMatchingRow{}
+	for rows.Next() {
+		var i ListingsMatchingRow
+		if err := rows.Scan(
+			&i.BranchID,
+			&i.BusinessID,
+			&i.Version,
+			&i.Listed,
+			&i.NameAr,
+			&i.NameEn,
+			&i.CityCode,
+			&i.District,
+			&i.Address,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Phone,
+			&i.Timezone,
+			&i.UpdatedAt,
+			&i.SortKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listingsNear = `-- name: ListingsNear :many
 SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
        latitude, longitude, phone, timezone, updated_at,
-       (location <-> ST_MakePoint($1::float8, $2::float8)::geography)::float8 AS distance_m
+       (location <-> ST_MakePoint($1::float8, $2::float8)::geography)::float8 AS sort_key
 FROM discovery.branch_listings
 WHERE listed
   AND ST_DWithin(location, ST_MakePoint($1::float8, $2::float8)::geography, $3::float8, false)
   AND ($4::text IS NULL OR city_code = $4::text)
-  AND ($5::float8 IS NULL
+  AND ($5::text IS NULL
+       OR search_text LIKE '%' || $6::text || '%'
+       OR $5::text <% search_text)
+  AND ($7::float8 IS NULL
        OR (location <-> ST_MakePoint($1::float8, $2::float8)::geography, branch_id)
-          > ($5::float8, $6::uuid))
+          > ($7::float8, $8::uuid))
 ORDER BY location <-> ST_MakePoint($1::float8, $2::float8)::geography, branch_id
-LIMIT $7
+LIMIT $9
 `
 
 type ListingsNearParams struct {
@@ -178,6 +276,8 @@ type ListingsNearParams struct {
 	Lat           float64
 	RadiusM       float64
 	CityCode      *string
+	Text          *string
+	TextLike      *string
 	AfterDistance *float64
 	AfterID       *uuid.UUID
 	PageSize      int32
@@ -198,20 +298,24 @@ type ListingsNearRow struct {
 	Phone      string
 	Timezone   string
 	UpdatedAt  time.Time
-	DistanceM  float64
+	SortKey    float64
 }
 
 // A page of the listed branches within radius_m metres of a point, nearest
 // first, then by ID, after the last one of the previous page (none for the
 // first page); optionally only one city's. Distances are on a sphere: <->
 // and ST_DWithin(…, false) agree, so the radius, the order and the cursor
-// all use the same number. The GiST index finds the candidates.
+// all use the same number. The GiST index finds the candidates. sort_key
+// is the distance in metres (the same name as ListingsMatching's, so the
+// two queries share a row type).
 func (q *Queries) ListingsNear(ctx context.Context, arg ListingsNearParams) ([]ListingsNearRow, error) {
 	rows, err := q.db.Query(ctx, listingsNear,
 		arg.Lng,
 		arg.Lat,
 		arg.RadiusM,
 		arg.CityCode,
+		arg.Text,
+		arg.TextLike,
 		arg.AfterDistance,
 		arg.AfterID,
 		arg.PageSize,
@@ -238,7 +342,7 @@ func (q *Queries) ListingsNear(ctx context.Context, arg ListingsNearParams) ([]L
 			&i.Phone,
 			&i.Timezone,
 			&i.UpdatedAt,
-			&i.DistanceM,
+			&i.SortKey,
 		); err != nil {
 			return nil, err
 		}

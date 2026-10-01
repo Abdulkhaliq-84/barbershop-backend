@@ -5,10 +5,10 @@
 -- version or a newer one: events can arrive twice and out of order.
 INSERT INTO discovery.branch_listings (
     branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
-    latitude, longitude, phone, timezone, updated_at
+    latitude, longitude, phone, timezone, updated_at, search_text
 ) VALUES (
     @branch_id, @business_id, @version, @listed, @name_ar, @name_en, @city_code, @district, @address,
-    @latitude, @longitude, @phone, @timezone, @updated_at
+    @latitude, @longitude, @phone, @timezone, @updated_at, @search_text
 )
 ON CONFLICT (branch_id) DO UPDATE SET
     business_id = excluded.business_id,
@@ -23,7 +23,8 @@ ON CONFLICT (branch_id) DO UPDATE SET
     longitude   = excluded.longitude,
     phone       = excluded.phone,
     timezone    = excluded.timezone,
-    updated_at  = excluded.updated_at
+    updated_at  = excluded.updated_at,
+    search_text = excluded.search_text
 WHERE discovery.branch_listings.version < excluded.version;
 
 -- name: ListingsInCity :many
@@ -44,16 +45,42 @@ LIMIT @page_size;
 -- first, then by ID, after the last one of the previous page (none for the
 -- first page); optionally only one city's. Distances are on a sphere: <->
 -- and ST_DWithin(…, false) agree, so the radius, the order and the cursor
--- all use the same number. The GiST index finds the candidates.
+-- all use the same number. The GiST index finds the candidates. sort_key
+-- is the distance in metres (the same name as ListingsMatching's, so the
+-- two queries share a row type).
 SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
        latitude, longitude, phone, timezone, updated_at,
-       (location <-> ST_MakePoint(@lng::float8, @lat::float8)::geography)::float8 AS distance_m
+       (location <-> ST_MakePoint(@lng::float8, @lat::float8)::geography)::float8 AS sort_key
 FROM discovery.branch_listings
 WHERE listed
   AND ST_DWithin(location, ST_MakePoint(@lng::float8, @lat::float8)::geography, @radius_m::float8, false)
   AND (sqlc.narg(city_code)::text IS NULL OR city_code = sqlc.narg(city_code)::text)
+  AND (sqlc.narg(text)::text IS NULL
+       OR search_text LIKE '%' || sqlc.narg(text_like)::text || '%'
+       OR sqlc.narg(text)::text <% search_text)
   AND (sqlc.narg(after_distance)::float8 IS NULL
        OR (location <-> ST_MakePoint(@lng::float8, @lat::float8)::geography, branch_id)
           > (sqlc.narg(after_distance)::float8, sqlc.narg(after_id)::uuid))
 ORDER BY location <-> ST_MakePoint(@lng::float8, @lat::float8)::geography, branch_id
+LIMIT @page_size;
+
+-- name: ListingsMatching :many
+-- A page of the listed branches whose names match a search (normalised),
+-- best match first, then by ID, after the last one of the previous page
+-- (none for the first page); optionally only one city's. A name matches if
+-- it contains the search, or a part of it is close to the search
+-- (word_similarity at least pg_trgm.word_similarity_threshold, which the
+-- caller sets). The trigram index finds both. sort_key is the match, 0–1.
+SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, updated_at,
+       word_similarity(@text::text, search_text)::float8 AS sort_key
+FROM discovery.branch_listings
+WHERE listed
+  AND (search_text LIKE '%' || @text_like::text || '%' OR @text::text <% search_text)
+  AND (sqlc.narg(city_code)::text IS NULL OR city_code = sqlc.narg(city_code)::text)
+  AND (sqlc.narg(after_score)::float8 IS NULL
+       OR word_similarity(@text::text, search_text)::float8 < sqlc.narg(after_score)::float8
+       OR (word_similarity(@text::text, search_text)::float8 = sqlc.narg(after_score)::float8
+           AND branch_id > sqlc.narg(after_id)::uuid))
+ORDER BY word_similarity(@text::text, search_text)::float8 DESC, branch_id
 LIMIT @page_size;

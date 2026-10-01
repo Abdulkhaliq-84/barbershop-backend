@@ -193,6 +193,7 @@ type DiscoveryBranchListing struct {
 	Timezone   string
 	UpdatedAt  time.Time
 	Location   interface{}
+	SearchText string
 }
 
 type IamOtpChallenge struct {

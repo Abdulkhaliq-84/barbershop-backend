@@ -44,7 +44,9 @@ progress: M6.1 the `discovery` module — its own copy of each branch, kept from
 (which carry the branch; the newest version wins), cities as reference data in `shared`, and
 public `GET /v1/cities` and `GET /v1/branches?city=` (ADR-0027); M6.2 nearby search — a
 generated `geography` column with a partial GiST index, sphere distances everywhere, pages by
-`(distance, branch ID)` (ADR-0028).
+`(distance, branch ID)` (ADR-0028); M6.3 search by name — `domain.Normalize` (Arabic folding,
+fuzz-tested) on names and searches, a partial GIN trigram index, word similarity ≥ 0.5 set per
+search (ADR-0029).
 
 ## 2. Where things are
 
@@ -56,7 +58,7 @@ generated `geography` column with a partial GiST index, sphere distances everywh
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0028) |
+| Why a decision was made | `docs/adr/` (0001–0029) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
