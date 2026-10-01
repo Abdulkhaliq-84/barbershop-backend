@@ -39,8 +39,8 @@ func insert(t *testing.T, pool *pgxpool.Pool, staff shared.StaffID, status strin
 	}
 	_, err := pool.Exec(t.Context(), `
 		INSERT INTO booking.appointments (id, business_id, branch_id, staff_id, customer_id, status, source, assignment,
-			starts_at, ends_at, during, price_amount, price_currency, pending_until, cancelled_by, cancelled_at, version, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'customer_app', 'any_barber', $7, $8, tstzrange($7, $9, '[)'), 6000, 'SAR', $10, $11, $12, 1, $13, $13)`,
+			starts_at, ends_at, during, price_amount, price_currency, pending_until, cancelled_by, cancelled_at, cancellable_until, version, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'customer_app', 'any_barber', $7, $8, tstzrange($7, $9, '[)'), 6000, 'SAR', $10, $11, $12, $7, 1, $13, $13)`,
 		shared.NewID[shared.StaffTag]().UUID(), shared.NewID[shared.BusinessTag]().UUID(), shared.NewID[shared.BranchTag]().UUID(),
 		staff.UUID(), shared.NewID[shared.UserTag]().UUID(), status, start, end, busyUntil, pending, by, cancelled, t0)
 	return err

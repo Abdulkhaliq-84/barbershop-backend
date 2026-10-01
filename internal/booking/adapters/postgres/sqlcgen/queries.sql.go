@@ -46,6 +46,202 @@ func (q *Queries) AppointmentItems(ctx context.Context, appointmentID uuid.UUID)
 	return items, nil
 }
 
+const appointmentItemsOf = `-- name: AppointmentItemsOf :many
+SELECT appointment_id, position, service_id, name_ar, name_en, duration_minutes, price_amount, price_currency FROM booking.appointment_items WHERE appointment_id = ANY($1::uuid[]) ORDER BY appointment_id, position
+`
+
+func (q *Queries) AppointmentItemsOf(ctx context.Context, ids []uuid.UUID) ([]BookingAppointmentItem, error) {
+	rows, err := q.db.Query(ctx, appointmentItemsOf, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BookingAppointmentItem{}
+	for rows.Next() {
+		var i BookingAppointmentItem
+		if err := rows.Scan(
+			&i.AppointmentID,
+			&i.Position,
+			&i.ServiceID,
+			&i.NameAr,
+			&i.NameEn,
+			&i.DurationMinutes,
+			&i.PriceAmount,
+			&i.PriceCurrency,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const branchDay = `-- name: BranchDay :many
+SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+       upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
+       cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
+FROM booking.appointments
+WHERE business_id = $1 AND branch_id = $2
+  AND starts_at >= $3 AND starts_at < $4
+  AND ($5::uuid IS NULL OR staff_id = $5)
+ORDER BY starts_at, id
+`
+
+type BranchDayParams struct {
+	BusinessID uuid.UUID
+	BranchID   uuid.UUID
+	FromTime   time.Time
+	ToTime     time.Time
+	StaffID    pgtype.UUID
+}
+
+type BranchDayRow struct {
+	ID               uuid.UUID
+	BusinessID       uuid.UUID
+	BranchID         uuid.UUID
+	StaffID          uuid.UUID
+	CustomerID       uuid.UUID
+	Status           string
+	Source           string
+	Assignment       string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	BusyUntil        time.Time
+	PriceAmount      int64
+	PriceCurrency    string
+	CustomerNote     string
+	PendingUntil     *time.Time
+	CancellableUntil time.Time
+	CancelledBy      *string
+	CancelReason     string
+	CancelledAt      *time.Time
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// A branch's appointments starting in [from, to), every status, by start;
+// only one barber's when staff_id is given.
+func (q *Queries) BranchDay(ctx context.Context, arg BranchDayParams) ([]BranchDayRow, error) {
+	rows, err := q.db.Query(ctx, branchDay,
+		arg.BusinessID,
+		arg.BranchID,
+		arg.FromTime,
+		arg.ToTime,
+		arg.StaffID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BranchDayRow{}
+	for rows.Next() {
+		var i BranchDayRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BusinessID,
+			&i.BranchID,
+			&i.StaffID,
+			&i.CustomerID,
+			&i.Status,
+			&i.Source,
+			&i.Assignment,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.BusyUntil,
+			&i.PriceAmount,
+			&i.PriceCurrency,
+			&i.CustomerNote,
+			&i.PendingUntil,
+			&i.CancellableUntil,
+			&i.CancelledBy,
+			&i.CancelReason,
+			&i.CancelledAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const businessAppointmentForUpdate = `-- name: BusinessAppointmentForUpdate :one
+SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+       upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
+       cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
+FROM booking.appointments WHERE business_id = $1 AND id = $2 FOR UPDATE
+`
+
+type BusinessAppointmentForUpdateParams struct {
+	BusinessID uuid.UUID
+	ID         uuid.UUID
+}
+
+type BusinessAppointmentForUpdateRow struct {
+	ID               uuid.UUID
+	BusinessID       uuid.UUID
+	BranchID         uuid.UUID
+	StaffID          uuid.UUID
+	CustomerID       uuid.UUID
+	Status           string
+	Source           string
+	Assignment       string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	BusyUntil        time.Time
+	PriceAmount      int64
+	PriceCurrency    string
+	CustomerNote     string
+	PendingUntil     *time.Time
+	CancellableUntil time.Time
+	CancelledBy      *string
+	CancelReason     string
+	CancelledAt      *time.Time
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// By (business_id, id), locked: another business's appointment ID finds nothing.
+func (q *Queries) BusinessAppointmentForUpdate(ctx context.Context, arg BusinessAppointmentForUpdateParams) (BusinessAppointmentForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, businessAppointmentForUpdate, arg.BusinessID, arg.ID)
+	var i BusinessAppointmentForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.BranchID,
+		&i.StaffID,
+		&i.CustomerID,
+		&i.Status,
+		&i.Source,
+		&i.Assignment,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.BusyUntil,
+		&i.PriceAmount,
+		&i.PriceCurrency,
+		&i.CustomerNote,
+		&i.PendingUntil,
+		&i.CancellableUntil,
+		&i.CancelledBy,
+		&i.CancelReason,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const busyIntervals = `-- name: BusyIntervals :many
 
 SELECT staff_id, lower(during)::timestamptz AS busy_from, upper(during)::timestamptz AS busy_to
@@ -141,9 +337,10 @@ func (q *Queries) CountActiveBookings(ctx context.Context, arg CountActiveBookin
 }
 
 const customerAppointment = `-- name: CustomerAppointment :one
+
 SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
        upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
-       version, created_at, updated_at
+       cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
 FROM booking.appointments WHERE customer_id = $1 AND id = $2
 `
 
@@ -153,26 +350,32 @@ type CustomerAppointmentParams struct {
 }
 
 type CustomerAppointmentRow struct {
-	ID            uuid.UUID
-	BusinessID    uuid.UUID
-	BranchID      uuid.UUID
-	StaffID       uuid.UUID
-	CustomerID    uuid.UUID
-	Status        string
-	Source        string
-	Assignment    string
-	StartsAt      time.Time
-	EndsAt        time.Time
-	BusyUntil     time.Time
-	PriceAmount   int64
-	PriceCurrency string
-	CustomerNote  string
-	PendingUntil  *time.Time
-	Version       int32
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID               uuid.UUID
+	BusinessID       uuid.UUID
+	BranchID         uuid.UUID
+	StaffID          uuid.UUID
+	CustomerID       uuid.UUID
+	Status           string
+	Source           string
+	Assignment       string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	BusyUntil        time.Time
+	PriceAmount      int64
+	PriceCurrency    string
+	CustomerNote     string
+	PendingUntil     *time.Time
+	CancellableUntil time.Time
+	CancelledBy      *string
+	CancelReason     string
+	CancelledAt      *time.Time
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
+// The appointment queries below select the same columns, in the same
+// order: the repository reads all their rows the same way.
 // Always by (customer_id, id): someone else's appointment ID finds nothing.
 func (q *Queries) CustomerAppointment(ctx context.Context, arg CustomerAppointmentParams) (CustomerAppointmentRow, error) {
 	row := q.db.QueryRow(ctx, customerAppointment, arg.CustomerID, arg.ID)
@@ -193,6 +396,78 @@ func (q *Queries) CustomerAppointment(ctx context.Context, arg CustomerAppointme
 		&i.PriceCurrency,
 		&i.CustomerNote,
 		&i.PendingUntil,
+		&i.CancellableUntil,
+		&i.CancelledBy,
+		&i.CancelReason,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const customerAppointmentForUpdate = `-- name: CustomerAppointmentForUpdate :one
+SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+       upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
+       cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
+FROM booking.appointments WHERE customer_id = $1 AND id = $2 FOR UPDATE
+`
+
+type CustomerAppointmentForUpdateParams struct {
+	CustomerID uuid.UUID
+	ID         uuid.UUID
+}
+
+type CustomerAppointmentForUpdateRow struct {
+	ID               uuid.UUID
+	BusinessID       uuid.UUID
+	BranchID         uuid.UUID
+	StaffID          uuid.UUID
+	CustomerID       uuid.UUID
+	Status           string
+	Source           string
+	Assignment       string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	BusyUntil        time.Time
+	PriceAmount      int64
+	PriceCurrency    string
+	CustomerNote     string
+	PendingUntil     *time.Time
+	CancellableUntil time.Time
+	CancelledBy      *string
+	CancelReason     string
+	CancelledAt      *time.Time
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// CustomerAppointment, locked until the transaction ends: one change at a time.
+func (q *Queries) CustomerAppointmentForUpdate(ctx context.Context, arg CustomerAppointmentForUpdateParams) (CustomerAppointmentForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, customerAppointmentForUpdate, arg.CustomerID, arg.ID)
+	var i CustomerAppointmentForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.BranchID,
+		&i.StaffID,
+		&i.CustomerID,
+		&i.Status,
+		&i.Source,
+		&i.Assignment,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.BusyUntil,
+		&i.PriceAmount,
+		&i.PriceCurrency,
+		&i.CustomerNote,
+		&i.PendingUntil,
+		&i.CancellableUntil,
+		&i.CancelledBy,
+		&i.CancelReason,
+		&i.CancelledAt,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -225,33 +500,34 @@ const insertAppointment = `-- name: InsertAppointment :exec
 INSERT INTO booking.appointments (
     id, business_id, branch_id, staff_id, customer_id, status, source, assignment,
     starts_at, ends_at, during, price_amount, price_currency, customer_note, pending_until,
-    version, created_at, updated_at
+    cancellable_until, version, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
     $9, $10, tstzrange($9, $11::timestamptz, '[)'), $12, $13,
-    $14, $15, $16, $17, $18
+    $14, $15, $16, $17, $18, $19
 )
 `
 
 type InsertAppointmentParams struct {
-	ID            uuid.UUID
-	BusinessID    uuid.UUID
-	BranchID      uuid.UUID
-	StaffID       uuid.UUID
-	CustomerID    uuid.UUID
-	Status        string
-	Source        string
-	Assignment    string
-	StartsAt      time.Time
-	EndsAt        time.Time
-	BusyUntil     time.Time
-	PriceAmount   int64
-	PriceCurrency string
-	CustomerNote  string
-	PendingUntil  *time.Time
-	Version       int32
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID               uuid.UUID
+	BusinessID       uuid.UUID
+	BranchID         uuid.UUID
+	StaffID          uuid.UUID
+	CustomerID       uuid.UUID
+	Status           string
+	Source           string
+	Assignment       string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	BusyUntil        time.Time
+	PriceAmount      int64
+	PriceCurrency    string
+	CustomerNote     string
+	PendingUntil     *time.Time
+	CancellableUntil time.Time
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func (q *Queries) InsertAppointment(ctx context.Context, arg InsertAppointmentParams) error {
@@ -271,6 +547,7 @@ func (q *Queries) InsertAppointment(ctx context.Context, arg InsertAppointmentPa
 		arg.PriceCurrency,
 		arg.CustomerNote,
 		arg.PendingUntil,
+		arg.CancellableUntil,
 		arg.Version,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -337,4 +614,41 @@ type SettleIdempotencyKeyParams struct {
 func (q *Queries) SettleIdempotencyKey(ctx context.Context, arg SettleIdempotencyKeyParams) error {
 	_, err := q.db.Exec(ctx, settleIdempotencyKey, arg.AppointmentID, arg.CustomerID, arg.Key)
 	return err
+}
+
+const updateAppointmentStatus = `-- name: UpdateAppointmentStatus :execrows
+UPDATE booking.appointments
+SET status = $1, pending_until = $2, cancelled_by = $3, cancel_reason = $4,
+    cancelled_at = $5, version = $6, updated_at = $7
+WHERE id = $8 AND version = $9
+`
+
+type UpdateAppointmentStatusParams struct {
+	Status          string
+	PendingUntil    *time.Time
+	CancelledBy     *string
+	CancelReason    string
+	CancelledAt     *time.Time
+	Version         int32
+	UpdatedAt       time.Time
+	ID              uuid.UUID
+	ExpectedVersion int32
+}
+
+func (q *Queries) UpdateAppointmentStatus(ctx context.Context, arg UpdateAppointmentStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateAppointmentStatus,
+		arg.Status,
+		arg.PendingUntil,
+		arg.CancelledBy,
+		arg.CancelReason,
+		arg.CancelledAt,
+		arg.Version,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

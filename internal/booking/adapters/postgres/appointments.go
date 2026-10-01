@@ -54,6 +54,45 @@ func (r *Appointments) ByCustomer(ctx context.Context, customer shared.UserID, i
 	return load(ctx, sqlcgen.New(r.pool), customer, id)
 }
 
+// Day returns the branch's appointments starting in [from, to), in every
+// status, by start; only barber's if barber isn't nil.
+func (r *Appointments) Day(ctx context.Context, business shared.BusinessID, branch shared.BranchID, from, to time.Time, barber *shared.StaffID) ([]*domain.Appointment, error) {
+	q := sqlcgen.New(r.pool)
+	p := sqlcgen.BranchDayParams{BusinessID: business.UUID(), BranchID: branch.UUID(), FromTime: from, ToTime: to}
+	if barber != nil {
+		p.StaffID = pgUUID(barber.UUID())
+	}
+	rows, err := q.BranchDay(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("branch day: %w", err)
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	all, err := q.AppointmentItemsOf(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("branch day items: %w", err)
+	}
+	items := make(map[uuid.UUID][]sqlcgen.BookingAppointmentItem, len(rows))
+	for _, it := range all {
+		items[it.AppointmentID] = append(items[it.AppointmentID], it)
+	}
+	out := make([]*domain.Appointment, 0, len(rows))
+	for _, row := range rows {
+		a, err := hydrate(appointmentRow(row), items[row.ID])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// appointmentRow is a row of any of the appointment queries: they select
+// the same columns, so their row types convert to this one.
+type appointmentRow = sqlcgen.CustomerAppointmentRow
+
 func load(ctx context.Context, q *sqlcgen.Queries, customer shared.UserID, id domain.AppointmentID) (*domain.Appointment, error) {
 	row, err := q.CustomerAppointment(ctx, sqlcgen.CustomerAppointmentParams{CustomerID: customer.UUID(), ID: id.UUID()})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -62,10 +101,19 @@ func load(ctx context.Context, q *sqlcgen.Queries, customer shared.UserID, id do
 	if err != nil {
 		return nil, fmt.Errorf("load appointment: %w", err)
 	}
-	rows, err := q.AppointmentItems(ctx, row.ID)
+	return withItems(ctx, q, row)
+}
+
+func withItems(ctx context.Context, q *sqlcgen.Queries, row appointmentRow) (*domain.Appointment, error) {
+	items, err := q.AppointmentItems(ctx, row.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load appointment items: %w", err)
 	}
+	return hydrate(row, items)
+}
+
+// hydrate rebuilds an appointment from its row and its items' rows.
+func hydrate(row appointmentRow, rows []sqlcgen.BookingAppointmentItem) (*domain.Appointment, error) {
 	items := make([]domain.Item, 0, len(rows))
 	for _, it := range rows {
 		name, err := shared.NewLocalizedText(it.NameAr, it.NameEn)
@@ -85,12 +133,18 @@ func load(ctx context.Context, q *sqlcgen.Queries, customer shared.UserID, id do
 	if err != nil {
 		return nil, fmt.Errorf("stored price: %w", err)
 	}
+	var cancellation *domain.Cancellation
+	if row.CancelledBy != nil && row.CancelledAt != nil {
+		cancellation = &domain.Cancellation{By: domain.Canceller(*row.CancelledBy), Reason: row.CancelReason, At: *row.CancelledAt}
+	}
 	return domain.Rehydrate(domain.Snapshot{
-		ID: id, Business: shared.IDFromUUID[shared.BusinessTag](row.BusinessID), Branch: shared.IDFromUUID[shared.BranchTag](row.BranchID),
-		Barber: shared.IDFromUUID[shared.StaffTag](row.StaffID), Customer: customer, Items: items,
+		ID: shared.IDFromUUID[domain.AppointmentTag](row.ID), Business: shared.IDFromUUID[shared.BusinessTag](row.BusinessID),
+		Branch: shared.IDFromUUID[shared.BranchTag](row.BranchID), Barber: shared.IDFromUUID[shared.StaffTag](row.StaffID),
+		Customer: shared.IDFromUUID[shared.UserTag](row.CustomerID), Items: items,
 		Start: row.StartsAt, End: row.EndsAt, BusyUntil: row.BusyUntil, Price: price,
 		Status: domain.Status(row.Status), Source: domain.Source(row.Source), Assignment: domain.Assignment(row.Assignment),
-		Note: row.CustomerNote, PendingUntil: row.PendingUntil, Version: int(row.Version), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		Note: row.CustomerNote, PendingUntil: row.PendingUntil, CancellableUntil: row.CancellableUntil, Cancellation: cancellation,
+		Version: int(row.Version), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}), nil
 }
 

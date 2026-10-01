@@ -74,13 +74,18 @@ func (h *Handlers) GetMyAppointment(ctx context.Context, req apigen.GetMyAppoint
 func toAPIAppointment(v app.AppointmentView) apigen.Appointment {
 	s := v.Snapshot()
 	out := apigen.Appointment{
-		Id: s.ID.UUID(), BranchId: s.Branch.UUID(),
+		Id: s.ID.UUID(), BranchId: s.Branch.UUID(), CustomerId: s.Customer.UUID(),
 		Barber:     apigen.AppointmentBarber{Id: s.Barber.UUID(), DisplayName: v.BarberName},
 		Status:     apigen.AppointmentStatus(s.Status),
+		Source:     apigen.AppointmentSource(s.Source),
 		Assignment: apigen.AppointmentAssignment(s.Assignment),
 		StartsAt:   s.Start.UTC(), EndsAt: s.End.UTC(), PendingUntil: s.PendingUntil,
-		Items: make([]apigen.AppointmentItem, 0, len(s.Items)),
-		Price: toAPIMoney(s.Price), Note: s.Note, CreatedAt: s.CreatedAt, Version: s.Version,
+		CancellableUntil: s.CancellableUntil.UTC(),
+		Items:            make([]apigen.AppointmentItem, 0, len(s.Items)),
+		Price:            toAPIMoney(s.Price), Note: s.Note, CreatedAt: s.CreatedAt, Version: s.Version,
+	}
+	if c := s.Cancellation; c != nil {
+		out.Cancellation = &apigen.Cancellation{By: apigen.CancellationBy(c.By), Reason: c.Reason, At: c.At.UTC()}
 	}
 	for _, it := range s.Items {
 		out.Items = append(out.Items, apigen.AppointmentItem{

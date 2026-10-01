@@ -34,7 +34,9 @@ with readiness from catalog and scheduling answered in `main` so `business` impo
 (ADR-0022); M5.2 the `booking` module and public availability — a pure slot calculator over
 business, catalog and scheduling (ADR-0023); M5.3 booking an appointment — `Idempotency-Key`
 looked up first, the exclusion constraint has the last word, the barber's hours re-read under
-`database.LockStaff` (shared with scheduling), any barber tried in savepoints (ADR-0024).
+`database.LockStaff` (shared with scheduling), any barber tried in savepoints (ADR-0024); M5.4
+the appointment lifecycle — the customer cancels within the deadline kept with the booking, the
+shop confirms/rejects/cancels/completes/marks a no-show under a row lock, and sees its day (ADR-0025).
 
 ## 2. Where things are
 

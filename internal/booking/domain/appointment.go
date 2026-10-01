@@ -75,6 +75,9 @@ type Booking struct {
 	// PendingExpiry has passed.
 	AutoConfirm   bool
 	PendingExpiry time.Duration
+	// CancellationWindow: the customer may cancel a confirmed booking until
+	// this long before it starts. The deadline is kept with the booking.
+	CancellationWindow time.Duration
 }
 
 // Appointment is a booked visit: one barber, one or more services back to
@@ -94,10 +97,14 @@ type Appointment struct {
 	assignment   Assignment
 	note         string
 	pendingUntil *time.Time
-	version      int
-	createdAt    time.Time
-	updatedAt    time.Time
-	events       []Event
+	// cancellableUntil is the customer's deadline to cancel once confirmed:
+	// start − the branch's window when it was booked.
+	cancellableUntil time.Time
+	cancellation     *Cancellation
+	version          int
+	createdAt        time.Time
+	updatedAt        time.Time
+	events           []Event
 }
 
 // Book makes a customer's appointment: confirmed at once, or pending the
@@ -110,11 +117,12 @@ func Book(b Booking, now time.Time) (*Appointment, error) {
 	if utf8.RuneCountInString(b.Note) > MaxNoteLen {
 		return nil, ErrNoteTooLong
 	}
-	now = now.UTC().Truncate(time.Microsecond) // what Postgres keeps
+	now = dbTime(now)
 	a := &Appointment{
 		id: b.ID, business: b.Business, branch: b.Branch, barber: b.Barber, customer: b.Customer,
 		items: b.Items, start: b.Start.UTC(), status: StatusConfirmed, source: SourceCustomerApp,
-		assignment: b.Assignment, note: b.Note, version: 1, createdAt: now, updatedAt: now,
+		assignment: b.Assignment, note: b.Note, cancellableUntil: b.Start.UTC().Add(-max(b.CancellationWindow, 0)),
+		version: 1, createdAt: now, updatedAt: now,
 	}
 	total := time.Duration(0)
 	a.price = shared.Halalas(0)
@@ -142,6 +150,7 @@ func Rehydrate(s Snapshot) *Appointment {
 		id: s.ID, business: s.Business, branch: s.Branch, barber: s.Barber, customer: s.Customer,
 		items: s.Items, start: s.Start, end: s.End, busyUntil: s.BusyUntil, price: s.Price,
 		status: s.Status, source: s.Source, assignment: s.Assignment, note: s.Note, pendingUntil: s.PendingUntil,
+		cancellableUntil: s.CancellableUntil, cancellation: s.Cancellation,
 		version: s.Version, createdAt: s.CreatedAt, updatedAt: s.UpdatedAt,
 	}
 }
@@ -162,9 +171,12 @@ type Snapshot struct {
 	Assignment   Assignment
 	Note         string
 	PendingUntil *time.Time
-	Version      int
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// CancellableUntil is the customer's deadline to cancel once confirmed.
+	CancellableUntil time.Time
+	Cancellation     *Cancellation // set once cancelled
+	Version          int
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func (a *Appointment) snapshot() Snapshot {
@@ -172,6 +184,7 @@ func (a *Appointment) snapshot() Snapshot {
 		ID: a.id, Business: a.business, Branch: a.branch, Barber: a.barber, Customer: a.customer,
 		Items: a.items, Start: a.start, End: a.end, BusyUntil: a.busyUntil, Price: a.price,
 		Status: a.status, Source: a.source, Assignment: a.assignment, Note: a.note, PendingUntil: a.pendingUntil,
+		CancellableUntil: a.cancellableUntil, Cancellation: a.cancellation,
 		Version: a.version, CreatedAt: a.createdAt, UpdatedAt: a.updatedAt,
 	}
 }
@@ -181,6 +194,12 @@ func (a *Appointment) Snapshot() Snapshot { return a.snapshot() }
 
 // ID returns the appointment's ID.
 func (a *Appointment) ID() AppointmentID { return a.id }
+
+// Business returns the business it was booked at.
+func (a *Appointment) Business() shared.BusinessID { return a.business }
+
+// Branch returns the branch it was booked at.
+func (a *Appointment) Branch() shared.BranchID { return a.branch }
 
 // Barber returns who performs it.
 func (a *Appointment) Barber() shared.StaffID { return a.barber }
@@ -211,3 +230,13 @@ type AppointmentBooked struct {
 }
 
 func (AppointmentBooked) isEvent() {}
+
+// StatusChanged is recorded when an appointment moves on: confirmed,
+// rejected, cancelled, completed or marked a no-show. Appointment is the
+// state after the change.
+type StatusChanged struct {
+	From        Status
+	Appointment Snapshot
+}
+
+func (StatusChanged) isEvent() {}

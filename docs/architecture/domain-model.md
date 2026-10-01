@@ -299,6 +299,18 @@ any barber      → union of start times; each keeps the list of barbers free at
   them. "Any barber" tries each free barber in a savepoint, least booked that day first.
 - `GET /v1/me/appointments/{id}` returns the customer's own appointment (someone else's is `404`).
 
+**Live since M5.4 (ADR-0025):** the lifecycle above, except expiry (M5.5).
+- The customer cancels (`POST /v1/me/appointments/{id}/cancel`): a pending booking until it
+  starts, a confirmed one until `cancellable_until` — the start minus the branch's cancellation
+  window, kept with the booking (invariant 7).
+- The shop acts (`POST /v1/businesses/{id}/appointments/{id}/{confirm|reject|cancel|complete|no-show}`):
+  a barber on their own appointments, the owner and managers on their branches'. Completed and
+  no-show only once started (invariant 8).
+- Each change is made under a row lock and published with its event
+  (`booking.appointment_confirmed`, `…_rejected`, `…_cancelled`, `…_completed`, `…_no_show`).
+- `GET …/branches/{id}/appointments?date=` is the shop's day: a barber's own, or all for
+  managers.
+
 ### 3.6 `discovery` — Search read model
 
 A denormalised `branch_listing` per published branch: names {ar,en} (+ normalised search text),

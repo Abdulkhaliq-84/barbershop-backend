@@ -132,6 +132,7 @@ func (h *BookHandlers) Book(ctx context.Context, cmd BookAppointment) (a *domain
 			Barber: staff, Customer: cmd.Customer, Start: cmd.Start, Items: itemsFor(cmd.Services, menu, staff),
 			Buffer: branch.Policy.Buffer, Assignment: assignment, Note: strings.TrimSpace(cmd.Note),
 			AutoConfirm: branch.Policy.AutoConfirm, PendingExpiry: branch.Policy.PendingExpiry,
+			CancellationWindow: branch.Policy.CancellationWindow,
 		}, now)
 		if err != nil {
 			return nil, false, err
@@ -261,14 +262,39 @@ type AppointmentView struct {
 
 // View adds the barber's name to a.
 func (h *BookHandlers) View(ctx context.Context, a *domain.Appointment) (AppointmentView, error) {
-	s := a.Snapshot()
-	barbers, err := h.branches.Barbers(ctx, s.Business, s.Branch, []shared.StaffID{s.Barber})
+	return view(ctx, h.branches, a)
+}
+
+func view(ctx context.Context, branches Branches, a *domain.Appointment) (AppointmentView, error) {
+	v, err := views(ctx, branches, a.Business(), a.Branch(), []*domain.Appointment{a})
 	if err != nil {
-		return AppointmentView{}, fmt.Errorf("appointment: %w", err)
+		return AppointmentView{}, err
 	}
-	v := AppointmentView{Appointment: a}
-	if len(barbers) == 1 {
-		v.BarberName = barbers[0].Name
+	return v[0], nil
+}
+
+// views adds their barbers' names to one branch's appointments, asking
+// business once.
+func views(ctx context.Context, branches Branches, business shared.BusinessID, branch shared.BranchID, list []*domain.Appointment) ([]AppointmentView, error) {
+	var staff []shared.StaffID
+	for _, a := range list {
+		if !slices.Contains(staff, a.Barber()) {
+			staff = append(staff, a.Barber())
+		}
 	}
-	return v, nil
+	names := make(map[shared.StaffID]string, len(staff))
+	if len(staff) > 0 {
+		barbers, err := branches.Barbers(ctx, business, branch, staff)
+		if err != nil {
+			return nil, fmt.Errorf("appointment barbers: %w", err)
+		}
+		for _, b := range barbers {
+			names[b.ID] = b.Name
+		}
+	}
+	out := make([]AppointmentView, 0, len(list))
+	for _, a := range list {
+		out = append(out, AppointmentView{Appointment: a, BarberName: names[a.Barber()]})
+	}
+	return out, nil
 }

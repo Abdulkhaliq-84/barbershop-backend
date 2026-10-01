@@ -29,3 +29,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0022](0022-branch-publishing-and-readiness.md) | Publishing a branch asks catalog and scheduling through main | Accepted |
 | [0023](0023-availability.md) | Availability is a pure calculation over three modules, public and advisory | Accepted |
 | [0024](0024-booking-an-appointment.md) | Booking: the key first, the database decides, one lock per barber shared with scheduling | Accepted |
+| [0025](0025-appointment-lifecycle.md) | Appointment lifecycle: the domain decides, one change at a time, the deadline kept with the booking | Accepted |

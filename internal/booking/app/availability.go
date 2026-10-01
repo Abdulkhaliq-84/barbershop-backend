@@ -27,6 +27,9 @@ type Policy struct {
 	AutoConfirm       bool          // false: the shop confirms each booking
 	PendingExpiry     time.Duration // an unconfirmed booking expires after this
 	MaxActiveBookings int           // upcoming bookings one customer may hold here
+	// CancellationWindow: customers may cancel a confirmed booking until
+	// this long before it starts.
+	CancellationWindow time.Duration
 }
 
 // Branch is a bookable branch: published, of an active business.
