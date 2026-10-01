@@ -101,9 +101,9 @@ GitHub Actions · GHCR · release-please · Trivy · CodeQL
 - [x] M1 — Walking skeleton + CI: server, config, Postgres/PostGIS, migrations, lint/test/build on every PR
 - [x] M1.5 — CD & releases: scanned, attested Docker images on GHCR, SemVer releases
 - [x] M2 — Shared kernel + IAM: phone OTP, JWT, refresh rotation
-- [ ] M3 — Business onboarding: verification, branches, staff, plans
-- [ ] M4 — Catalog + scheduling: services, opening hours, barber schedules
-- [ ] M5 — Booking core: availability engine, booking lifecycle
+- [x] M3 — Business onboarding: verification, branches, staff, plans
+- [x] M4 — Catalog + scheduling: services, opening hours, barber schedules
+- [x] M5 — Booking core: availability engine, booking lifecycle
 - [ ] M6 — Discovery: map / city / text search
 - [ ] M7 — Notifications: push, SMS, reminders
 - [ ] M8 — Hardening + Flutter hand-off

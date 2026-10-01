@@ -49,6 +49,7 @@ var acts = []act{
 	{"staff cancels", func(a *domain.Appointment, now time.Time) error { return a.CancelByStaff("", now) }},
 	{"complete", func(a *domain.Appointment, now time.Time) error { return a.Complete(now) }},
 	{"no-show", func(a *domain.Appointment, now time.Time) error { return a.MarkNoShow(now) }},
+	{"expire", func(a *domain.Appointment, now time.Time) error { return a.Expire(now) }},
 }
 
 var statuses = []domain.Status{
@@ -56,9 +57,9 @@ var statuses = []domain.Status{
 	domain.StatusCancelled, domain.StatusCompleted, domain.StatusNoShow,
 }
 
-// The edges of the lifecycle diagram (domain-model.md §3.5), minus the
-// expiry job's.
+// The edges of the lifecycle diagram (domain-model.md §3.5).
 var edges = map[[2]domain.Status]bool{
+	{domain.StatusPending, domain.StatusExpired}:     true,
 	{domain.StatusPending, domain.StatusConfirmed}:   true,
 	{domain.StatusPending, domain.StatusRejected}:    true,
 	{domain.StatusPending, domain.StatusCancelled}:   true,
@@ -135,6 +136,9 @@ func TestLifecycle(t *testing.T) {
 		{"a no-show once started", domain.StatusConfirmed, func(a *domain.Appointment) error { return a.MarkNoShow(started) }, domain.StatusNoShow, nil},
 		{"…not before", domain.StatusConfirmed, func(a *domain.Appointment) error { return a.MarkNoShow(inWindow) }, "", domain.ErrNotStarted},
 		{"…not after it was completed", domain.StatusCompleted, func(a *domain.Appointment) error { return a.MarkNoShow(started) }, "", domain.ErrInvalidTransition},
+		{"the job expires a pending booking at its expiry", domain.StatusPending, func(a *domain.Appointment) error { return a.Expire(pendingUntil) }, domain.StatusExpired, nil},
+		{"…not before", domain.StatusPending, func(a *domain.Appointment) error { return a.Expire(pendingUntil.Add(-time.Microsecond)) }, "", domain.ErrInvalidTransition},
+		{"…nor a confirmed one", domain.StatusConfirmed, func(a *domain.Appointment) error { return a.Expire(started) }, "", domain.ErrInvalidTransition},
 	} {
 		a := in(tt.from)
 		err := tt.do(a)
@@ -174,7 +178,7 @@ func TestBookKeepsTheCancellationDeadline(t *testing.T) {
 	t.Parallel()
 	cut, _ := shared.NewLocalizedText("قص", "")
 	b := domain.Booking{
-		ID: shared.NewID[domain.AppointmentTag](), Start: start, CancellationWindow: 3 * time.Hour,
+		ID: shared.NewID[domain.AppointmentTag](), Customer: shared.NewID[shared.UserTag](), Start: start, CancellationWindow: 3 * time.Hour,
 		Items: []domain.Item{{Service: shared.NewID[shared.ServiceTag](), Name: cut, Duration: 30 * time.Minute, Price: shared.Halalas(6000)}},
 	}
 	a, err := domain.Book(b, start.Add(-48*time.Hour))
@@ -187,5 +191,39 @@ func TestBookKeepsTheCancellationDeadline(t *testing.T) {
 	b.CancellationWindow = 0
 	if a, _ = domain.Book(b, start.Add(-48*time.Hour)); !a.Snapshot().CancellableUntil.Equal(start) {
 		t.Errorf("no window: cancellable until %s", a.Snapshot().CancellableUntil)
+	}
+}
+
+// The shop books walk-ins by name; only the shop does, and its bookings
+// need no answer.
+func TestWalkIn(t *testing.T) {
+	t.Parallel()
+	cut, _ := shared.NewLocalizedText("قص", "")
+	b := domain.Booking{
+		ID: shared.NewID[domain.AppointmentTag](), Start: start, Source: domain.SourceStaff, CustomerName: "  أبو فهد  ",
+		Assignment: domain.RequestedBarber, AutoConfirm: false, PendingExpiry: time.Hour,
+		Items: []domain.Item{{Service: shared.NewID[shared.ServiceTag](), Name: cut, Duration: 30 * time.Minute, Price: shared.Halalas(6000)}},
+	}
+	a, err := domain.Book(b, start.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := a.Snapshot(); !s.Customer.IsZero() || s.CustomerName != "أبو فهد" || s.Source != domain.SourceStaff || s.Status != domain.StatusConfirmed || s.PendingUntil != nil {
+		t.Errorf("walk-in = %+v", s)
+	}
+	for name, tt := range map[string]struct {
+		change func(*domain.Booking)
+		want   error
+	}{
+		"no name":             {func(b *domain.Booking) { b.CustomerName = "   " }, domain.ErrNoCustomer},
+		"the app, no account": {func(b *domain.Booking) { b.Source = "" }, domain.ErrNoCustomer},
+		"a long name":         {func(b *domain.Booking) { b.CustomerName = strings.Repeat("ف", 101) }, domain.ErrCustomerNameTooLong},
+		"100 characters":      {func(b *domain.Booking) { b.CustomerName = strings.Repeat("ف", 100) }, nil},
+	} {
+		c := b
+		tt.change(&c)
+		if _, err := domain.Book(c, start.Add(-time.Hour)); !errors.Is(err, tt.want) {
+			t.Errorf("%s: %v, want %v", name, err, tt.want)
+		}
 	}
 }

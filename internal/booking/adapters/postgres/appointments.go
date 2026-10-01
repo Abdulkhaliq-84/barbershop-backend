@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/booking/adapters/postgres/sqlcgen"
@@ -94,7 +95,7 @@ func (r *Appointments) Day(ctx context.Context, business shared.BusinessID, bran
 type appointmentRow = sqlcgen.CustomerAppointmentRow
 
 func load(ctx context.Context, q *sqlcgen.Queries, customer shared.UserID, id domain.AppointmentID) (*domain.Appointment, error) {
-	row, err := q.CustomerAppointment(ctx, sqlcgen.CustomerAppointmentParams{CustomerID: customer.UUID(), ID: id.UUID()})
+	row, err := q.CustomerAppointment(ctx, sqlcgen.CustomerAppointmentParams{CustomerID: pgUUID(customer.UUID()), ID: id.UUID()})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -140,12 +141,28 @@ func hydrate(row appointmentRow, rows []sqlcgen.BookingAppointmentItem) (*domain
 	return domain.Rehydrate(domain.Snapshot{
 		ID: shared.IDFromUUID[domain.AppointmentTag](row.ID), Business: shared.IDFromUUID[shared.BusinessTag](row.BusinessID),
 		Branch: shared.IDFromUUID[shared.BranchTag](row.BranchID), Barber: shared.IDFromUUID[shared.StaffTag](row.StaffID),
-		Customer: shared.IDFromUUID[shared.UserTag](row.CustomerID), Items: items,
+		Customer: customerOf(row.CustomerID), CustomerName: row.CustomerName, Items: items,
 		Start: row.StartsAt, End: row.EndsAt, BusyUntil: row.BusyUntil, Price: price,
 		Status: domain.Status(row.Status), Source: domain.Source(row.Source), Assignment: domain.Assignment(row.Assignment),
 		Note: row.CustomerNote, PendingUntil: row.PendingUntil, CancellableUntil: row.CancellableUntil, Cancellation: cancellation,
 		Version: int(row.Version), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}), nil
+}
+
+// customerOf reads a nullable customer_id: no one for a walk-in.
+func customerOf(id pgtype.UUID) shared.UserID {
+	if !id.Valid {
+		return shared.UserID{}
+	}
+	return shared.IDFromUUID[shared.UserTag](id.Bytes)
+}
+
+// optional is a nullable column's value: NULL for a zero ID.
+func optional[T any](id shared.ID[T]) pgtype.UUID {
+	if id.IsZero() {
+		return pgtype.UUID{}
+	}
+	return pgUUID(id.UUID())
 }
 
 // toInt16 and toInt32 convert, refusing values the columns can't hold.

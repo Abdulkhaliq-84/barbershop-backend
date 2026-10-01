@@ -132,7 +132,7 @@ Client flow (Flutter):
 | GET / POST / DELETE | `/v1/businesses/{business_id}/staff/{staff_id}/time-off[/{time_off_id}]` — live (M4.4): instants; `409 time_off_overlaps` | manager / the barber |
 | GET | `…/branches/{branch_id}/staff/{staff_id}/working-windows?from=&to=` — live (M4.5): when they can work (opening hours ∩ schedule − time off), UTC instants, at most 62 days (`422` beyond) | anyone at the branch |
 | GET | `…/branches/{branch_id}/day?date=` — per-barber timeline + KPIs (dashboard) | barber (own) / manager |
-| POST | `…/branches/{branch_id}/appointments` — staff booking / walk-in | barber |
+| POST | `…/branches/{branch_id}/appointments` (Idempotency-Key) — live (M5.5): a walk-in, `{starts_at, service_ids, barber_id, customer_name, note?}` → `201`, confirmed, no customer account; any whole minute from 15 min ago to the horizon; `409 slot_unavailable` / `branch_not_bookable`; `422 invalid_start` / `barber_unavailable` | barber (own) / manager |
 | GET | `…/branches/{branch_id}/appointments?date=` — live (M5.4): the day's appointments, every status, by start; a barber sees their own | barber (own) / manager |
 | POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` — live (M5.4): `reason` with cancel only; `409 invalid_transition` / `appointment_not_started` | barber (own) / manager |
 | GET | `/v1/businesses/{business_id}/subscription` — live (M3.6): plan, status (`setup`/`trialing`/`free`), trial end, limits; `409 plan_limit_reached` when adding past them | owner |

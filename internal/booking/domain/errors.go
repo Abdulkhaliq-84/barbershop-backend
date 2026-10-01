@@ -31,4 +31,11 @@ var (
 	// ErrNotStarted: completed or no-show only once it has started.
 	ErrNotStarted    = errors.New("booking: the appointment hasn't started yet")
 	ErrReasonTooLong = errors.New("booking: the reason is too long")
+	// ErrNoCustomer: an appointment needs a customer — an app user, or for
+	// the shop's own bookings a walk-in's name.
+	ErrNoCustomer          = errors.New("booking: who is the customer?")
+	ErrCustomerNameTooLong = errors.New("booking: the customer's name is too long")
+	// ErrBranchNotBookable: the branch isn't published, or its business
+	// isn't active — it takes no bookings yet.
+	ErrBranchNotBookable = errors.New("booking: the branch takes no bookings")
 )

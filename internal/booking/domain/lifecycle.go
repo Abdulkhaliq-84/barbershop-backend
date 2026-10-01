@@ -36,6 +36,7 @@ const (
 	ActionCancel   Action = "cancel"
 	ActionComplete Action = "complete"
 	ActionNoShow   Action = "no_show"
+	ActionExpire   Action = "expire"
 )
 
 // TransitionError says an action doesn't apply to an appointment in Status.
@@ -46,7 +47,7 @@ type TransitionError struct {
 }
 
 func (e *TransitionError) Error() string {
-	return fmt.Sprintf("booking: can't %s a %s appointment", e.Action, e.Status)
+	return fmt.Sprintf("booking: can't %s an appointment that is %s", e.Action, e.Status)
 }
 
 // Is makes errors.Is(err, ErrInvalidTransition) true.
@@ -54,7 +55,7 @@ func (e *TransitionError) Is(target error) bool { return target == ErrInvalidTra
 
 // The lifecycle (domain-model.md §3.5):
 //
-//	pending   → confirmed | rejected | cancelled | expired (M5.5)
+//	pending   → confirmed | rejected | cancelled | expired
 //	confirmed → cancelled | completed | no_show
 //
 // The other statuses are final. Every change bumps the version and records
@@ -105,6 +106,16 @@ func (a *Appointment) CancelByStaff(reason string, now time.Time) error {
 	return a.cancel(ByStaff, reason, now)
 }
 
+// Expire records that the shop didn't answer a pending booking in time
+// (the expiry job): its time is free again.
+func (a *Appointment) Expire(now time.Time) error {
+	if a.status != StatusPending || a.pendingUntil == nil || now.Before(*a.pendingUntil) {
+		return &TransitionError{ActionExpire, a.current(now)}
+	}
+	a.change(StatusExpired, now)
+	return nil
+}
+
 // Complete records that it took place (the shop), once it has started.
 func (a *Appointment) Complete(now time.Time) error {
 	return a.finish(StatusCompleted, ActionComplete, now)
@@ -138,7 +149,7 @@ func (a *Appointment) cancel(by Canceller, reason string, now time.Time) error {
 }
 
 // current is the status as of now: a pending booking past its expiry is
-// expired, even before the expiry job (M5.5) has written it down.
+// expired, even before the expiry job has written it down.
 func (a *Appointment) current(now time.Time) Status {
 	if a.status == StatusPending && a.pendingUntil != nil && !now.Before(*a.pendingUntil) {
 		return StatusExpired

@@ -166,7 +166,8 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 4. M5.4 — the appointment lifecycle: the customer cancels within the deadline kept with the
    booking; the shop confirms, rejects, cancels, completes or marks a no-show; the shop's day
    ([ADR-0025](adr/0025-appointment-lifecycle.md)).
-5. M5.5 — staff bookings (walk-ins) and pending expiry as a scheduled River job.
+5. M5.5 — staff bookings (walk-ins, by name, no account) and pending expiry as a scheduled River
+   job (`outbox.Bus.Every`) ([ADR-0026](adr/0026-walk-ins-and-pending-expiry.md)).
    *Your turn:* "My appointments" with cursor pagination.
 
 ### Design track (in parallel, in Figma)

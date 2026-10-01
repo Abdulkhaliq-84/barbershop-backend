@@ -13,6 +13,71 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const appointmentByID = `-- name: AppointmentByID :one
+SELECT id, business_id, branch_id, staff_id, customer_id, customer_name, status, source, assignment, starts_at, ends_at,
+       upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
+       cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
+FROM booking.appointments WHERE id = $1
+`
+
+type AppointmentByIDRow struct {
+	ID               uuid.UUID
+	BusinessID       uuid.UUID
+	BranchID         uuid.UUID
+	StaffID          uuid.UUID
+	CustomerID       pgtype.UUID
+	CustomerName     string
+	Status           string
+	Source           string
+	Assignment       string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	BusyUntil        time.Time
+	PriceAmount      int64
+	PriceCurrency    string
+	CustomerNote     string
+	PendingUntil     *time.Time
+	CancellableUntil time.Time
+	CancelledBy      *string
+	CancelReason     string
+	CancelledAt      *time.Time
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// For a replay: the Idempotency-Key, found by its owner, already scoped it.
+func (q *Queries) AppointmentByID(ctx context.Context, id uuid.UUID) (AppointmentByIDRow, error) {
+	row := q.db.QueryRow(ctx, appointmentByID, id)
+	var i AppointmentByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.BranchID,
+		&i.StaffID,
+		&i.CustomerID,
+		&i.CustomerName,
+		&i.Status,
+		&i.Source,
+		&i.Assignment,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.BusyUntil,
+		&i.PriceAmount,
+		&i.PriceCurrency,
+		&i.CustomerNote,
+		&i.PendingUntil,
+		&i.CancellableUntil,
+		&i.CancelledBy,
+		&i.CancelReason,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const appointmentItems = `-- name: AppointmentItems :many
 SELECT appointment_id, position, service_id, name_ar, name_en, duration_minutes, price_amount, price_currency FROM booking.appointment_items WHERE appointment_id = $1 ORDER BY position
 `
@@ -80,7 +145,7 @@ func (q *Queries) AppointmentItemsOf(ctx context.Context, ids []uuid.UUID) ([]Bo
 }
 
 const branchDay = `-- name: BranchDay :many
-SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+SELECT id, business_id, branch_id, staff_id, customer_id, customer_name, status, source, assignment, starts_at, ends_at,
        upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
        cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
 FROM booking.appointments
@@ -103,7 +168,8 @@ type BranchDayRow struct {
 	BusinessID       uuid.UUID
 	BranchID         uuid.UUID
 	StaffID          uuid.UUID
-	CustomerID       uuid.UUID
+	CustomerID       pgtype.UUID
+	CustomerName     string
 	Status           string
 	Source           string
 	Assignment       string
@@ -146,6 +212,7 @@ func (q *Queries) BranchDay(ctx context.Context, arg BranchDayParams) ([]BranchD
 			&i.BranchID,
 			&i.StaffID,
 			&i.CustomerID,
+			&i.CustomerName,
 			&i.Status,
 			&i.Source,
 			&i.Assignment,
@@ -175,7 +242,7 @@ func (q *Queries) BranchDay(ctx context.Context, arg BranchDayParams) ([]BranchD
 }
 
 const businessAppointmentForUpdate = `-- name: BusinessAppointmentForUpdate :one
-SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+SELECT id, business_id, branch_id, staff_id, customer_id, customer_name, status, source, assignment, starts_at, ends_at,
        upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
        cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
 FROM booking.appointments WHERE business_id = $1 AND id = $2 FOR UPDATE
@@ -191,7 +258,8 @@ type BusinessAppointmentForUpdateRow struct {
 	BusinessID       uuid.UUID
 	BranchID         uuid.UUID
 	StaffID          uuid.UUID
-	CustomerID       uuid.UUID
+	CustomerID       pgtype.UUID
+	CustomerName     string
 	Status           string
 	Source           string
 	Assignment       string
@@ -221,6 +289,7 @@ func (q *Queries) BusinessAppointmentForUpdate(ctx context.Context, arg Business
 		&i.BranchID,
 		&i.StaffID,
 		&i.CustomerID,
+		&i.CustomerName,
 		&i.Status,
 		&i.Source,
 		&i.Assignment,
@@ -289,13 +358,13 @@ func (q *Queries) BusyIntervals(ctx context.Context, arg BusyIntervalsParams) ([
 }
 
 const claimIdempotencyKey = `-- name: ClaimIdempotencyKey :execrows
-INSERT INTO booking.idempotency_keys (customer_id, key, request_hash, created_at)
+INSERT INTO booking.idempotency_keys (requester_id, key, request_hash, created_at)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT DO NOTHING
 `
 
 type ClaimIdempotencyKeyParams struct {
-	CustomerID  uuid.UUID
+	RequesterID uuid.UUID
 	Key         uuid.UUID
 	RequestHash []byte
 	CreatedAt   time.Time
@@ -305,7 +374,7 @@ type ClaimIdempotencyKeyParams struct {
 // has it; if that one is still running, this waits for it to finish.
 func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyKeyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimIdempotencyKey,
-		arg.CustomerID,
+		arg.RequesterID,
 		arg.Key,
 		arg.RequestHash,
 		arg.CreatedAt,
@@ -323,7 +392,7 @@ WHERE customer_id = $1 AND branch_id = $2
 `
 
 type CountActiveBookingsParams struct {
-	CustomerID uuid.UUID
+	CustomerID pgtype.UUID
 	BranchID   uuid.UUID
 	Now        time.Time
 }
@@ -338,14 +407,14 @@ func (q *Queries) CountActiveBookings(ctx context.Context, arg CountActiveBookin
 
 const customerAppointment = `-- name: CustomerAppointment :one
 
-SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+SELECT id, business_id, branch_id, staff_id, customer_id, customer_name, status, source, assignment, starts_at, ends_at,
        upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
        cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
 FROM booking.appointments WHERE customer_id = $1 AND id = $2
 `
 
 type CustomerAppointmentParams struct {
-	CustomerID uuid.UUID
+	CustomerID pgtype.UUID
 	ID         uuid.UUID
 }
 
@@ -354,7 +423,8 @@ type CustomerAppointmentRow struct {
 	BusinessID       uuid.UUID
 	BranchID         uuid.UUID
 	StaffID          uuid.UUID
-	CustomerID       uuid.UUID
+	CustomerID       pgtype.UUID
+	CustomerName     string
 	Status           string
 	Source           string
 	Assignment       string
@@ -386,6 +456,7 @@ func (q *Queries) CustomerAppointment(ctx context.Context, arg CustomerAppointme
 		&i.BranchID,
 		&i.StaffID,
 		&i.CustomerID,
+		&i.CustomerName,
 		&i.Status,
 		&i.Source,
 		&i.Assignment,
@@ -408,14 +479,14 @@ func (q *Queries) CustomerAppointment(ctx context.Context, arg CustomerAppointme
 }
 
 const customerAppointmentForUpdate = `-- name: CustomerAppointmentForUpdate :one
-SELECT id, business_id, branch_id, staff_id, customer_id, status, source, assignment, starts_at, ends_at,
+SELECT id, business_id, branch_id, staff_id, customer_id, customer_name, status, source, assignment, starts_at, ends_at,
        upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
        cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
 FROM booking.appointments WHERE customer_id = $1 AND id = $2 FOR UPDATE
 `
 
 type CustomerAppointmentForUpdateParams struct {
-	CustomerID uuid.UUID
+	CustomerID pgtype.UUID
 	ID         uuid.UUID
 }
 
@@ -424,7 +495,8 @@ type CustomerAppointmentForUpdateRow struct {
 	BusinessID       uuid.UUID
 	BranchID         uuid.UUID
 	StaffID          uuid.UUID
-	CustomerID       uuid.UUID
+	CustomerID       pgtype.UUID
+	CustomerName     string
 	Status           string
 	Source           string
 	Assignment       string
@@ -454,6 +526,7 @@ func (q *Queries) CustomerAppointmentForUpdate(ctx context.Context, arg Customer
 		&i.BranchID,
 		&i.StaffID,
 		&i.CustomerID,
+		&i.CustomerName,
 		&i.Status,
 		&i.Source,
 		&i.Assignment,
@@ -475,13 +548,102 @@ func (q *Queries) CustomerAppointmentForUpdate(ctx context.Context, arg Customer
 	return i, err
 }
 
+const duePendingForUpdate = `-- name: DuePendingForUpdate :many
+SELECT id, business_id, branch_id, staff_id, customer_id, customer_name, status, source, assignment, starts_at, ends_at,
+       upper(during)::timestamptz AS busy_until, price_amount, price_currency, customer_note, pending_until,
+       cancellable_until, cancelled_by, cancel_reason, cancelled_at, version, created_at, updated_at
+FROM booking.appointments
+WHERE status = 'pending' AND pending_until <= $1
+ORDER BY pending_until, id
+LIMIT $2
+FOR UPDATE SKIP LOCKED
+`
+
+type DuePendingForUpdateParams struct {
+	Now     *time.Time
+	MaxRows int32
+}
+
+type DuePendingForUpdateRow struct {
+	ID               uuid.UUID
+	BusinessID       uuid.UUID
+	BranchID         uuid.UUID
+	StaffID          uuid.UUID
+	CustomerID       pgtype.UUID
+	CustomerName     string
+	Status           string
+	Source           string
+	Assignment       string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	BusyUntil        time.Time
+	PriceAmount      int64
+	PriceCurrency    string
+	CustomerNote     string
+	PendingUntil     *time.Time
+	CancellableUntil time.Time
+	CancelledBy      *string
+	CancelReason     string
+	CancelledAt      *time.Time
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// Pending bookings whose expiry has passed, oldest first, locked. Rows
+// another transaction holds (the shop confirming one right now) are
+// skipped: the next run sees them again if they are still pending.
+func (q *Queries) DuePendingForUpdate(ctx context.Context, arg DuePendingForUpdateParams) ([]DuePendingForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, duePendingForUpdate, arg.Now, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DuePendingForUpdateRow{}
+	for rows.Next() {
+		var i DuePendingForUpdateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BusinessID,
+			&i.BranchID,
+			&i.StaffID,
+			&i.CustomerID,
+			&i.CustomerName,
+			&i.Status,
+			&i.Source,
+			&i.Assignment,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.BusyUntil,
+			&i.PriceAmount,
+			&i.PriceCurrency,
+			&i.CustomerNote,
+			&i.PendingUntil,
+			&i.CancellableUntil,
+			&i.CancelledBy,
+			&i.CancelReason,
+			&i.CancelledAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const idempotencyKey = `-- name: IdempotencyKey :one
-SELECT request_hash, appointment_id FROM booking.idempotency_keys WHERE customer_id = $1 AND key = $2
+SELECT request_hash, appointment_id FROM booking.idempotency_keys WHERE requester_id = $1 AND key = $2
 `
 
 type IdempotencyKeyParams struct {
-	CustomerID uuid.UUID
-	Key        uuid.UUID
+	RequesterID uuid.UUID
+	Key         uuid.UUID
 }
 
 type IdempotencyKeyRow struct {
@@ -490,7 +652,7 @@ type IdempotencyKeyRow struct {
 }
 
 func (q *Queries) IdempotencyKey(ctx context.Context, arg IdempotencyKeyParams) (IdempotencyKeyRow, error) {
-	row := q.db.QueryRow(ctx, idempotencyKey, arg.CustomerID, arg.Key)
+	row := q.db.QueryRow(ctx, idempotencyKey, arg.RequesterID, arg.Key)
 	var i IdempotencyKeyRow
 	err := row.Scan(&i.RequestHash, &i.AppointmentID)
 	return i, err
@@ -498,13 +660,13 @@ func (q *Queries) IdempotencyKey(ctx context.Context, arg IdempotencyKeyParams) 
 
 const insertAppointment = `-- name: InsertAppointment :exec
 INSERT INTO booking.appointments (
-    id, business_id, branch_id, staff_id, customer_id, status, source, assignment,
+    id, business_id, branch_id, staff_id, customer_id, customer_name, status, source, assignment,
     starts_at, ends_at, during, price_amount, price_currency, customer_note, pending_until,
     cancellable_until, version, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, tstzrange($9, $11::timestamptz, '[)'), $12, $13,
-    $14, $15, $16, $17, $18, $19
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    $10, $11, tstzrange($10, $12::timestamptz, '[)'), $13, $14,
+    $15, $16, $17, $18, $19, $20
 )
 `
 
@@ -513,7 +675,8 @@ type InsertAppointmentParams struct {
 	BusinessID       uuid.UUID
 	BranchID         uuid.UUID
 	StaffID          uuid.UUID
-	CustomerID       uuid.UUID
+	CustomerID       pgtype.UUID
+	CustomerName     string
 	Status           string
 	Source           string
 	Assignment       string
@@ -537,6 +700,7 @@ func (q *Queries) InsertAppointment(ctx context.Context, arg InsertAppointmentPa
 		arg.BranchID,
 		arg.StaffID,
 		arg.CustomerID,
+		arg.CustomerName,
 		arg.Status,
 		arg.Source,
 		arg.Assignment,
@@ -602,17 +766,17 @@ func (q *Queries) LockCustomerAtBranch(ctx context.Context, arg LockCustomerAtBr
 }
 
 const settleIdempotencyKey = `-- name: SettleIdempotencyKey :exec
-UPDATE booking.idempotency_keys SET appointment_id = $1 WHERE customer_id = $2 AND key = $3
+UPDATE booking.idempotency_keys SET appointment_id = $1 WHERE requester_id = $2 AND key = $3
 `
 
 type SettleIdempotencyKeyParams struct {
 	AppointmentID pgtype.UUID
-	CustomerID    uuid.UUID
+	RequesterID   uuid.UUID
 	Key           uuid.UUID
 }
 
 func (q *Queries) SettleIdempotencyKey(ctx context.Context, arg SettleIdempotencyKeyParams) error {
-	_, err := q.db.Exec(ctx, settleIdempotencyKey, arg.AppointmentID, arg.CustomerID, arg.Key)
+	_, err := q.db.Exec(ctx, settleIdempotencyKey, arg.AppointmentID, arg.RequesterID, arg.Key)
 	return err
 }
 

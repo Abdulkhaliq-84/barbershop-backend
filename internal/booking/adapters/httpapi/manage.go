@@ -93,6 +93,43 @@ func (h *Handlers) ListBranchAppointments(ctx context.Context, req apigen.ListBr
 	return out, nil
 }
 
+// BookWalkIn handles POST /v1/businesses/{business_id}/branches/{branch_id}/appointments.
+func (h *Handlers) BookWalkIn(ctx context.Context, req apigen.BookWalkInRequestObject) (apigen.BookWalkInResponseObject, error) {
+	fail := func(err error) (apigen.BookWalkInResponseObject, error) {
+		problem, headers := h.problem(ctx, err)
+		return apigen.BookWalkIndefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status, Headers: headers}, nil
+	}
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return fail(httpx.ErrNoPrincipal)
+	}
+	body := req.Body
+	cmd := app.StaffBooking{
+		Actor: p.UserID, Business: shared.IDFromUUID[shared.BusinessTag](req.BusinessId),
+		Branch: shared.IDFromUUID[shared.BranchTag](req.BranchId), IdempotencyKey: req.Params.IdempotencyKey,
+		Start: body.StartsAt, Barber: shared.IDFromUUID[shared.StaffTag](body.BarberId), CustomerName: body.CustomerName,
+	}
+	for _, id := range body.ServiceIds {
+		cmd.Services = append(cmd.Services, shared.IDFromUUID[shared.ServiceTag](id))
+	}
+	if body.Note != nil {
+		cmd.Note = *body.Note
+	}
+	a, replayed, err := h.book.StaffBook(ctx, cmd)
+	if err != nil {
+		return fail(err)
+	}
+	v, err := h.book.View(ctx, a)
+	if err != nil {
+		return fail(err)
+	}
+	out := apigen.BookWalkIn201JSONResponse{Body: toAPIAppointment(v)}
+	if replayed {
+		out.Headers.IdempotentReplayed = new(true)
+	}
+	return out, nil
+}
+
 func reasonOf(body *apigen.CancelRequest) string {
 	if body == nil || body.Reason == nil {
 		return ""

@@ -72,7 +72,7 @@ func TestBook(t *testing.T) {
 		},
 	}
 	repo := &bookings{}
-	h := app.NewBookHandlers(app.NewAvailabilityHandlers(s, s, scheduleSide{s}, busySide{s}, clock.NewFake(at(3, 20, 0))), repo)
+	h := app.NewBookHandlers(app.NewAvailabilityHandlers(s, s, scheduleSide{s}, busySide{s}, clock.NewFake(at(3, 20, 0))), repo, nil)
 	ctx := t.Context()
 	cmd := app.BookAppointment{
 		Customer: shared.NewID[shared.UserTag](), IdempotencyKey: uuid.New(), Branch: s.branch.ID,

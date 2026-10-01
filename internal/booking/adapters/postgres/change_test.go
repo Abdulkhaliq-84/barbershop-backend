@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/booking/adapters/postgres"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/booking/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/booking/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -203,4 +205,134 @@ func idsOf(list []*domain.Appointment) []domain.AppointmentID {
 		out = append(out, a.ID())
 	}
 	return out
+}
+
+// The expiry job: due pending bookings expire, oldest first and a batch at
+// a time; the others are left alone, and the time is free again.
+func TestExpireDue(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	s, ev := store(pool)
+	sh, ali := newShop(), shared.NewID[shared.StaffTag]()
+	// booked(…, pending) expires an hour after t0.
+	first := booked(t, s, sh, ali, shared.NewID[shared.UserTag](), t0.Add(5*time.Hour), true)
+	second := booked(t, s, sh, ali, shared.NewID[shared.UserTag](), t0.Add(6*time.Hour), true)
+	confirmed := booked(t, s, sh, ali, shared.NewID[shared.UserTag](), t0.Add(7*time.Hour), false)
+	due := t0.Add(time.Hour)
+	// The second has waited longer: it is due a minute earlier, so it goes first.
+	if _, err := pool.Exec(ctx, `UPDATE booking.appointments SET pending_until = $2 WHERE id = $1`, second.ID().UUID(), due.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := s.ExpireDue(ctx, due.Add(-time.Minute-time.Microsecond), 10); err != nil || n != 0 {
+		t.Fatalf("before the expiry: %d, %v", n, err)
+	}
+	events := len(ev.got)
+	if n, err := s.ExpireDue(ctx, due, 1); err != nil || n != 1 {
+		t.Fatalf("a batch of one: %d, %v", n, err)
+	}
+	if got, err := s.ByCustomer(ctx, second.Customer(), second.ID()); err != nil {
+		t.Fatal(err)
+	} else if got.Status() != domain.StatusExpired {
+		t.Errorf("the longest waiting first: second is %s", got.Status())
+	}
+	if n, err := s.ExpireDue(ctx, due, 10); err != nil || n != 1 {
+		t.Fatalf("the rest: %d, %v", n, err)
+	}
+	for _, a := range []*domain.Appointment{first, second} {
+		got, err := s.ByCustomer(ctx, a.Customer(), a.ID())
+		if err != nil || got.Status() != domain.StatusExpired || got.Snapshot().PendingUntil != nil {
+			t.Errorf("%s: %v, %v", a.ID(), got.Status(), err)
+		}
+	}
+	if got, _ := s.ByCustomer(ctx, confirmed.Customer(), confirmed.ID()); got.Status() != domain.StatusConfirmed {
+		t.Errorf("a confirmed booking became %s", got.Status())
+	}
+	if len(ev.got)-events != 2 || ev.got[len(ev.got)-1].Type != "booking.appointment_expired" {
+		t.Errorf("events = %d, last %s", len(ev.got)-events, ev.got[len(ev.got)-1].Type)
+	}
+	if n, err := s.ExpireDue(ctx, due.Add(time.Hour), 10); err != nil || n != 0 {
+		t.Errorf("again: %d, %v", n, err)
+	}
+	// The barber's time is free again.
+	sh.start = t0.Add(5 * time.Hour)
+	if _, _, err := s.Book(ctx, attempt(uuid.New(), 1, sh.draft(t, ali, shared.NewID[shared.UserTag]()))); err != nil {
+		t.Errorf("booking the expired time: %v", err)
+	}
+}
+
+// A booking the shop is confirming right now is skipped, not waited for:
+// the run finds it again next time, if it is still pending.
+func TestExpireDueSkipsLockedRows(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	s, _ := store(pool)
+	sh := newShop()
+	a := booked(t, s, sh, shared.NewID[shared.StaffTag](), shared.NewID[shared.UserTag](), t0.Add(5*time.Hour), true)
+	expired := make(chan int, 1)
+	_, err := s.ChangeAtBusiness(ctx, sh.business, a.ID(), func(a *domain.Appointment) error {
+		go func() {
+			n, err := s.ExpireDue(context.WithoutCancel(ctx), t0.Add(2*time.Hour), 10)
+			if err != nil {
+				t.Error(err)
+			}
+			expired <- n
+		}()
+		if n := <-expired; n != 0 { // returned while the row was still locked
+			t.Errorf("expired %d locked bookings", n)
+		}
+		return a.Confirm(t0)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A walk-in has no customer account: the shop's name for them is kept, the
+// key is the staff member's, and no customer can reach it.
+func TestWalkIn(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	s, ev := store(pool)
+	sh, ali, staffUser := newShop(), shared.NewID[shared.StaffTag](), shared.NewID[shared.UserTag]()
+	name, _ := shared.NewLocalizedText("قص", "")
+	d, err := domain.Book(domain.Booking{
+		ID: shared.NewID[domain.AppointmentTag](), Business: sh.business, Branch: sh.branch, Barber: ali,
+		Source: domain.SourceStaff, CustomerName: "أبو فهد", Start: sh.start, Assignment: domain.RequestedBarber, AutoConfirm: true,
+		Items: []domain.Item{{Service: shared.NewID[shared.ServiceTag](), Name: name, Duration: 30 * time.Minute, Price: shared.Halalas(6000)}},
+	}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := uuid.New()
+	walkIn := app.BookingAttempt{
+		Requester: staffUser, Branch: sh.branch, Key: key, RequestHash: make32(3), Now: t0, Drafts: []*domain.Appointment{d},
+		StillWorking: func(context.Context, *domain.Appointment) (bool, error) { return true, nil },
+	}
+	if _, _, err := s.Book(ctx, walkIn); err != nil {
+		t.Fatal(err)
+	}
+	day, err := postgres.NewAppointments(pool).Day(ctx, sh.business, sh.branch, t0, t0.Add(24*time.Hour), nil)
+	if err != nil || len(day) != 1 {
+		t.Fatalf("the day: %d, %v", len(day), err)
+	}
+	if snap := day[0].Snapshot(); !snap.Customer.IsZero() || snap.CustomerName != "أبو فهد" || snap.Source != domain.SourceStaff {
+		t.Errorf("stored = %+v", snap)
+	}
+	if last := ev.got[len(ev.got)-1]; jsonHas(t, last.Payload, "source", "staff") == false || strings.Contains(string(last.Payload), "customer_id") {
+		t.Errorf("event = %s", last.Payload)
+	}
+	// The staff member's retry gets it back, by their key.
+	if a, ok, err := s.Replay(ctx, staffUser, key, make32(3)); err != nil || !ok || a.ID() != d.ID() || a.Snapshot().CustomerName != "أبو فهد" {
+		t.Errorf("replay: %v, %v, %v", a, ok, err)
+	}
+	// The database refuses an appointment with neither a customer nor a
+	// walk-in's name.
+	_, err = pool.Exec(ctx, `UPDATE booking.appointments SET customer_name = '' WHERE id = $1`, d.ID().UUID())
+	if err == nil || !strings.Contains(err.Error(), "appointments_customer_check") {
+		t.Errorf("no customer at all: %v", err)
+	}
 }

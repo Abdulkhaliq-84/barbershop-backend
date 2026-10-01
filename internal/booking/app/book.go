@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -29,13 +30,15 @@ type BookAppointment struct {
 // BookingAttempt is what the repository saves in one transaction: the
 // first of Drafts whose barber is still free.
 type BookingAttempt struct {
-	Customer    shared.UserID
+	// Requester owns the Idempotency-Key: the customer booking, or the
+	// staff member booking for a walk-in.
+	Requester   shared.UserID
 	Branch      shared.BranchID
 	Key         uuid.UUID
 	RequestHash []byte // SHA-256 of what was asked, to tell a retry from a reused key
 	Now         time.Time
 	// Allow checks the customer's upcoming bookings at the branch, counted
-	// under a lock on the customer.
+	// under a lock on the customer. Nil for the shop's own bookings.
 	Allow func(active int) error
 	// Drafts are the same booking with each free barber, best first; none
 	// when nobody looked free (the key is still claimed, to find a
@@ -48,10 +51,10 @@ type BookingAttempt struct {
 
 // Bookings stores appointments (booking's own repository).
 type Bookings interface {
-	// Replay returns the appointment an earlier request with the customer's
-	// key made (ok), domain.ErrIdempotencyReused if it asked for something
-	// else, or nothing if the key is new.
-	Replay(ctx context.Context, customer shared.UserID, key uuid.UUID, requestHash []byte) (a *domain.Appointment, ok bool, err error)
+	// Replay returns the appointment an earlier request with the
+	// requester's key made (ok), domain.ErrIdempotencyReused if it asked for
+	// something else, or nothing if the key is new.
+	Replay(ctx context.Context, requester shared.UserID, key uuid.UUID, requestHash []byte) (a *domain.Appointment, ok bool, err error)
 	// Book saves the first draft whose barber is still free, or returns the
 	// appointment an earlier request with the same key made (replayed).
 	// domain.ErrSlotUnavailable when nobody was.
@@ -61,16 +64,17 @@ type Bookings interface {
 	ByCustomer(ctx context.Context, customer shared.UserID, id domain.AppointmentID) (*domain.Appointment, error)
 }
 
-// BookHandlers are the customer's booking use cases. Any signed-in user
-// may book at a bookable branch.
+// BookHandlers are the booking use cases: any signed-in user books at a
+// bookable branch; its staff book walk-ins there too.
 type BookHandlers struct {
 	*AvailabilityHandlers // the same reads: branch, menu, barbers, windows, appointments
 	bookings              Bookings
+	staff                 Staff
 }
 
 // NewBookHandlers wires the use cases.
-func NewBookHandlers(availability *AvailabilityHandlers, bookings Bookings) *BookHandlers {
-	return &BookHandlers{AvailabilityHandlers: availability, bookings: bookings}
+func NewBookHandlers(availability *AvailabilityHandlers, bookings Bookings, staff Staff) *BookHandlers {
+	return &BookHandlers{AvailabilityHandlers: availability, bookings: bookings, staff: staff}
 }
 
 // Book books the customer in. The slot shown a moment ago may be gone:
@@ -141,7 +145,7 @@ func (h *BookHandlers) Book(ctx context.Context, cmd BookAppointment) (a *domain
 	}
 	limit := branch.Policy.MaxActiveBookings
 	return h.bookings.Book(ctx, BookingAttempt{
-		Customer: cmd.Customer, Branch: branch.ID,
+		Requester: cmd.Customer, Branch: branch.ID,
 		Key: cmd.IdempotencyKey, RequestHash: hash, Now: now, Drafts: drafts,
 		Allow: func(active int) error {
 			if active >= limit {
@@ -149,15 +153,143 @@ func (h *BookHandlers) Book(ctx context.Context, cmd BookAppointment) (a *domain
 			}
 			return nil
 		},
-		StillWorking: func(ctx context.Context, a *domain.Appointment) (bool, error) {
-			busy := a.Busy()
-			windows, err := h.schedules.WorkingWindows(ctx, branch.BusinessID, branch.ID, []shared.StaffID{a.Barber()}, busy.Start(), busy.End())
-			if err != nil {
-				return false, err
-			}
-			return slices.ContainsFunc(windows[a.Barber()], func(w shared.Interval) bool { return w.Covers(busy) }), nil
-		},
+		StillWorking: h.stillWorking(branch),
 	})
+}
+
+// stillWorking re-reads a draft's barber's working windows: hours or time
+// off may have changed since the free time was found.
+func (h *BookHandlers) stillWorking(branch Branch) func(context.Context, *domain.Appointment) (bool, error) {
+	return func(ctx context.Context, a *domain.Appointment) (bool, error) {
+		busy := a.Busy()
+		windows, err := h.schedules.WorkingWindows(ctx, branch.BusinessID, branch.ID, []shared.StaffID{a.Barber()}, busy.Start(), busy.End())
+		if err != nil {
+			return false, err
+		}
+		return slices.ContainsFunc(windows[a.Barber()], func(w shared.Interval) bool { return w.Covers(busy) }), nil
+	}
+}
+
+// StaffBooking is the shop booking someone in: a walk-in, or a customer who
+// phoned. They have no app account here; the shop gives their name.
+type StaffBooking struct {
+	Actor          shared.UserID // the staff member booking
+	Business       shared.BusinessID
+	Branch         shared.BranchID
+	IdempotencyKey uuid.UUID // the actor's key for this request
+	Start          time.Time
+	Services       []shared.ServiceID
+	Barber         shared.StaffID
+	CustomerName   string
+	Note           string
+}
+
+// WalkInGrace is how far back the shop may start a booking: a walk-in may
+// already be in the chair.
+const WalkInGrace = 15 * time.Minute
+
+// StaffBook books a walk-in. Who may: the owner and the branch's managers
+// for any barber there, a barber for themselves (domain.ErrForbidden
+// otherwise; not staff of the business, or not its branch, is
+// domain.ErrNotFound). The branch must take bookings (published, its
+// business active).
+//
+// The shop's rules differ from the app's: any whole minute (not only the
+// grid), from WalkInGrace ago (no lead time), within the horizon; the
+// barber must be working then and free. It is confirmed at once, and no
+// limit of upcoming bookings applies. The Idempotency-Key is the staff
+// member's.
+func (h *BookHandlers) StaffBook(ctx context.Context, cmd StaffBooking) (a *domain.Appointment, replayed bool, err error) {
+	if len(cmd.Services) == 0 || len(cmd.Services) > domain.MaxServices || hasDuplicates(cmd.Services) {
+		return nil, false, domain.ErrNoServices
+	}
+	member, err := h.staff.MemberOf(ctx, cmd.Actor, cmd.Business)
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := h.staff.BranchLocation(ctx, cmd.Business, cmd.Branch); err != nil {
+		return nil, false, err
+	}
+	if !member.worksAt(cmd.Branch) || (member.Role == RoleBarber && cmd.Barber != member.Staff) {
+		return nil, false, domain.ErrForbidden
+	}
+	hash := staffRequestHash(cmd)
+	if a, ok, err := h.bookings.Replay(ctx, cmd.Actor, cmd.IdempotencyKey, hash); ok || err != nil {
+		return a, ok, err
+	}
+	branch, err := h.branches.Bookable(ctx, cmd.Branch)
+	switch {
+	case errors.Is(err, domain.ErrNotFound) || (err == nil && branch.BusinessID != cmd.Business):
+		return nil, false, domain.ErrBranchNotBookable // the business's own branch, not published
+	case err != nil:
+		return nil, false, err
+	}
+	now := h.clock.Now()
+	if err := checkStaffStart(cmd.Start, now, branch); err != nil {
+		return nil, false, err
+	}
+	menu, err := h.menus.Menu(ctx, branch.BusinessID, branch.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("staff book: %w", err)
+	}
+	offers, err := offersFor(cmd.Services, menu)
+	if err != nil {
+		return nil, false, err
+	}
+	if offers, err = h.stillThere(ctx, branch, offers); err != nil {
+		return nil, false, err
+	}
+	i := slices.IndexFunc(offers, func(o Offer) bool { return o.ID == cmd.Barber })
+	if i < 0 {
+		return nil, false, domain.ErrBarberUnavailable
+	}
+	day := domain.DayOf(cmd.Start.In(branch.Location))
+	cands, err := h.candidates(ctx, branch, day, offers[i:i+1])
+	if err != nil {
+		return nil, false, err
+	}
+	var drafts []*domain.Appointment // none if they aren't free: the key still finds a first request
+	if len(freeAt(cmd.Start, cands, day, branch.Location)) == 1 {
+		d, err := domain.Book(domain.Booking{
+			ID: shared.NewID[domain.AppointmentTag](), Business: branch.BusinessID, Branch: branch.ID,
+			Barber: cmd.Barber, CustomerName: cmd.CustomerName, Source: domain.SourceStaff, Start: cmd.Start,
+			Items: itemsFor(cmd.Services, menu, cmd.Barber), Buffer: branch.Policy.Buffer,
+			Assignment: domain.RequestedBarber, Note: strings.TrimSpace(cmd.Note), AutoConfirm: true,
+		}, now)
+		if err != nil {
+			return nil, false, err
+		}
+		drafts = append(drafts, d)
+	}
+	return h.bookings.Book(ctx, BookingAttempt{
+		Requester: cmd.Actor, Branch: branch.ID, Key: cmd.IdempotencyKey, RequestHash: hash, Now: now,
+		Drafts: drafts, StillWorking: h.stillWorking(branch), // no Allow: no limit for the shop
+	})
+}
+
+// checkStaffStart applies the shop's rules for when its bookings may
+// start: a whole minute, from WalkInGrace ago, within the horizon.
+func checkStaffStart(start, now time.Time, b Branch) error {
+	last := domain.DayOf(now.In(b.Location)).AddDays(b.Policy.HorizonDays)
+	switch {
+	case !start.Equal(start.Truncate(time.Minute)),
+		start.Before(now.Add(-WalkInGrace)),
+		!start.Before(last.AddDays(1).Start(b.Location)):
+		return domain.ErrInvalidStart
+	}
+	return nil
+}
+
+// staffRequestHash is requestHash for the shop's bookings.
+func staffRequestHash(cmd StaffBooking) []byte {
+	services := make([]string, 0, len(cmd.Services))
+	for _, s := range cmd.Services {
+		services = append(services, s.String())
+	}
+	sum := sha256.Sum256(fmt.Appendf(nil, "staff|%s|%s|%s|%s|%q|%q",
+		cmd.Branch, cmd.Start.UTC().Format(time.RFC3339Nano), strings.Join(services, ","), cmd.Barber,
+		strings.TrimSpace(cmd.CustomerName), strings.TrimSpace(cmd.Note)))
+	return sum[:]
 }
 
 // Appointment returns one of the customer's own appointments.

@@ -1,4 +1,5 @@
-// Package outbox delivers domain events between modules (ADR-0009, ADR-0019).
+// Package outbox delivers domain events between modules (ADR-0009, ADR-0019),
+// and runs the modules' scheduled tasks in the worker role (Every).
 //
 // A module saves its events in the same transaction as the change they
 // describe (PublishTx), as River jobs: one per event. The worker role (Run)
@@ -69,6 +70,7 @@ type Bus struct {
 	mu       sync.RWMutex
 	handlers map[string]Handler  // subscriber name → handler
 	byType   map[string][]string // event type → subscriber names, in subscription order
+	tasks    map[string]schedule // task name → when and what
 }
 
 // New returns a bus on pool. Subscribe everything before serving requests or
@@ -78,7 +80,10 @@ func New(pool *pgxpool.Pool, logger *slog.Logger) (*Bus, error) {
 	if err != nil {
 		return nil, fmt.Errorf("outbox: %w", err)
 	}
-	return &Bus{pool: pool, client: client, logger: logger, handlers: map[string]Handler{}, byType: map[string][]string{}}, nil
+	return &Bus{
+		pool: pool, client: client, logger: logger,
+		handlers: map[string]Handler{}, byType: map[string][]string{}, tasks: map[string]schedule{},
+	}, nil
 }
 
 // riverConns is how many pool connections River keeps for itself while it
@@ -103,6 +108,31 @@ func (b *Bus) Subscribe(name, eventType string, handler Handler) {
 	}
 	b.handlers[name] = handler
 	b.byType[eventType] = append(b.byType[eventType], name)
+}
+
+// Task is work a module wants done on a schedule, such as expiring stale
+// bookings. It must be idempotent and safe to run twice at once: a run may
+// repeat work an earlier one did, find nothing to do, or overlap the next
+// run if it takes longer than its interval.
+type Task func(ctx context.Context) error
+
+type schedule struct {
+	every time.Duration
+	task  Task
+}
+
+// Every registers task to run in the worker role every interval, under a
+// unique, stable name: once as the worker starts, then each interval. It is
+// scheduled at most once per interval, however many workers are deployed
+// (River's elected leader inserts it, unique per period). A failed run is
+// not retried: the next one does the work. Register before calling Run.
+func (b *Bus) Every(name string, interval time.Duration, task Task) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, dup := b.tasks[name]; dup {
+		panic("outbox: task " + name + " registered twice")
+	}
+	b.tasks[name] = schedule{every: interval, task: task}
 }
 
 // PublishTx saves events inside tx, one job each. The worker fans them out
@@ -136,10 +166,14 @@ func (b *Bus) Run(ctx context.Context, stopTimeout time.Duration) error {
 	if err := river.AddWorkerSafely(workers, &deliveryWorker{bus: b}); err != nil {
 		return err
 	}
+	if err := river.AddWorkerSafely(workers, &taskWorker{bus: b}); err != nil {
+		return err
+	}
 	client, err := river.NewClient(riverpgxv5.New(b.pool), &river.Config{
 		Schema:          Schema,
 		Logger:          b.logger,
 		Workers:         workers,
+		PeriodicJobs:    b.periodicJobs(),
 		Queues:          map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: maxWorkers(b.pool)}},
 		SoftStopTimeout: stopTimeout, // then River cancels the handlers still running
 	})
@@ -255,3 +289,51 @@ const (
 	unknownSubscriberWait   = 24 * time.Hour
 	unknownSubscriberSnooze = time.Minute
 )
+
+// periodicJobs schedules the registered tasks.
+func (b *Bus) periodicJobs() []*river.PeriodicJob {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	jobs := make([]*river.PeriodicJob, 0, len(b.tasks))
+	for name, s := range b.tasks {
+		jobs = append(jobs, river.NewPeriodicJob(
+			river.PeriodicInterval(s.every),
+			func() (river.JobArgs, *river.InsertOpts) {
+				return taskArgs{Name: name}, &river.InsertOpts{
+					MaxAttempts: 1, // the next run does the work instead
+					UniqueOpts:  river.UniqueOpts{ByArgs: true, ByPeriod: s.every},
+				}
+			},
+			&river.PeriodicJobOpts{ID: name, RunOnStart: true},
+		))
+	}
+	return jobs
+}
+
+// taskArgs is one run of a scheduled task.
+type taskArgs struct {
+	Name string `json:"name"`
+}
+
+func (taskArgs) Kind() string { return "scheduled_task" }
+
+type taskWorker struct {
+	river.WorkerDefaults[taskArgs]
+	bus *Bus
+}
+
+// Work runs the task. One this release doesn't know (a newer release
+// scheduled it while rolling out) is skipped: that release runs it.
+func (w *taskWorker) Work(ctx context.Context, job *river.Job[taskArgs]) error {
+	w.bus.mu.RLock()
+	s, ok := w.bus.tasks[job.Args.Name]
+	w.bus.mu.RUnlock()
+	if !ok {
+		w.bus.logger.WarnContext(ctx, "scheduled task skipped: not in this release", slog.String("task", job.Args.Name))
+		return nil
+	}
+	if err := s.task(ctx); err != nil {
+		return fmt.Errorf("outbox: task %s: %w", job.Args.Name, err)
+	}
+	return nil
+}
