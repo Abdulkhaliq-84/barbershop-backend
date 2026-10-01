@@ -55,7 +55,7 @@ func (h *Handlers) SearchBranches(ctx context.Context, req apigen.SearchBranches
 	}
 	var after *domain.Position
 	if req.Params.Cursor != nil {
-		if after, err = decodeCursor(*req.Params.Cursor, s.Near != nil); err != nil {
+		if after, err = decodeCursor(*req.Params.Cursor, s.Order()); err != nil {
 			return fail(err)
 		}
 	}
@@ -76,7 +76,7 @@ func (h *Handlers) SearchBranches(ctx context.Context, req apigen.SearchBranches
 		out.Data = append(out.Data, item)
 	}
 	if page.Next != nil {
-		out.NextCursor = new(encodeCursor(*page.Next, s.Near != nil))
+		out.NextCursor = new(encodeCursor(*page.Next, s.Order()))
 	}
 	return out, nil
 }
@@ -91,6 +91,9 @@ var (
 // searchOf reads the search from the query parameters.
 func searchOf(p apigen.SearchBranchesParams) (app.Search, error) {
 	var s app.Search
+	if p.Q != nil {
+		s.Text = *p.Q
+	}
 	if p.City != nil {
 		city, err := shared.ParseCity(*p.City)
 		if err != nil {
@@ -132,47 +135,61 @@ func toAPIText(t shared.LocalizedText) apigen.LocalizedText {
 // errBadCursor reports a cursor this API didn't issue.
 var errBadCursor = errors.New("cursor: not one this API issued")
 
-// A cursor is opaque to clients: base64url of "n|<branch_id>|<arabic name>"
-// when browsing by name, "d|<branch_id>|<distance>" near a place (the ID
-// before the name: it never contains "|", a name might). The distance is
-// written so it reads back exactly, so the next page starts exactly after
-// the last branch shown. A cursor is not signed: it only says where to
-// continue, and every page is still only listed branches.
-func encodeCursor(p domain.Position, near bool) string {
-	key := "n|" + p.Branch.String() + "|" + p.NameAr
-	if near {
-		key = "d|" + p.Branch.String() + "|" + strconv.FormatFloat(p.DistanceM, 'g', -1, 64)
+// A cursor is opaque to clients: base64url of "<kind>|<branch_id>|<key>",
+// where the kind names the search's order and the key is the last branch's
+// sort key in it: "n" and its Arabic name, "d" and its distance, "m" and
+// its match score. (The ID comes before the key: it never contains "|", a
+// name might.) Numbers are written so they read back exactly, so the next
+// page starts exactly after the last branch shown. A cursor is not signed:
+// it only says where to continue, and every page is still only listed
+// branches.
+var cursorKinds = map[app.Order]string{app.ByName: "n", app.ByDistance: "d", app.ByMatch: "m"}
+
+func encodeCursor(p domain.Position, order app.Order) string {
+	key := p.NameAr
+	switch order {
+	case app.ByDistance:
+		key = strconv.FormatFloat(p.DistanceM, 'g', -1, 64)
+	case app.ByMatch:
+		key = strconv.FormatFloat(p.Score, 'g', -1, 64)
 	}
-	return base64.RawURLEncoding.EncodeToString([]byte(key))
+	return base64.RawURLEncoding.EncodeToString([]byte(cursorKinds[order] + "|" + p.Branch.String() + "|" + key))
 }
 
-func decodeCursor(s string, near bool) (*domain.Position, error) {
+func decodeCursor(s string, order app.Order) (*domain.Position, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
 		return nil, errBadCursor
 	}
-	want := "n|"
-	if near {
-		want = "d|"
-	}
-	rest, ours := strings.CutPrefix(string(raw), want)
+	rest, ours := strings.CutPrefix(string(raw), cursorKinds[order]+"|")
 	id, key, ok := strings.Cut(rest, "|")
 	if !ours || !ok || key == "" {
-		return nil, errBadCursor // not ours, or from the other kind of search
+		return nil, errBadCursor // not ours, or from another kind of search
 	}
 	u, err := uuid.Parse(id)
 	if err != nil {
 		return nil, errBadCursor
 	}
 	p := &domain.Position{Branch: shared.IDFromUUID[shared.BranchTag](u)}
-	if !near {
+	switch order {
+	case app.ByName:
 		p.NameAr = key
-		return p, nil
+	case app.ByDistance:
+		p.DistanceM, ok = number(key, 0, math.MaxFloat64)
+	case app.ByMatch:
+		p.Score, ok = number(key, 0, 1)
 	}
-	if p.DistanceM, err = strconv.ParseFloat(key, 64); err != nil || p.DistanceM < 0 || math.IsInf(p.DistanceM, 0) || math.IsNaN(p.DistanceM) {
+	if !ok {
 		return nil, errBadCursor
 	}
 	return p, nil
+}
+
+// number parses a cursor's number, which must lie in [lo, hi] (so NaN and
+// the infinities don't).
+func number(s string, lo, hi float64) (float64, bool) {
+	v, err := strconv.ParseFloat(s, 64)
+	return v, err == nil && v >= lo && v <= hi
 }
 
 // problem maps a use-case error to an API error. Unknown errors are bugs or
@@ -185,7 +202,9 @@ func (h *Handlers) problem(ctx context.Context, err error) apigen.Problem {
 	case errors.Is(err, errBadCursor):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "cursor: pass next_cursor from the previous page, with the same search"
 	case errors.Is(err, domain.ErrNoPlace):
-		status, code, detail = http.StatusBadRequest, "validation_failed", "pass city, or lat and lng"
+		status, code, detail = http.StatusBadRequest, "validation_failed", "pass city, lat and lng, or q"
+	case errors.Is(err, domain.ErrQueryTooShort):
+		status, code, detail = http.StatusBadRequest, "validation_failed", "q: at least two letters or digits"
 	case errors.Is(err, domain.ErrRadius):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "radius_km: 1 to 50"
 	case errors.Is(err, errHalfAPlace), errors.Is(err, errRadiusAlone), errors.Is(err, errBadCoordinates):

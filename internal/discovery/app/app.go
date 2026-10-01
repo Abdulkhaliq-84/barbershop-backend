@@ -30,11 +30,36 @@ func (h *Handlers) Keep(ctx context.Context, l domain.Listing) error {
 	return nil
 }
 
-// Search is what a customer looks for: the branches of a city, the
-// branches near a point, or both (near a point, in that city).
+// Search is what a customer looks for: the branches of a city, near a
+// point, or with a name, or several of these at once.
 type Search struct {
 	City *shared.City // nil: any city
-	Near *domain.Near // nil: by Arabic name, which needs a city
+	Near *domain.Near // nil: no place
+	Text string       // what the customer typed to find a name; "": any name
+}
+
+// Order is how a search's results are sorted, and so what a page's
+// position holds.
+type Order int
+
+// The orders: near a point, nearest first; by name searched for, best
+// match first; else browsing a city, by Arabic name.
+const (
+	ByName Order = iota
+	ByDistance
+	ByMatch
+)
+
+// Order says how the search's results are sorted.
+func (s Search) Order() Order {
+	switch {
+	case s.Near != nil:
+		return ByDistance
+	case s.Text != "":
+		return ByMatch
+	default:
+		return ByName
+	}
 }
 
 // Page is one page of search results. Next is where the next page starts;
@@ -45,30 +70,39 @@ type Page struct {
 }
 
 // Search returns a page of results, after the given position (nil for the
-// first page): nearest first when searching near a point, else by name.
+// first page), in the search's Order.
 func (h *Handlers) Search(ctx context.Context, s Search, after *domain.Position) (Page, error) {
+	f := domain.Filter{City: s.City}
+	if s.Text != "" {
+		text, err := domain.ParseQuery(s.Text)
+		if err != nil {
+			return Page{}, err
+		}
+		f.Text = text
+	}
 	// One more than a page says whether another page follows.
 	var found []domain.Found
-	switch {
-	case s.Near != nil:
+	var err error
+	switch s.Order() {
+	case ByDistance:
 		if s.Near.RadiusM <= 0 || s.Near.RadiusM > domain.MaxRadiusKm*1000 {
 			return Page{}, domain.ErrRadius
 		}
-		got, err := h.listings.Near(ctx, *s.Near, s.City, after, domain.PageSize+1)
-		if err != nil {
-			return Page{}, fmt.Errorf("search near: %w", err)
+		found, err = h.listings.Near(ctx, *s.Near, f, after, domain.PageSize+1)
+	case ByMatch:
+		found, err = h.listings.Matching(ctx, f, after, domain.PageSize+1)
+	case ByName:
+		if s.City == nil {
+			return Page{}, domain.ErrNoPlace
 		}
-		found = got
-	case s.City != nil:
-		got, err := h.listings.InCity(ctx, *s.City, after, domain.PageSize+1)
-		if err != nil {
-			return Page{}, fmt.Errorf("browse %s: %w", s.City.Code(), err)
-		}
-		for _, l := range got {
+		var listed []domain.Listing
+		listed, err = h.listings.InCity(ctx, *s.City, after, domain.PageSize+1)
+		for _, l := range listed {
 			found = append(found, domain.Found{Listing: l})
 		}
-	default:
-		return Page{}, domain.ErrNoPlace
+	}
+	if err != nil {
+		return Page{}, fmt.Errorf("search: %w", err)
 	}
 	if len(found) <= domain.PageSize {
 		return Page{Found: found}, nil
@@ -76,9 +110,12 @@ func (h *Handlers) Search(ctx context.Context, s Search, after *domain.Position)
 	found = found[:domain.PageSize]
 	last := found[len(found)-1]
 	next := &domain.Position{Branch: last.Branch}
-	if s.Near != nil {
+	switch s.Order() {
+	case ByDistance:
 		next.DistanceM = last.DistanceM
-	} else {
+	case ByMatch:
+		next.Score = last.Score
+	case ByName:
 		next.NameAr = last.Name.Ar()
 	}
 	return Page{Found: found, Next: next}, nil

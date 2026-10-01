@@ -605,11 +605,18 @@ paths:
         `cursor` to get the next one (with the same search).
 
         - **Near a place** (`lat` and `lng`): the branches within
-          `radius_km`, nearest first, each with its `distance_m`. Add
-          `city` to keep only that city's.
+          `radius_km`, nearest first, each with its `distance_m`.
+        - **By name** (`q`): branches whose Arabic or English name contains
+          `q` or is close to it (a letter off), best match first. Spelling
+          variants match: أ إ آ and ا, ة and ه, ى and ي, short vowels,
+          tatweel, upper and lower case.
         - **In a city** (`city` alone): its branches by Arabic name.
 
-        Neither a city nor a place, or only one of `lat` and `lng`: `400`.
+        They combine: `city` keeps only that city's branches, and `q` with
+        a place keeps only matching names, still nearest first.
+
+        None of a city, a place or a name, only one of `lat` and `lng`, or a
+        `q` with fewer than two letters or digits: `400`.
 
         A list kept from the businesses' changes: a branch appears or
         changes here moments after its owner publishes or edits it.
@@ -624,6 +631,14 @@ paths:
             type: string
             pattern: "^[a-z][a-z_]{1,39}$"
             example: riyadh
+        - name: q
+          in: query
+          description: A branch name, or part of one, in Arabic or English.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 60
+            example: الأناقة
         - name: lat
           in: query
           description: Search near this latitude (with `lng`), e.g. the customer's location.

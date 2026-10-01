@@ -234,7 +234,7 @@ func TestNear(t *testing.T) {
 	}
 	near := func(radiusKm float64, city *shared.City, after *domain.Position, limit int) []domain.Found {
 		t.Helper()
-		got, err := r.Near(ctx, domain.Near{Point: olaya, RadiusM: radiusKm * 1000}, city, after, limit)
+		got, err := r.Near(ctx, domain.Near{Point: olaya, RadiusM: radiusKm * 1000}, domain.Filter{City: city}, after, limit)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -350,7 +350,7 @@ func TestNearTies(t *testing.T) {
 		var seen []shared.BranchID
 		var after *domain.Position
 		for range 20 {
-			got, err := r.Near(ctx, domain.Near{Point: olaya, RadiusM: 10_000}, nil, after, size)
+			got, err := r.Near(ctx, domain.Near{Point: olaya, RadiusM: 10_000}, domain.Filter{}, after, size)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -370,5 +370,147 @@ func TestNearTies(t *testing.T) {
 		if !slices.Equal(seen, want) {
 			t.Errorf("pages of %d = %v, want %v", size, seen, want)
 		}
+	}
+}
+
+func TestMatching(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	named := func(ar, en, city string) domain.Listing {
+		l := listing(t, ar)
+		l.Name, _ = shared.NewLocalizedText(ar, en)
+		l.City, _ = shared.ParseCity(city)
+		return l
+	}
+	elegance := named("صالون الأناقة", "Elegance Barbers", "riyadh")
+	royal := named("الأناقة الملكية", "", "jeddah")
+	nearly := named("صالون الاناقي", "", "riyadh") // one letter off
+	elite := named("حلاق النخبة", "Elite Cuts", "riyadh")
+	hidden := named("الأناقة المخفية", "", "riyadh")
+	hidden.Listed = false
+	for _, l := range []domain.Listing{elite, nearly, hidden, royal, elegance} {
+		if _, err := r.Keep(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stored string
+	if err := pool.QueryRow(ctx, `SELECT search_text FROM discovery.branch_listings WHERE branch_id = $1`, elegance.Branch.UUID()).Scan(&stored); err != nil ||
+		stored != "صالون الاناقه elegance barbers" {
+		t.Errorf("search_text = %q, %v", stored, err)
+	}
+	match := func(text string, city *shared.City, after *domain.Position, limit int) []domain.Found {
+		t.Helper()
+		got, err := r.Matching(ctx, domain.Filter{City: city, Text: text}, after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	ids := func(found []domain.Found) []shared.BranchID {
+		out := make([]shared.BranchID, len(found))
+		for i, f := range found {
+			out[i] = f.Branch
+		}
+		return out
+	}
+	// Equal scores tie, and the ID orders them.
+	byID := func(ids ...shared.BranchID) []shared.BranchID {
+		slices.SortFunc(ids, func(a, b shared.BranchID) int { return strings.Compare(a.String(), b.String()) })
+		return ids
+	}
+	exact := byID(elegance.Branch, royal.Branch)       // both score 1
+	best := append(slices.Clone(exact), nearly.Branch) // then 0.75
+
+	all := match("الاناقه", nil, nil, 10)
+	if !slices.Equal(ids(all), best) || all[0].Score != 1 || all[2].Score >= 1 || all[2].Score < 0.5 {
+		t.Fatalf("الاناقه = %v (scores %v, %v, %v), want %v", ids(all), all[0].Score, all[1].Score, all[2].Score, best)
+	}
+	if all[0].Listing != elegance && all[0].Listing != royal {
+		t.Errorf("listing read back = %+v", all[0].Listing)
+	}
+	for name, tt := range map[string]struct {
+		text string
+		city string
+		want []shared.BranchID
+	}{
+		// All three score 0.57: found because the threshold is 0.5, not 0.6.
+		"a letter missing": {"الانقه", "", byID(elegance.Branch, royal.Branch, nearly.Branch)},
+		// Contained, though the score is only 0.25.
+		"part of a word":  {"ناق", "", byID(elegance.Branch, royal.Branch, nearly.Branch)},
+		"English":         {"elegance", "", []shared.BranchID{elegance.Branch}},
+		"in a city":       {"الاناقه", "riyadh", []shared.BranchID{elegance.Branch, nearly.Branch}},
+		"nothing like it": {"قهوه", "", nil},
+		"another shop":    {"النخبه", "", []shared.BranchID{elite.Branch}},
+	} {
+		var city *shared.City
+		if tt.city != "" {
+			c, _ := shared.ParseCity(tt.city)
+			city = &c
+		}
+		if got := ids(match(tt.text, city, nil, 10)); !slices.Equal(got, tt.want) {
+			t.Errorf("%s: %v, want %v", name, got, tt.want)
+		}
+	}
+
+	// One at a time, each exactly once, best first, across the tie.
+	var seen []shared.BranchID
+	var after *domain.Position
+	for range 10 {
+		got := match("الاناقه", nil, after, 1)
+		if len(got) == 0 {
+			break
+		}
+		seen = append(seen, got[0].Branch)
+		after = &domain.Position{Score: got[0].Score, Branch: got[0].Branch}
+	}
+	if !slices.Equal(seen, best) {
+		t.Errorf("one at a time = %v, want %v", seen, best)
+	}
+
+	// Near a place, a name narrows it: still nearest first.
+	olaya, _ := shared.NewGeoPoint(24.6911, 46.6851)
+	got, err := r.Near(ctx, domain.Near{Point: olaya, RadiusM: 10_000}, domain.Filter{Text: "النخبه"}, nil, 10)
+	if err != nil || !slices.Equal(ids(got), []shared.BranchID{elite.Branch}) {
+		t.Errorf("near, by name = %v, %v", ids(got), err)
+	}
+}
+
+// The name search reads the trigram index, not every row.
+func TestMatchingUsesTheIndex(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO discovery.branch_listings
+			(branch_id, business_id, version, listed, name_ar, city_code, address, latitude, longitude, timezone, updated_at, search_text)
+		SELECT gen_random_uuid(), gen_random_uuid(), 1, true, 'صالون', 'riyadh', 'شارع', 24.7, 46.7, 'Asia/Riyadh', now(), md5(g::text)
+		FROM generate_series(1, 5000) g`); err != nil {
+		t.Fatal(err)
+	}
+	// Rows added after a GIN index is built wait in its pending list, which
+	// the planner prices high until a vacuum moves them into the index (as
+	// autovacuum does in a running database).
+	if _, err := pool.Exec(ctx, `VACUUM ANALYZE discovery.branch_listings`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, `EXPLAIN (COSTS OFF)
+		SELECT branch_id FROM discovery.branch_listings
+		WHERE listed AND (search_text LIKE '%الاناقه%' OR 'الاناقه' <% search_text)
+		ORDER BY word_similarity('الاناقه', search_text) DESC, branch_id LIMIT 21`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(line + "\n")
+	}
+	if !strings.Contains(plan.String(), "branch_listings_search_idx") {
+		t.Errorf("the plan doesn't use the name index:\n%s", plan.String())
 	}
 }

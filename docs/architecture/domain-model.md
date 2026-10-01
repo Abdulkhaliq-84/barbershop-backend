@@ -351,6 +351,15 @@ Arabic normalisation for search: strip diacritics/tatweel, unify alef forms (أ 
   (radius, order, the one shown, the cursor) is measured on a sphere, so they agree.
 - Pages continue by `(distance, branch ID)`.
 
+**Live since M6.3 (ADR-0029):** search by name.
+- `GET /v1/branches?q=`: branches whose Arabic or English name contains `q` or is close to it (a
+  letter off), best match first. It combines with `city`, and with a place (then nearest
+  first).
+- `domain.Normalize` applies the Arabic rules above, plus lowercase and single spaces, to names
+  (`search_text`, saved with the copy) and to searches alike. It is fuzz-tested.
+- A partial GIN trigram index answers both "contains" (`LIKE`) and "close to" (`<%`, word
+  similarity ≥ 0.5, set per search).
+
 ### 3.7 `billing` — Plans and entitlements
 
 | Aggregate | Key fields | Invariants |
