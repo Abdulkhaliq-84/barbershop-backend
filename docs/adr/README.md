@@ -31,3 +31,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0024](0024-booking-an-appointment.md) | Booking: the key first, the database decides, one lock per barber shared with scheduling | Accepted |
 | [0025](0025-appointment-lifecycle.md) | Appointment lifecycle: the domain decides, one change at a time, the deadline kept with the booking | Accepted |
 | [0026](0026-walk-ins-and-pending-expiry.md) | Walk-ins and pending expiry: the shop books by name, a scheduled task expires what wasn't answered | Accepted |
+| [0027](0027-discovery-read-model.md) | Discovery keeps its own copy of each branch, from events that carry the branch | Accepted |

@@ -1,0 +1,10 @@
+# gitleaks: the default rules, plus one allowance (CI: security.yml).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated code"
+# oapi-codegen embeds the OpenAPI spec in apigen.gen.go as gzipped base64,
+# and stretches of random base64 can look like an API key. The spec itself,
+# api/openapi.yaml, is still scanned.
+paths = ['''internal/apigen/apigen\.gen\.go''']

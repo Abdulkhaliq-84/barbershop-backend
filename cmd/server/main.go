@@ -29,6 +29,8 @@ import (
 	businesshttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/business/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog"
 	cataloghttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/adapters/httpapi"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery"
+	discoveryhttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/iam"
 	iamhttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media"
@@ -130,6 +132,7 @@ type (
 	catalogAPI    = cataloghttp.Handlers
 	schedulingAPI = schedulinghttp.Handlers
 	bookingAPI    = bookinghttp.Handlers
+	discoveryAPI  = discoveryhttp.Handlers
 )
 
 type apiServer struct {
@@ -139,6 +142,7 @@ type apiServer struct {
 	*catalogAPI    // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
 	*schedulingAPI // scheduling: /v1/businesses/{id}/branches/{id}/opening-hours
 	*bookingAPI    // booking: /v1/branches/{id}/availability
+	*discoveryAPI  // discovery: /v1/branches, /v1/cities
 }
 
 // application is every module, wired: the API for the api role, the outbox
@@ -187,10 +191,14 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Pool: pool, Clock: clock.System{}, Logger: logger,
 		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule, Events: bus,
 	})
-	subscribe(bus, billingModule)
+	discoveryModule := discovery.New(discovery.Deps{Pool: pool, Logger: logger})
+	subscribe(bus, billingModule, discoveryModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
-	api := apiServer{iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP(), bookingModule.HTTP()}
+	api := apiServer{
+		iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP(),
+		bookingModule.HTTP(), discoveryModule.HTTP(),
+	}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
 	}
@@ -220,10 +228,15 @@ func (r *branchReadiness) BranchReadiness(ctx context.Context, biz shared.Busine
 
 // subscribe wires who reacts to which event. Subscriber names are stored in
 // queued jobs: never rename one (add a new name and retire the old).
-func subscribe(bus *outbox.Bus, billingModule *billing.Module) {
+func subscribe(bus *outbox.Bus, billingModule *billing.Module, discoveryModule *discovery.Module) {
 	// An approved business starts its free trial.
 	business.OnApproved(bus, "billing.start_trial", func(ctx context.Context, e business.Approved) error {
 		return billingModule.StartTrial(ctx, e.BusinessID, e.ApprovedAt)
+	})
+	// Discovery keeps its copy of every branch: published, unpublished or
+	// edited. The two types have the same fields, so a conversion does.
+	business.OnBranchChanged(bus, "discovery.keep_branch", func(ctx context.Context, e business.BranchChanged) error {
+		return discoveryModule.KeepBranch(ctx, discovery.Branch(e))
 	})
 }
 

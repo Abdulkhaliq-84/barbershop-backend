@@ -98,6 +98,7 @@ func TestNewBranchRejects(t *testing.T) {
 		{"city with capitals", func(p *domain.BranchProfile) { p.City = "Riyadh" }, domain.ErrInvalidCityCode},
 		{"city in arabic", func(p *domain.BranchProfile) { p.City = "الرياض" }, domain.ErrInvalidCityCode},
 		{"no city", func(p *domain.BranchProfile) { p.City = "" }, domain.ErrInvalidCityCode},
+		{"a city not on the list", func(p *domain.BranchProfile) { p.City = "atlantis" }, domain.ErrInvalidCityCode},
 		{"blank address", func(p *domain.BranchProfile) { p.Address = "  " }, domain.ErrAddressRequired},
 		{"address too long", func(p *domain.BranchProfile) { p.Address = strings.Repeat("ب", 201) }, domain.ErrTextTooLong},
 		{"district too long", func(p *domain.BranchProfile) { p.District = strings.Repeat("ب", 81) }, domain.ErrTextTooLong},
@@ -138,6 +139,14 @@ func TestBranchEdit(t *testing.T) {
 	}
 	if b.Profile().Address != "طريق الملك فهد" || b.Policy().Rules().AutoConfirm || b.Version() != 2 || !b.UpdatedAt().Equal(t0.Add(time.Hour)) {
 		t.Errorf("after edit: %+v", b)
+	}
+	// The edit is an event carrying the branch as it is now, version and all.
+	want := domain.BranchUpdatedEvent{
+		Business: b.BusinessID(), Branch: b.ID(), At: t0.Add(time.Hour),
+		Snapshot: domain.BranchSnapshot{Version: 2, Status: domain.BranchDraft, Profile: b.Profile()},
+	}
+	if len(b.Events()) != 1 || b.Events()[0] != want {
+		t.Errorf("events = %+v, want [%+v]", b.Events(), want)
 	}
 
 	// A refused edit changes nothing.
@@ -198,8 +207,12 @@ func TestBranchPublish(t *testing.T) {
 	if b.Status() != domain.BranchPublished || b.Version() != 2 || !b.UpdatedAt().Equal(t0.Add(time.Hour)) {
 		t.Errorf("published = %s v%d at %s", b.Status(), b.Version(), b.UpdatedAt())
 	}
-	if ev, ok := b.Events()[0].(domain.BranchPublishedEvent); len(b.Events()) != 1 || !ok || ev.Branch != b.ID() || ev.Business != b.BusinessID() {
-		t.Errorf("events = %+v", b.Events())
+	published := domain.BranchPublishedEvent{
+		Business: b.BusinessID(), Branch: b.ID(), At: t0.Add(time.Hour),
+		Snapshot: domain.BranchSnapshot{Version: 2, Status: domain.BranchPublished, Profile: b.Profile()},
+	}
+	if len(b.Events()) != 1 || b.Events()[0] != published {
+		t.Errorf("events = %+v, want [%+v]", b.Events(), published)
 	}
 	if err := b.Publish(domain.StatusActive, ready, t0.Add(2*time.Hour)); !errors.Is(err, domain.ErrInvalidStateTransition) {
 		t.Errorf("publish twice: %v", err)
@@ -209,7 +222,7 @@ func TestBranchPublish(t *testing.T) {
 	if err := b.Unpublish(t0.Add(3 * time.Hour)); err != nil || b.Status() != domain.BranchUnpublished || b.Version() != 3 {
 		t.Fatalf("unpublish: %v, %s v%d", err, b.Status(), b.Version())
 	}
-	if _, ok := b.Events()[1].(domain.BranchUnpublishedEvent); !ok {
+	if ev, ok := b.Events()[1].(domain.BranchUnpublishedEvent); !ok || ev.Snapshot.Version != 3 || ev.Snapshot.Status != domain.BranchUnpublished {
 		t.Errorf("events = %+v", b.Events())
 	}
 	if err := b.Unpublish(t0.Add(4 * time.Hour)); !errors.Is(err, domain.ErrInvalidStateTransition) {

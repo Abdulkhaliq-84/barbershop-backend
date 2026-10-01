@@ -233,7 +233,7 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	case errors.As(err, &policyErr):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", policyErr.Error()
 	case errors.Is(err, domain.ErrInvalidCityCode):
-		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "city_code: not a city code"
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "city_code: not one of the cities in GET /v1/cities"
 	case errors.Is(err, domain.ErrAddressRequired):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "address: required"
 	case errors.Is(err, domain.ErrInvalidTimezone):

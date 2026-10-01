@@ -32,7 +32,7 @@ scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures (the 
 scheduling.barber_schedules, scheduling.barber_hours, scheduling.schedule_overrides,
 scheduling.override_hours, scheduling.time_off (EXCLUDE: no overlapping time off per person)
 booking.appointments, booking.appointment_items, booking.idempotency_keys
-discovery.branch_listings, discovery.cities
+discovery.branch_listings  (cities are reference data in code — ADR-0027)
 billing.subscriptions  (plans are reference data in code — ADR-0019)
 notification.device_tokens, notification.deliveries
 media.objects

@@ -20,11 +20,21 @@ type BusinessApproved struct {
 
 func (BusinessApproved) isEvent() {}
 
+// BranchSnapshot is a branch as of one version: what the branch events
+// carry, so another module (discovery) can keep its own copy of what
+// customers see. A copy applies an event only if its version is newer.
+type BranchSnapshot struct {
+	Version int
+	Status  BranchStatus
+	Profile BranchProfile
+}
+
 // BranchPublishedEvent is recorded when the owner shows a branch to customers.
 type BranchPublishedEvent struct {
 	Business shared.BusinessID
 	Branch   shared.BranchID
 	At       time.Time
+	Snapshot BranchSnapshot
 }
 
 func (BranchPublishedEvent) isEvent() {}
@@ -34,6 +44,18 @@ type BranchUnpublishedEvent struct {
 	Business shared.BusinessID
 	Branch   shared.BranchID
 	At       time.Time
+	Snapshot BranchSnapshot
 }
 
 func (BranchUnpublishedEvent) isEvent() {}
+
+// BranchUpdatedEvent is recorded when the owner edits a branch, published
+// or not.
+type BranchUpdatedEvent struct {
+	Business shared.BusinessID
+	Branch   shared.BranchID
+	At       time.Time
+	Snapshot BranchSnapshot
+}
+
+func (BranchUpdatedEvent) isEvent() {}

@@ -215,11 +215,15 @@ func (s *Store) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event)
 			})
 		case domain.BranchPublishedEvent:
 			ev, err = outbox.NewEvent(events.TypeBranchPublished, e.At, events.BranchPublished{
-				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), PublishedAt: e.At,
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), PublishedAt: e.At, Branch: branchContract(e.Snapshot),
 			})
 		case domain.BranchUnpublishedEvent:
 			ev, err = outbox.NewEvent(events.TypeBranchUnpublished, e.At, events.BranchUnpublished{
-				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), UnpublishedAt: e.At,
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), UnpublishedAt: e.At, Branch: branchContract(e.Snapshot),
+			})
+		case domain.BranchUpdatedEvent:
+			ev, err = outbox.NewEvent(events.TypeBranchUpdated, e.At, events.BranchUpdated{
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), UpdatedAt: e.At, Branch: branchContract(e.Snapshot),
 			})
 		default:
 			err = fmt.Errorf("no contract for event %T", e)
@@ -233,6 +237,18 @@ func (s *Store) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event)
 		return fmt.Errorf("publish events: %w", err)
 	}
 	return nil
+}
+
+// branchContract is a branch snapshot in the events' JSON shape.
+func branchContract(s domain.BranchSnapshot) events.Branch {
+	p := s.Profile
+	return events.Branch{
+		Version: s.Version, Status: string(s.Status),
+		Name:     events.LocalizedText{Ar: p.Name.Ar(), En: p.Name.En()},
+		CityCode: string(p.City), District: p.District, Address: p.Address,
+		Location: events.Location{Latitude: p.Location.Lat(), Longitude: p.Location.Lng()},
+		Phone:    p.Phone.String(), Timezone: p.Timezone,
+	}
 }
 
 // ReviewPage returns up to limit businesses in status, oldest submission

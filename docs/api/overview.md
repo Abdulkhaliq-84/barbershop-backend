@@ -93,8 +93,8 @@ Client flow (Flutter):
 
 | Method | Path |
 |---|---|
-| GET | `/v1/cities` |
-| GET | `/v1/branches/search?lat=&lng=&radius_km=&city=&q=&category=&open_now=&sort=distance\|price&cursor=` |
+| GET | `/v1/cities` — live (M6.1): the cities, largest first, `{code, name}` |
+| GET | `/v1/branches?city=&cursor=` — live (M6.1): a city's published branches by Arabic name, 20 a page; `422 unknown_city`. Coming: `lat`, `lng`, `radius_km` (M6.2), `q` (M6.3), `category`, `sort=distance\|price` (M6.4), `open_now` (M6.5) |
 | GET | `/v1/branches/{branch_id}` — public profile: photos, hours, services, barbers |
 | GET | `/v1/categories` |
 
