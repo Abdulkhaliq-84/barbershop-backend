@@ -106,7 +106,7 @@ Client flow (Flutter):
 | POST | `/v1/appointments` (Idempotency-Key) — live (M5.3): signed in; `{branch_id, starts_at, service_ids, barber_id?, note?}` → `201` appointment (a retry with the same key: the same one, `Idempotent-Replayed: true`); `409 slot_unavailable` / `booking_limit_reached`; `422 invalid_start` / `idempotency_key_reused` |
 | GET | `/v1/me/appointments?status=upcoming\|past&cursor=` |
 | GET | `/v1/me/appointments/{appointment_id}` — live (M5.3): the customer's own; anyone else's is `404` |
-| POST | `/v1/me/appointments/{appointment_id}/cancel` |
+| POST | `/v1/me/appointments/{appointment_id}/cancel` — live (M5.4): `{reason?}`; pending until it starts, confirmed until `cancellable_until`; `409 cancellation_window_passed` / `invalid_transition` |
 
 ### Business mode — M3 / M4 / M5
 
@@ -133,7 +133,8 @@ Client flow (Flutter):
 | GET | `…/branches/{branch_id}/staff/{staff_id}/working-windows?from=&to=` — live (M4.5): when they can work (opening hours ∩ schedule − time off), UTC instants, at most 62 days (`422` beyond) | anyone at the branch |
 | GET | `…/branches/{branch_id}/day?date=` — per-barber timeline + KPIs (dashboard) | barber (own) / manager |
 | POST | `…/branches/{branch_id}/appointments` — staff booking / walk-in | barber |
-| POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` | barber (own) / manager |
+| GET | `…/branches/{branch_id}/appointments?date=` — live (M5.4): the day's appointments, every status, by start; a barber sees their own | barber (own) / manager |
+| POST | `/v1/businesses/{business_id}/appointments/{appointment_id}/{confirm\|reject\|complete\|no-show\|cancel}` — live (M5.4): `reason` with cancel only; `409 invalid_transition` / `appointment_not_started` | barber (own) / manager |
 | GET | `/v1/businesses/{business_id}/subscription` — live (M3.6): plan, status (`setup`/`trialing`/`free`), trial end, limits; `409 plan_limit_reached` when adding past them | owner |
 
 **Authorization (M3.1, ADR-0015).** Every business-mode use case checks the caller's membership

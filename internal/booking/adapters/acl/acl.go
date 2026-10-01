@@ -39,7 +39,7 @@ func (a *Branches) Bookable(ctx context.Context, id shared.BranchID) (app.Branch
 			MinLead: b.Policy.MinLead, HorizonDays: b.Policy.HorizonDays,
 			SlotInterval: b.Policy.SlotInterval, Buffer: b.Policy.Buffer,
 			AutoConfirm: b.Policy.AutoConfirm, PendingExpiry: b.Policy.PendingExpiry,
-			MaxActiveBookings: b.Policy.MaxActiveBookings,
+			MaxActiveBookings: b.Policy.MaxActiveBookings, CancellationWindow: b.Policy.CancellationWindow,
 		},
 	}, nil
 }
@@ -99,4 +99,34 @@ func (a *Schedules) WorkingWindows(ctx context.Context, biz shared.BusinessID, b
 		return nil, fmt.Errorf("working windows: %w", err)
 	}
 	return w, nil
+}
+
+// Staff answers app.Staff from business.
+type Staff struct{ business *business.Module }
+
+// NewStaff wraps the business module.
+func NewStaff(b *business.Module) *Staff { return &Staff{business: b} }
+
+// MemberOf returns actor's active membership of the business.
+func (a *Staff) MemberOf(ctx context.Context, actor shared.UserID, biz shared.BusinessID) (app.Member, error) {
+	m, err := a.business.MemberOf(ctx, actor, biz)
+	switch {
+	case errors.Is(err, business.ErrNotFound):
+		return app.Member{}, domain.ErrNotFound
+	case err != nil:
+		return app.Member{}, fmt.Errorf("member of: %w", err)
+	}
+	return app.Member{Staff: m.ID, Role: app.Role(m.Role), Branches: m.Branches}, nil
+}
+
+// BranchLocation returns the branch's time zone.
+func (a *Staff) BranchLocation(ctx context.Context, biz shared.BusinessID, branch shared.BranchID) (*time.Location, error) {
+	loc, err := a.business.BranchLocation(ctx, biz, branch)
+	switch {
+	case errors.Is(err, business.ErrNotFound):
+		return nil, domain.ErrNotFound
+	case err != nil:
+		return nil, fmt.Errorf("branch location: %w", err)
+	}
+	return loc, nil
 }

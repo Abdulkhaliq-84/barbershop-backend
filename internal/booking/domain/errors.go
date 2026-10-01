@@ -20,4 +20,15 @@ var (
 	ErrTooManyBookings   = errors.New("booking: you already have the most upcoming bookings this branch allows")
 	ErrNoteTooLong       = errors.New("booking: the note is too long")
 	ErrIdempotencyReused = errors.New("booking: this Idempotency-Key was used for a different booking")
+	// ErrForbidden: staff of the business who may not act on this — a
+	// barber on someone else's appointment, or staff of another branch.
+	ErrForbidden = errors.New("booking: not allowed")
+	// ErrInvalidTransition: the action doesn't apply to the appointment as
+	// it is now (a *TransitionError says which).
+	ErrInvalidTransition = errors.New("booking: the appointment can't change that way")
+	// ErrTooLateToCancel: past the deadline for the customer to cancel.
+	ErrTooLateToCancel = errors.New("booking: too late to cancel")
+	// ErrNotStarted: completed or no-show only once it has started.
+	ErrNotStarted    = errors.New("booking: the appointment hasn't started yet")
+	ErrReasonTooLong = errors.New("booking: the reason is too long")
 )

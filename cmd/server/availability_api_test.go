@@ -82,9 +82,9 @@ func TestAvailabilityAPI(t *testing.T) {
 	noon := time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 12, 0, 0, 0, riyadh)
 	if _, err := a.pool.Exec(t.Context(), `
 		INSERT INTO booking.appointments (id, business_id, branch_id, staff_id, customer_id, status, source, assignment,
-			starts_at, ends_at, during, price_amount, price_currency, version, created_at, updated_at)
+			starts_at, ends_at, during, price_amount, price_currency, cancellable_until, version, created_at, updated_at)
 		SELECT gen_random_uuid(), business_id, $1, $2, gen_random_uuid(), 'confirmed', 'staff', 'requested_barber',
-			$3, $4, tstzrange($3, $4, '[)'), 6000, 'SAR', 1, now(), now()
+			$3, $4, tstzrange($3, $4, '[)'), 6000, 'SAR', $3, 1, now(), now()
 		FROM business.branches WHERE id = $1`, branch, me, noon, noon.Add(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}

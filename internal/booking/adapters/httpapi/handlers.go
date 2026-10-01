@@ -19,12 +19,13 @@ import (
 type Handlers struct {
 	availability *app.AvailabilityHandlers
 	book         *app.BookHandlers
+	manage       *app.ManageHandlers
 	logger       *slog.Logger
 }
 
 // NewHandlers wires the HTTP adapter to the use cases.
-func NewHandlers(availability *app.AvailabilityHandlers, book *app.BookHandlers, logger *slog.Logger) *Handlers {
-	return &Handlers{availability: availability, book: book, logger: logger}
+func NewHandlers(availability *app.AvailabilityHandlers, book *app.BookHandlers, manage *app.ManageHandlers, logger *slog.Logger) *Handlers {
+	return &Handlers{availability: availability, book: book, manage: manage, logger: logger}
 }
 
 // GetAvailability handles GET /v1/branches/{branch_id}/availability.
@@ -86,6 +87,18 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnprocessableEntity, "idempotency_key_reused", "this Idempotency-Key was used for a different booking"
 	case errors.Is(err, domain.ErrNoteTooLong):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "note: at most 300 characters"
+	case errors.Is(err, domain.ErrInvalidTransition):
+		status, code, detail = http.StatusConflict, "invalid_transition", transitionDetail(err)
+	case errors.Is(err, domain.ErrTooLateToCancel):
+		status, code, detail = http.StatusConflict, "cancellation_window_passed", "past the deadline to cancel this booking (cancellable_until)"
+	case errors.Is(err, domain.ErrNotStarted):
+		status, code, detail = http.StatusConflict, "appointment_not_started", "it can be completed or marked a no-show once it has started"
+	case errors.Is(err, domain.ErrReasonTooLong):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "reason: at most 300 characters"
+	case errors.Is(err, errReasonNotAllowed):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "reason: only with cancel"
+	case errors.Is(err, domain.ErrForbidden):
+		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, domain.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, domain.ErrNoServices):
@@ -98,4 +111,21 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		h.logger.ErrorContext(ctx, "booking request failed", slog.String("error_type", fmt.Sprintf("%T", err)))
 	}
 	return httpx.APIProblem(ctx, status, code, detail), headers
+}
+
+// transitionDetail says what the appointment is now, in plain words.
+func transitionDetail(err error) string {
+	te, ok := errors.AsType[*domain.TransitionError](err)
+	if !ok {
+		return "the appointment can't change that way"
+	}
+	done := map[domain.Action]string{
+		domain.ActionConfirm: "confirmed", domain.ActionReject: "rejected", domain.ActionCancel: "cancelled",
+		domain.ActionComplete: "completed", domain.ActionNoShow: "marked a no-show",
+	}[te.Action]
+	is := string(te.Status)
+	if te.Status == domain.StatusNoShow {
+		is = "a no-show"
+	}
+	return fmt.Sprintf("the appointment is %s, so it can't be %s", is, done)
 }

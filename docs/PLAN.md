@@ -163,8 +163,10 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 3. M5.3 — book: `POST /v1/appointments` with `Idempotency-Key`, the exclusion constraint
    (`409 slot_unavailable`), any-barber assignment, price snapshots
    ([ADR-0024](adr/0024-booking-an-appointment.md)).
-4. M5.4 — cancellation policy, shop actions (confirm, reject, complete, no-show) and staff bookings.
-5. M5.5 — pending expiry as a scheduled River job; booking events.
+4. M5.4 — the appointment lifecycle: the customer cancels within the deadline kept with the
+   booking; the shop confirms, rejects, cancels, completes or marks a no-show; the shop's day
+   ([ADR-0025](adr/0025-appointment-lifecycle.md)).
+5. M5.5 — staff bookings (walk-ins) and pending expiry as a scheduled River job.
    *Your turn:* "My appointments" with cursor pagination.
 
 ### Design track (in parallel, in Figma)

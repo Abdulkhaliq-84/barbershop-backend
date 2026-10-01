@@ -182,7 +182,8 @@ func insert(ctx context.Context, q *sqlcgen.Queries, a *domain.Appointment) erro
 		CustomerID: s.Customer.UUID(), Status: string(s.Status), Source: string(s.Source), Assignment: string(s.Assignment),
 		StartsAt: s.Start, EndsAt: s.End, BusyUntil: s.BusyUntil,
 		PriceAmount: s.Price.Amount(), PriceCurrency: string(s.Price.Currency()),
-		CustomerNote: s.Note, PendingUntil: s.PendingUntil, Version: version, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
+		CustomerNote: s.Note, PendingUntil: s.PendingUntil, CancellableUntil: s.CancellableUntil,
+		Version: version, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}); err != nil {
 		return fmt.Errorf("insert appointment: %w", err)
 	}
@@ -222,6 +223,8 @@ func (s *Store) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event)
 				BarberID: a.Barber.UUID(), CustomerID: a.Customer.UUID(), Status: string(a.Status),
 				StartsAt: a.Start, EndsAt: a.End,
 			})
+		case domain.StatusChanged:
+			ev, err = statusChanged(e)
 		default:
 			err = fmt.Errorf("no contract for event %T", e)
 		}
@@ -237,3 +240,27 @@ func (s *Store) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event)
 }
 
 func pgUUID(id uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: id, Valid: true} }
+
+// statusChanged is the event of a lifecycle change, typed by the new status.
+func statusChanged(e domain.StatusChanged) (outbox.Event, error) {
+	a := e.Appointment
+	typ, ok := map[domain.Status]string{
+		domain.StatusConfirmed: events.TypeAppointmentConfirmed,
+		domain.StatusRejected:  events.TypeAppointmentRejected,
+		domain.StatusCancelled: events.TypeAppointmentCancelled,
+		domain.StatusCompleted: events.TypeAppointmentCompleted,
+		domain.StatusNoShow:    events.TypeAppointmentNoShow,
+	}[a.Status]
+	if !ok {
+		return outbox.Event{}, fmt.Errorf("no contract for a change to %s", a.Status)
+	}
+	p := events.AppointmentStatusChanged{
+		AppointmentID: a.ID.UUID(), BusinessID: a.Business.UUID(), BranchID: a.Branch.UUID(),
+		BarberID: a.Barber.UUID(), CustomerID: a.Customer.UUID(), From: string(e.From), Status: string(a.Status),
+		StartsAt: a.Start, EndsAt: a.End, ChangedAt: a.UpdatedAt,
+	}
+	if c := a.Cancellation; c != nil {
+		p.CancelledBy, p.Reason = string(c.By), c.Reason
+	}
+	return outbox.NewEvent(typ, a.UpdatedAt, p)
+}

@@ -709,6 +709,118 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/me/appointments/{appointment_id}/cancel:
+    parameters:
+      - name: appointment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelMyAppointment
+      tags: [booking]
+      summary: Cancel one of my appointments
+      description: |
+        A pending booking can be cancelled until it starts. A confirmed one
+        until its `cancellable_until`: the start minus the branch's
+        cancellation window when it was booked (a later change to the
+        window doesn't move it). After that: `409 cancellation_window_passed`.
+        Already cancelled, completed, rejected or expired:
+        `409 invalid_transition`. Someone else's appointment is `404`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelRequest"
+      responses:
+        "200":
+          description: The cancelled appointment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/appointments/{appointment_id}/{action}:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - name: appointment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [confirm, reject, cancel, complete, no-show]
+    post:
+      operationId: actOnAppointment
+      tags: [booking]
+      summary: Confirm, reject, cancel, complete or mark a no-show (the shop)
+      description: |
+        - `confirm` / `reject`: a pending booking (not past its `pending_until`).
+        - `cancel`: a pending or confirmed one, at any time; the only action
+          that takes a `reason`.
+        - `complete` / `no-show`: a confirmed one, once it has started
+          (before: `409 appointment_not_started`).
+
+        Anything else is `409 invalid_transition`. A barber acts on their
+        own appointments; the owner and managers on any at the branches
+        they work at — others get `403`. Not staff of the business, or
+        another business's appointment: `404`. Two staff acting at once take
+        turns: the second sees what the first did.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelRequest"
+      responses:
+        "200":
+          description: The appointment after the action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/businesses/{business_id}/branches/{branch_id}/appointments:
+    parameters:
+      - $ref: "#/components/parameters/BusinessID"
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: listBranchAppointments
+      tags: [booking]
+      summary: A branch's appointments on a day (staff of the branch)
+      description: |
+        Every appointment starting on `date` (in the branch's time zone),
+        in every status, by start time. A barber sees their own; the owner
+        and the branch's managers see everyone's. Staff of another branch:
+        `403`; not staff of the business, or not its branch: `404`.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: The day, in the branch's time zone.
+          schema:
+            type: string
+            format: date
+            example: "2026-10-04"
+      responses:
+        "200":
+          description: The day's appointments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchDay"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/service-categories:
     get:
       operationId: listServiceCategories
@@ -1406,7 +1518,8 @@ components:
             `invitation_closed`, `already_staff`, `plan_limit_reached`, `time_off_overlaps`,
             `registration_limit_reached`, `branch_not_ready`, `business_not_active`,
             `service_unavailable`, `barber_unavailable`, `slot_unavailable`, `invalid_start`,
-            `booking_limit_reached`, `idempotency_key_reused`.
+            `booking_limit_reached`, `idempotency_key_reused`, `invalid_transition`,
+            `cancellation_window_passed`, `appointment_not_started`.
           example: otp_cooldown
         detail:
           type: string
@@ -2136,7 +2249,7 @@ components:
 
     Appointment:
       type: object
-      required: [id, branch_id, barber, status, assignment, starts_at, ends_at, items, price, note, created_at, version]
+      required: [id, branch_id, customer_id, barber, status, source, assignment, starts_at, ends_at, cancellable_until, items, price, note, created_at, version]
       properties:
         id:
           type: string
@@ -2144,11 +2257,18 @@ components:
         branch_id:
           type: string
           format: uuid
+        customer_id:
+          type: string
+          format: uuid
+          description: Who booked it (a user ID).
         barber:
           $ref: "#/components/schemas/AppointmentBarber"
         status:
           type: string
           enum: [pending, confirmed, rejected, expired, cancelled, completed, no_show]
+        source:
+          type: string
+          enum: [customer_app, staff]
         assignment:
           type: string
           enum: [requested_barber, any_barber]
@@ -2163,6 +2283,14 @@ components:
           type: string
           format: date-time
           description: A pending booking expires then, unless the shop confirms it.
+        cancellable_until:
+          type: string
+          format: date-time
+          description: |
+            Until when the customer may cancel once it is confirmed: the
+            start minus the branch's cancellation window when it was booked.
+        cancellation:
+          $ref: "#/components/schemas/Cancellation"
         items:
           type: array
           description: What was booked, at the price and length of the time of booking.
@@ -2177,6 +2305,48 @@ components:
           format: date-time
         version:
           type: integer
+
+    Cancellation:
+      type: object
+      description: Present once the appointment was cancelled.
+      required: [by, reason, at]
+      properties:
+        by:
+          type: string
+          enum: [customer, staff]
+        reason:
+          type: string
+          description: Empty if none was given.
+        at:
+          type: string
+          format: date-time
+
+    CancelRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 300
+          description: Why, for the other side (optional; cancel only).
+
+    BranchDay:
+      type: object
+      required: [branch_id, date, time_zone, appointments]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+        time_zone:
+          type: string
+          example: Asia/Riyadh
+        appointments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Appointment"
 
     AppointmentBarber:
       type: object

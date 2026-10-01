@@ -1,5 +1,5 @@
-// Package booking is the appointments module: when customers can book, and
-// (from M5.3) their bookings (docs/architecture/domain-model.md §3.5).
+// Package booking is the appointments module: when customers can book,
+// their bookings, and what happens to them after (docs/architecture/domain-model.md §3.5).
 //
 // This root package is the module's public face. Other modules and main use
 // only what is exported here; domain, app and adapters are private (lint
@@ -46,8 +46,10 @@ func New(d Deps) *Module {
 		acl.NewBranches(d.Business), acl.NewMenus(d.Catalog), acl.NewSchedules(d.Scheduling),
 		appointments, d.Clock,
 	)
-	book := app.NewBookHandlers(availability, postgres.NewStore(appointments, d.Events))
-	return &Module{http: httpapi.NewHandlers(availability, book, d.Logger)}
+	store := postgres.NewStore(appointments, d.Events)
+	book := app.NewBookHandlers(availability, store)
+	manage := app.NewManageHandlers(acl.NewStaff(d.Business), acl.NewBranches(d.Business), store, d.Clock)
+	return &Module{http: httpapi.NewHandlers(availability, book, manage, d.Logger)}
 }
 
 // HTTP returns the handlers for the booking API operations.
