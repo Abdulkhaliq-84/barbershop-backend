@@ -613,15 +613,23 @@ paths:
         - **In a city** (`city` alone): its branches by Arabic name.
 
         They combine: `city` keeps only that city's branches, and `q` with
-        a place keeps only matching names, still nearest first.
+        a place keeps only matching names, still nearest first. `category`
+        narrows any of them to the branches offering a service of that kind.
+
+        Only branches offering a service customers can choose (active, with
+        a barber) are shown. Each comes with `price_from`, the least a
+        customer pays for a service there (for one of `category`'s, if
+        given).
 
         None of a city, a place or a name, only one of `lat` and `lng`, or a
         `q` with fewer than two letters or digits: `400`.
 
         A list kept from the businesses' changes: a branch appears or
-        changes here moments after its owner publishes or edits it.
+        changes here moments after its owner publishes or edits it, or
+        changes its services.
 
-        A city that isn't in `GET /v1/cities`: `422 unknown_city`.
+        A city that isn't in `GET /v1/cities`: `422 unknown_city`. A category
+        that isn't in `GET /v1/service-categories`: `422 unknown_category`.
       security: []
       parameters:
         - name: city
@@ -639,6 +647,15 @@ paths:
             minLength: 1
             maxLength: 60
             example: الأناقة
+        - name: category
+          in: query
+          description: |
+            Only branches offering a service of this kind: a code from
+            `GET /v1/service-categories`.
+          schema:
+            type: string
+            pattern: "^[a-z][a-z_]{1,39}$"
+            example: beard
         - name: lat
           in: query
           description: Search near this latitude (with `lng`), e.g. the customer's location.
@@ -2644,7 +2661,7 @@ components:
     BranchListing:
       type: object
       description: A branch as customers find it.
-      required: [id, name, city, district, address, location]
+      required: [id, name, city, district, address, location, price_from]
       properties:
         id:
           type: string
@@ -2666,6 +2683,13 @@ components:
           type: integer
           description: Metres from the place searched near (straight line); only when searching near a place.
           example: 850
+        price_from:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: |
+            The least a customer pays for a service here (for one of
+            `category`'s, if the search gave one): the cheapest barber's
+            price.
 
     BranchListingPage:
       type: object

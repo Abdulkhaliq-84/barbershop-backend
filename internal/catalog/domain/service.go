@@ -79,6 +79,7 @@ type Service struct {
 	version   int
 	createdAt time.Time
 	updatedAt time.Time
+	events    []Event // recorded since it was loaded, published when saved
 }
 
 // NewService checks details and creates an active service at branch.
@@ -88,7 +89,9 @@ func NewService(id ServiceID, business shared.BusinessID, branch shared.BranchID
 		return nil, err
 	}
 	now = dbTime(now)
-	return &Service{id: id, business: business, branch: branch, details: d, active: true, version: 1, createdAt: now, updatedAt: now}, nil
+	s := &Service{id: id, business: business, branch: branch, details: d, active: true, version: 1, createdAt: now, updatedAt: now}
+	s.events = append(s.events, ServiceCreatedEvent{Business: business, Branch: branch, Service: id, At: now, Snapshot: s.snapshot()})
+	return s, nil
 }
 
 // Edit replaces the details and the active flag.
@@ -98,8 +101,7 @@ func (s *Service) Edit(d ServiceDetails, active bool, now time.Time) error {
 		return err
 	}
 	s.details, s.active = d, active
-	s.version++
-	s.updatedAt = dbTime(now)
+	s.touch(now)
 	return nil
 }
 
@@ -111,10 +113,25 @@ func (s *Service) SetOfferings(offerings []Offering, now time.Time) error {
 		return err
 	}
 	s.offerings = checked
-	s.version++
-	s.updatedAt = dbTime(now)
+	s.touch(now)
 	return nil
 }
+
+// touch records a saved change: a new version and time, and the event
+// that tells other modules.
+func (s *Service) touch(now time.Time) {
+	s.version++
+	s.updatedAt = dbTime(now)
+	s.events = append(s.events, ServiceUpdatedEvent{Business: s.business, Branch: s.branch, Service: s.id, At: s.updatedAt, Snapshot: s.snapshot()})
+}
+
+// snapshot is the service as of now, for its events.
+func (s *Service) snapshot() ServiceSnapshot {
+	return ServiceSnapshot{Version: s.version, Active: s.active, Details: s.details, Offerings: slices.Clone(s.offerings)}
+}
+
+// Events returns what happened to the service since it was loaded.
+func (s *Service) Events() []Event { return slices.Clone(s.events) }
 
 // RehydrateService rebuilds a service loaded from storage.
 func RehydrateService(id ServiceID, business shared.BusinessID, branch shared.BranchID, d ServiceDetails, offerings []Offering, active bool, version int, createdAt, updatedAt time.Time) *Service {

@@ -35,7 +35,7 @@ func (h *Handlers) ListServiceCategories(context.Context, apigen.ListServiceCate
 	cats := h.services.Categories()
 	list := apigen.ListServiceCategories200JSONResponse{Data: make([]apigen.ServiceCategory, 0, len(cats))}
 	for _, c := range cats {
-		list.Data = append(list.Data, apigen.ServiceCategory{Code: string(c.Code), Name: httpx.APIText(c.Name), Icon: c.Icon})
+		list.Data = append(list.Data, apigen.ServiceCategory{Code: c.Code(), Name: httpx.APIText(c.Name()), Icon: c.Icon()})
 	}
 	return list, nil
 }

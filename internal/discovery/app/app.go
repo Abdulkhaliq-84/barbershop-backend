@@ -1,5 +1,5 @@
 // Package app holds discovery's use cases: keeping the listings from
-// business's events, and answering customers' searches.
+// business's and catalog's events, and answering customers' searches.
 package app
 
 import (
@@ -30,12 +30,23 @@ func (h *Handlers) Keep(ctx context.Context, l domain.Listing) error {
 	return nil
 }
 
+// KeepService applies a service event to discovery's copy, the same way:
+// an older version than the copy's changes nothing.
+func (h *Handlers) KeepService(ctx context.Context, s domain.Service) error {
+	if _, err := h.listings.KeepService(ctx, s); err != nil {
+		return fmt.Errorf("keep service %s: %w", s.Service, err)
+	}
+	return nil
+}
+
 // Search is what a customer looks for: the branches of a city, near a
-// point, or with a name, or several of these at once.
+// point, or with a name, or several of these at once; optionally only
+// those offering a kind of service.
 type Search struct {
-	City *shared.City // nil: any city
-	Near *domain.Near // nil: no place
-	Text string       // what the customer typed to find a name; "": any name
+	City     *shared.City     // nil: any city
+	Near     *domain.Near     // nil: no place
+	Text     string           // what the customer typed to find a name; "": any name
+	Category *shared.Category // nil: any service
 }
 
 // Order is how a search's results are sorted, and so what a page's
@@ -72,7 +83,7 @@ type Page struct {
 // Search returns a page of results, after the given position (nil for the
 // first page), in the search's Order.
 func (h *Handlers) Search(ctx context.Context, s Search, after *domain.Position) (Page, error) {
-	f := domain.Filter{City: s.City}
+	f := domain.Filter{City: s.City, Category: s.Category}
 	if s.Text != "" {
 		text, err := domain.ParseQuery(s.Text)
 		if err != nil {
@@ -95,11 +106,7 @@ func (h *Handlers) Search(ctx context.Context, s Search, after *domain.Position)
 		if s.City == nil {
 			return Page{}, domain.ErrNoPlace
 		}
-		var listed []domain.Listing
-		listed, err = h.listings.InCity(ctx, *s.City, after, domain.PageSize+1)
-		for _, l := range listed {
-			found = append(found, domain.Found{Listing: l})
-		}
+		found, err = h.listings.InCity(ctx, *s.City, s.Category, after, domain.PageSize+1)
 	}
 	if err != nil {
 		return Page{}, fmt.Errorf("search: %w", err)

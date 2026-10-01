@@ -196,6 +196,17 @@ type DiscoveryBranchListing struct {
 	SearchText string
 }
 
+type DiscoveryBranchService struct {
+	ServiceID    uuid.UUID
+	BranchID     uuid.UUID
+	BusinessID   uuid.UUID
+	Version      int32
+	Offered      bool
+	CategoryCode string
+	PriceFrom    int64
+	UpdatedAt    time.Time
+}
+
 type IamOtpChallenge struct {
 	ID         uuid.UUID
 	Phone      string

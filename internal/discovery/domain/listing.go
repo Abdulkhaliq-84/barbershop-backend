@@ -32,6 +32,19 @@ type Listing struct {
 	UpdatedAt time.Time
 }
 
+// Service is discovery's copy of one of a branch's services, as of
+// Version: only what searching needs. catalog decides everything about it.
+type Service struct {
+	Service   shared.ServiceID
+	Branch    shared.BranchID
+	Business  shared.BusinessID
+	Version   int  // the service's version this copy is of
+	Offered   bool // active, and someone performs it: customers can choose it
+	Category  shared.Category
+	PriceFrom shared.Money // the least a customer pays for it, in SAR
+	UpdatedAt time.Time
+}
+
 // PageSize is how many listings one page holds.
 const PageSize = 20
 
@@ -40,6 +53,7 @@ var (
 	ErrNoPlace       = errors.New("search: a city, a point to search near, or a name is required")
 	ErrRadius        = errors.New("search: the radius is out of range")
 	ErrQueryTooShort = errors.New("search: a name to search for needs at least two letters")
+	ErrNotSAR        = errors.New("discovery: prices are kept in SAR")
 )
 
 // Search radius limits, in kilometres.
@@ -56,17 +70,22 @@ type Near struct {
 }
 
 // Filter narrows a search: only City's branches (nil: any city), only
-// names matching Text (normalised by ParseQuery; "": any name).
+// names matching Text (normalised by ParseQuery; "": any name), only
+// branches offering a service in Category (nil: any service).
 type Filter struct {
-	City *shared.City
-	Text string
+	City     *shared.City
+	Text     string
+	Category *shared.Category
 }
 
-// Found is a listing a search found. DistanceM is how far it is from the
-// point searched near, in metres; Score how well its name matches the text
-// searched for, from 0 to 1. Each is 0 when the search didn't ask for it.
+// Found is a listing a search found. PriceFrom is the least a customer
+// pays for a service there (one of the category's, if the search gave
+// one). DistanceM is how far it is from the point searched near, in
+// metres; Score how well its name matches the text searched for, from 0
+// to 1. Each is 0 when the search didn't ask for it.
 type Found struct {
 	Listing
+	PriceFrom shared.Money
 	DistanceM float64
 	Score     float64
 }
@@ -82,14 +101,20 @@ type Position struct {
 	Branch    shared.BranchID
 }
 
-// Listings stores discovery's copies.
+// Listings stores discovery's copies of branches and their services.
+// Searches find only listed branches that offer a service (in the filter's
+// category, if it has one): a branch with nothing a customer can choose
+// isn't shown.
 type Listings interface {
 	// Keep saves l unless the stored copy is of the same or a newer version,
 	// and reports whether it saved it.
 	Keep(ctx context.Context, l Listing) (bool, error)
-	// InCity returns up to limit listed branches in city, by Arabic name
-	// then ID, starting after the given position (nil: from the start).
-	InCity(ctx context.Context, city shared.City, after *Position, limit int) ([]Listing, error)
+	// KeepService saves s the same way.
+	KeepService(ctx context.Context, s Service) (bool, error)
+	// InCity returns up to limit listed branches in city offering a service
+	// in category (nil: any), by Arabic name then ID, starting after the
+	// given position (nil: from the start).
+	InCity(ctx context.Context, city shared.City, category *shared.Category, after *Position, limit int) ([]Found, error)
 	// Near returns up to limit listed branches within near's radius that
 	// pass f, nearest first then by ID, starting after the given position
 	// (nil: from the start).

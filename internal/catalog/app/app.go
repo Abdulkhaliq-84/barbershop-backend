@@ -111,7 +111,7 @@ func NewServiceHandlers(services domain.Services, access Access, clk clock.Clock
 }
 
 // Categories returns the service categories (public reference data).
-func (h *ServiceHandlers) Categories() []domain.Category { return domain.Categories() }
+func (h *ServiceHandlers) Categories() []shared.Category { return shared.Categories() }
 
 // Create adds an active service to the branch.
 func (h *ServiceHandlers) Create(ctx context.Context, cmd CreateService) (*domain.Service, error) {

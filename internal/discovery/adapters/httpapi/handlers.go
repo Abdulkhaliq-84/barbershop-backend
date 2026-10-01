@@ -68,7 +68,8 @@ func (h *Handlers) SearchBranches(ctx context.Context, req apigen.SearchBranches
 		item := apigen.BranchListing{
 			Id: f.Branch.UUID(), Name: toAPIText(f.Name), City: toAPICity(f.City),
 			District: f.District, Address: f.Address,
-			Location: apigen.GeoPoint{Latitude: f.Location.Lat(), Longitude: f.Location.Lng()},
+			Location:  apigen.GeoPoint{Latitude: f.Location.Lat(), Longitude: f.Location.Lng()},
+			PriceFrom: apigen.Money{Amount: f.PriceFrom.Amount(), Currency: apigen.MoneyCurrency(f.PriceFrom.Currency())},
 		}
 		if s.Near != nil {
 			item.DistanceM = new(int(math.Round(f.DistanceM)))
@@ -100,6 +101,13 @@ func searchOf(p apigen.SearchBranchesParams) (app.Search, error) {
 			return app.Search{}, err
 		}
 		s.City = &city
+	}
+	if p.Category != nil {
+		category, err := shared.ParseCategory(*p.Category)
+		if err != nil {
+			return app.Search{}, err
+		}
+		s.Category = &category
 	}
 	switch {
 	case p.Lat != nil && p.Lng != nil:
@@ -199,6 +207,8 @@ func (h *Handlers) problem(ctx context.Context, err error) apigen.Problem {
 	switch {
 	case errors.Is(err, shared.ErrUnknownCity):
 		status, code, detail = http.StatusUnprocessableEntity, "unknown_city", "city: not one of the cities in GET /v1/cities"
+	case errors.Is(err, shared.ErrUnknownCategory):
+		status, code, detail = http.StatusUnprocessableEntity, "unknown_category", "category: not one of the categories in GET /v1/service-categories"
 	case errors.Is(err, errBadCursor):
 		status, code, detail = http.StatusBadRequest, "validation_failed", "cursor: pass next_cursor from the previous page, with the same search"
 	case errors.Is(err, domain.ErrNoPlace):

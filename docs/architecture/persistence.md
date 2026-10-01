@@ -27,12 +27,12 @@ Each bounded context owns a Postgres **schema** used as a namespace:
 iam.users, iam.otp_challenges, iam.otp_phone_guards, iam.sessions, iam.refresh_tokens
 business.businesses, business.branches, business.staff_members, business.staff_branches,
 business.verification_documents, business.invitations
-catalog.services, catalog.service_offerings  (categories are reference data in code — ADR-0020)
+catalog.services, catalog.service_offerings  (categories are reference data in shared — ADR-0030)
 scheduling.branch_calendars, scheduling.opening_hours, scheduling.closures (the owner's exercise),
 scheduling.barber_schedules, scheduling.barber_hours, scheduling.schedule_overrides,
 scheduling.override_hours, scheduling.time_off (EXCLUDE: no overlapping time off per person)
 booking.appointments, booking.appointment_items, booking.idempotency_keys
-discovery.branch_listings  (cities are reference data in code — ADR-0027)
+discovery.branch_listings, discovery.branch_services  (cities are reference data in code — ADR-0027)
 billing.subscriptions  (plans are reference data in code — ADR-0019)
 notification.device_tokens, notification.deliveries
 media.objects
@@ -72,23 +72,36 @@ CREATE TABLE booking.appointments (
 CREATE INDEX ON booking.appointments (business_id, branch_id, lower(during));
 CREATE INDEX ON booking.appointments (customer_id, lower(during) DESC);
 
--- Geo search (M6)
+-- Search (M6): copies kept from events, the newest version winning (ADR-0027–0030)
 CREATE TABLE discovery.branch_listings (
     branch_id     uuid PRIMARY KEY,
     business_id   uuid NOT NULL,
-    name_ar       text NOT NULL,
-    name_en       text,
+    version       integer NOT NULL,
+    listed        boolean NOT NULL,                  -- published
+    name_ar       text COLLATE "C" NOT NULL,
+    name_en       text NOT NULL,
     search_text   text NOT NULL,                     -- normalised ar + en names
     city_code     text NOT NULL,
-    location      geography(Point, 4326) NOT NULL,
-    price_from    bigint,
-    categories    text[] NOT NULL DEFAULT '{}',
-    opening_hours jsonb NOT NULL,                    -- weekly, for "open now"
+    latitude, longitude double precision NOT NULL,
+    location      geography(Point, 4326) GENERATED ALWAYS AS (…) STORED,
+    opening_hours jsonb NOT NULL,                    -- weekly, for "open now" (M6.5)
     updated_at    timestamptz NOT NULL
 );
-CREATE INDEX ON discovery.branch_listings USING gist (location);
-CREATE INDEX ON discovery.branch_listings USING gin (search_text gin_trgm_ops);
-CREATE INDEX ON discovery.branch_listings USING gin (categories);
+CREATE INDEX ON discovery.branch_listings (city_code, name_ar, branch_id) WHERE listed;
+CREATE INDEX ON discovery.branch_listings USING gist (location) WHERE listed;
+CREATE INDEX ON discovery.branch_listings USING gin (search_text gin_trgm_ops) WHERE listed;
+
+-- What each branch sells: categories and the price from are answered at
+-- search time (EXISTS, min) from this table's index, not stored per listing.
+CREATE TABLE discovery.branch_services (
+    service_id    uuid PRIMARY KEY,
+    branch_id     uuid NOT NULL,
+    version       integer NOT NULL,
+    offered       boolean NOT NULL,                  -- active, and someone performs it
+    category_code text NOT NULL,
+    price_from    bigint NOT NULL                    -- the cheapest performer's, in halalas
+);
+CREATE INDEX ON discovery.branch_services (branch_id, category_code, price_from) WHERE offered;
 
 -- Nearby query shape
 -- SELECT … FROM discovery.branch_listings

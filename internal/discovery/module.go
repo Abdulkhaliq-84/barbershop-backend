@@ -1,11 +1,11 @@
 // Package discovery is the search module: how customers find branches
 // (docs/architecture/domain-model.md §3.6, ADR-0027).
 //
-// It keeps its own copy of every branch, a read model built only from
-// business's events: main subscribes it to them (KeepBranch). It depends
-// on no other module and never reads their tables, so searching can't slow
-// down or lock the business module, and the copy can take whatever shape
-// searching needs.
+// It keeps its own copy of every branch and of what each sells, a read
+// model built only from business's and catalog's events: main subscribes
+// it to them (KeepBranch, KeepService). It depends on no other module and
+// never reads their tables, so searching can't slow down or lock those
+// modules, and the copy can take whatever shape searching needs.
 //
 // This root package is the module's public face. Other modules and main use
 // only what is exported here; domain, app and adapters are private (lint
@@ -78,5 +78,32 @@ func (m *Module) KeepBranch(ctx context.Context, b Branch) error {
 		Branch: b.BranchID, Business: b.BusinessID, Version: b.Version, Listed: b.Published,
 		Name: b.Name, City: city, District: b.District, Address: b.Address, Location: b.Location,
 		Phone: b.Phone, Timezone: b.Timezone, UpdatedAt: b.At,
+	})
+}
+
+// Service is a branch's service as of Version, as catalog's events
+// describe it. Its fields match catalog.ServiceChanged one for one, so main
+// converts one to the other with a plain conversion.
+type Service struct {
+	BusinessID shared.BusinessID
+	BranchID   shared.BranchID
+	ServiceID  shared.ServiceID
+	Version    int
+	Offered    bool         // active, and someone performs it
+	Category   string       // a shared.Categories code
+	PriceFrom  shared.Money // the least a customer pays for it
+	At         time.Time
+}
+
+// KeepService updates discovery's copy of a service. An older version than
+// the copy's changes nothing, like KeepBranch.
+func (m *Module) KeepService(ctx context.Context, s Service) error {
+	category, err := shared.ParseCategory(s.Category)
+	if err != nil {
+		return err
+	}
+	return m.uc.KeepService(ctx, domain.Service{
+		Service: s.ServiceID, Branch: s.BranchID, Business: s.BusinessID, Version: s.Version,
+		Offered: s.Offered, Category: category, PriceFrom: s.PriceFrom, UpdatedAt: s.At,
 	})
 }

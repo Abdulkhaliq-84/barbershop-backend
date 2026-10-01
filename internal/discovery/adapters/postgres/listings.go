@@ -45,14 +45,34 @@ func (r *Listings) Keep(ctx context.Context, l domain.Listing) (bool, error) {
 	return n == 1, nil
 }
 
-// InCity returns up to limit listed branches in city, by Arabic name then
-// ID, after the given position.
-func (r *Listings) InCity(ctx context.Context, city shared.City, after *domain.Position, limit int) ([]domain.Listing, error) {
+// KeepService saves s unless the stored copy is of the same or a newer
+// version, in one statement like Keep.
+func (r *Listings) KeepService(ctx context.Context, s domain.Service) (bool, error) {
+	if s.PriceFrom.Currency() != shared.SAR {
+		return false, domain.ErrNotSAR
+	}
+	version, err := toInt32(s.Version)
+	if err != nil {
+		return false, err
+	}
+	n, err := sqlcgen.New(r.pool).KeepService(ctx, sqlcgen.KeepServiceParams{
+		ServiceID: s.Service.UUID(), BranchID: s.Branch.UUID(), BusinessID: s.Business.UUID(), Version: version,
+		Offered: s.Offered, CategoryCode: s.Category.Code(), PriceFrom: s.PriceFrom.Amount(), UpdatedAt: s.UpdatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("keep service: %w", err)
+	}
+	return n == 1, nil
+}
+
+// InCity returns up to limit listed branches in city offering a service in
+// category (nil: any), by Arabic name then ID, after the given position.
+func (r *Listings) InCity(ctx context.Context, city shared.City, category *shared.Category, after *domain.Position, limit int) ([]domain.Found, error) {
 	size, err := toInt32(limit)
 	if err != nil {
 		return nil, err
 	}
-	params := sqlcgen.ListingsInCityParams{CityCode: city.Code(), PageSize: size}
+	params := sqlcgen.ListingsInCityParams{CityCode: city.Code(), Category: categoryCode(category), PageSize: size}
 	if after != nil {
 		name, id := after.NameAr, after.Branch.UUID()
 		params.AfterName, params.AfterID = &name, &id
@@ -61,13 +81,13 @@ func (r *Listings) InCity(ctx context.Context, city shared.City, after *domain.P
 	if err != nil {
 		return nil, fmt.Errorf("listings in %s: %w", city.Code(), err)
 	}
-	out := make([]domain.Listing, 0, len(rows))
+	out := make([]domain.Found, 0, len(rows))
 	for _, row := range rows {
-		l, err := toListing(row)
+		f, err := toFound(row)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, l)
+		out = append(out, f)
 	}
 	return out, nil
 }
@@ -80,7 +100,7 @@ func (r *Listings) Near(ctx context.Context, near domain.Near, f domain.Filter, 
 		return nil, err
 	}
 	params := sqlcgen.ListingsNearParams{
-		Lat: near.Point.Lat(), Lng: near.Point.Lng(), RadiusM: near.RadiusM, PageSize: size,
+		Lat: near.Point.Lat(), Lng: near.Point.Lng(), RadiusM: near.RadiusM, Category: categoryCode(f.Category), PageSize: size,
 	}
 	if f.City != nil {
 		params.CityCode = new(f.City.Code())
@@ -109,7 +129,7 @@ func (r *Listings) Matching(ctx context.Context, f domain.Filter, after *domain.
 	if err != nil {
 		return nil, err
 	}
-	params := sqlcgen.ListingsMatchingParams{Text: f.Text, TextLike: escapeLike(f.Text), PageSize: size}
+	params := sqlcgen.ListingsMatchingParams{Text: f.Text, TextLike: escapeLike(f.Text), Category: categoryCode(f.Category), PageSize: size}
 	if f.City != nil {
 		params.CityCode = new(f.City.Code())
 	}
@@ -148,6 +168,14 @@ func (r *Listings) matching(ctx context.Context, fn func(q *sqlcgen.Queries) err
 	})
 }
 
+// categoryCode is the query parameter for a category: NULL for any.
+func categoryCode(c *shared.Category) *string {
+	if c == nil {
+		return nil
+	}
+	return new(c.Code())
+}
+
 // escapeLike makes text match itself in a LIKE pattern. Normalized text
 // has no %, _ or \ (they separate words), but a pattern shouldn't rely on it.
 func escapeLike(text string) string {
@@ -158,20 +186,27 @@ func escapeLike(text string) string {
 func found(rows []sqlcgen.ListingsNearRow, key func(*domain.Found, float64)) ([]domain.Found, error) {
 	out := make([]domain.Found, 0, len(rows))
 	for _, row := range rows {
-		// The listing columns are ListingsInCity's, plus the sort key.
-		l, err := toListing(sqlcgen.ListingsInCityRow{
+		// The columns are ListingsInCity's, plus the sort key.
+		f, err := toFound(sqlcgen.ListingsInCityRow{
 			BranchID: row.BranchID, BusinessID: row.BusinessID, Version: row.Version, Listed: row.Listed,
 			NameAr: row.NameAr, NameEn: row.NameEn, CityCode: row.CityCode, District: row.District, Address: row.Address,
 			Latitude: row.Latitude, Longitude: row.Longitude, Phone: row.Phone, Timezone: row.Timezone, UpdatedAt: row.UpdatedAt,
+			PriceFrom: row.PriceFrom,
 		})
 		if err != nil {
 			return nil, err
 		}
-		f := domain.Found{Listing: l}
 		key(&f, row.SortKey)
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// toFound reads a found branch: the listing, and the least a service there
+// costs (in halalas: discovery keeps SAR only).
+func toFound(row sqlcgen.ListingsInCityRow) (domain.Found, error) {
+	l, err := toListing(row)
+	return domain.Found{Listing: l, PriceFrom: shared.Halalas(row.PriceFrom)}, err
 }
 
 func toListing(row sqlcgen.ListingsInCityRow) (domain.Listing, error) {

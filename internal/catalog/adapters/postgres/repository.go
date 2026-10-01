@@ -15,6 +15,8 @@ import (
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/adapters/postgres/sqlcgen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/events"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -22,22 +24,34 @@ var _ domain.Services = (*Services)(nil)
 
 // Services implements domain.Services.
 type Services struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	events EventPublisher
 }
 
-// NewServices returns the repository.
-func NewServices(pool *pgxpool.Pool) *Services { return &Services{pool: pool} }
+// EventPublisher saves events inside the caller's transaction: the outbox
+// (ADR-0009). An event is published if and only if its change commits.
+type EventPublisher interface {
+	PublishTx(ctx context.Context, tx pgx.Tx, events ...outbox.Event) error
+}
 
-// Add inserts a new service.
+// NewServices returns the repository. It publishes the services' events
+// through events.
+func NewServices(pool *pgxpool.Pool, events EventPublisher) *Services {
+	return &Services{pool: pool, events: events}
+}
+
+// Add inserts a new service and publishes its events.
 func (r *Services) Add(ctx context.Context, s *domain.Service) error {
 	row, err := toRow(s)
 	if err != nil {
 		return err
 	}
-	if err := sqlcgen.New(r.pool).InsertService(ctx, sqlcgen.InsertServiceParams(row)); err != nil {
-		return fmt.Errorf("insert service: %w", err)
-	}
-	return nil
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := sqlcgen.New(tx).InsertService(ctx, sqlcgen.InsertServiceParams(row)); err != nil {
+			return fmt.Errorf("insert service: %w", err)
+		}
+		return r.publish(ctx, tx, s.Events())
+	})
 }
 
 // List returns the branch's services in display order, with their
@@ -124,8 +138,63 @@ func (r *Services) Update(ctx context.Context, business shared.BusinessID, branc
 		if n == 0 {
 			return domain.ErrVersionConflict
 		}
-		return saveOfferings(ctx, q, s)
+		if err := saveOfferings(ctx, q, s); err != nil {
+			return err
+		}
+		return r.publish(ctx, tx, s.Events())
 	})
+}
+
+// publish hands the service's events to the outbox inside tx, in the
+// contract's JSON shape (package events).
+func (r *Services) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event) error {
+	out := make([]outbox.Event, 0, len(recorded))
+	for _, e := range recorded {
+		var (
+			ev  outbox.Event
+			err error
+		)
+		switch e := e.(type) {
+		case domain.ServiceCreatedEvent:
+			ev, err = outbox.NewEvent(events.TypeServiceCreated, e.At, events.ServiceChanged{
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), ServiceID: e.Service.UUID(), ChangedAt: e.At,
+				Service: serviceContract(e.Snapshot),
+			})
+		case domain.ServiceUpdatedEvent:
+			ev, err = outbox.NewEvent(events.TypeServiceUpdated, e.At, events.ServiceChanged{
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), ServiceID: e.Service.UUID(), ChangedAt: e.At,
+				Service: serviceContract(e.Snapshot),
+			})
+		default:
+			err = fmt.Errorf("no contract for event %T", e)
+		}
+		if err != nil {
+			return err
+		}
+		out = append(out, ev)
+	}
+	if err := r.events.PublishTx(ctx, tx, out...); err != nil {
+		return fmt.Errorf("publish events: %w", err)
+	}
+	return nil
+}
+
+// serviceContract is a service snapshot in the events' JSON shape.
+func serviceContract(s domain.ServiceSnapshot) events.Service {
+	d := s.Details
+	out := events.Service{
+		Version: s.Version, Active: s.Active, CategoryCode: string(d.Category),
+		Name:            events.LocalizedText{Ar: d.Name.Ar(), En: d.Name.En()},
+		DurationMinutes: int(d.Duration / time.Minute), Price: moneyContract(d.Price),
+	}
+	if from, ok := s.PriceFrom(); ok {
+		out.PriceFrom = new(moneyContract(from))
+	}
+	return out
+}
+
+func moneyContract(m shared.Money) events.Money {
+	return events.Money{Amount: m.Amount(), Currency: string(m.Currency())}
 }
 
 // saveOfferings replaces the service's offerings with its current ones.

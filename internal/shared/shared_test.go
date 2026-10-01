@@ -246,3 +246,32 @@ func TestCities(t *testing.T) {
 		t.Error("Cities shares its backing array")
 	}
 }
+
+func TestCategories(t *testing.T) {
+	t.Parallel()
+	code := regexp.MustCompile(`^[a-z][a-z_]{1,39}$`) // the API's category pattern
+	seen := map[string]bool{}
+	for _, c := range shared.Categories() {
+		if !code.MatchString(c.Code()) || seen[c.Code()] || c.Name().Ar() == "" || c.Name().En() == "" || c.Icon() == "" {
+			t.Errorf("category %q: bad code, a duplicate, or a name or icon missing", c.Code())
+		}
+		seen[c.Code()] = true
+		if got, err := shared.ParseCategory(c.Code()); err != nil || got != c {
+			t.Errorf("ParseCategory(%q) = %v, %v", c.Code(), got, err)
+		}
+	}
+	if cats := shared.Categories(); len(cats) != 7 || cats[0].Code() != "haircut" || cats[0].Name().Ar() != "قص الشعر" {
+		t.Errorf("categories = %+v", cats)
+	}
+	for _, code := range []string{"", "Haircut", "massage"} {
+		if _, err := shared.ParseCategory(code); !errors.Is(err, shared.ErrUnknownCategory) {
+			t.Errorf("ParseCategory(%q) = %v", code, err)
+		}
+	}
+	// Callers get a copy: changing it changes nobody else's list.
+	list := shared.Categories()
+	list[0] = list[1]
+	if shared.Categories()[0].Code() != "haircut" {
+		t.Error("Categories shares its backing array")
+	}
+}
