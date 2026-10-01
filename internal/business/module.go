@@ -1,8 +1,8 @@
 // Package business is the tenancy module: businesses, their onboarding and
 // their staff (docs/architecture/domain-model.md §3.2).
 //
-// It publishes events through the outbox; OnApproved is how other modules
-// (wired in main) subscribe to them.
+// It publishes events through the outbox; OnApproved and OnBranchChanged
+// are how other modules (wired in main) subscribe to them.
 //
 // This root package is the module's public face. Other modules and main use
 // only what is exported here; the domain, app and adapters packages are the
@@ -17,6 +17,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/billing"
@@ -235,4 +236,71 @@ func OnApproved(bus *outbox.Bus, name string, fn func(ctx context.Context, e App
 			ApprovedAt: p.ApprovedAt,
 		})
 	})
+}
+
+// BranchChanged is a branch event (published, unpublished or edited) with
+// the branch as it is from Version on: what customers may see of it, and
+// whether they may.
+type BranchChanged struct {
+	BusinessID shared.BusinessID
+	BranchID   shared.BranchID
+	Version    int
+	Published  bool // customers can find and book it
+	Name       shared.LocalizedText
+	City       string // a shared.Cities code
+	District   string
+	Address    string
+	Location   shared.GeoPoint
+	Phone      string // E.164; "" if the branch has none
+	Timezone   string // IANA name
+	At         time.Time
+}
+
+// OnBranchChanged subscribes fn to every branch event, under three stable
+// names: name+".published", name+".unpublished" and name+".updated". An
+// event can come more than once and out of order: keep the newest Version.
+func OnBranchChanged(bus *outbox.Bus, name string, fn func(ctx context.Context, e BranchChanged) error) {
+	handle := func(ctx context.Context, e outbox.Event) error {
+		b, ok, err := decodeBranchChanged(e)
+		if err != nil || !ok {
+			return err
+		}
+		return fn(ctx, b)
+	}
+	bus.Subscribe(name+".published", events.TypeBranchPublished, handle)
+	bus.Subscribe(name+".unpublished", events.TypeBranchUnpublished, handle)
+	bus.Subscribe(name+".updated", events.TypeBranchUpdated, handle)
+}
+
+// decodeBranchChanged reads any of the three branch events. ok is false for
+// one queued before events carried the branch (M6.1): nothing to apply.
+func decodeBranchChanged(e outbox.Event) (_ BranchChanged, ok bool, _ error) {
+	// The three payloads share these fields.
+	var p struct {
+		BusinessID uuid.UUID     `json:"business_id"`
+		BranchID   uuid.UUID     `json:"branch_id"`
+		Branch     events.Branch `json:"branch"`
+	}
+	if err := json.Unmarshal(e.Payload, &p); err != nil {
+		return BranchChanged{}, false, fmt.Errorf("decode %s %s: %w", e.Type, e.ID, err)
+	}
+	b := p.Branch
+	if b.Version == 0 {
+		return BranchChanged{}, false, nil
+	}
+	name, err := shared.NewLocalizedText(b.Name.Ar, b.Name.En)
+	if err != nil {
+		return BranchChanged{}, false, fmt.Errorf("decode %s %s: name: %w", e.Type, e.ID, err)
+	}
+	location, err := shared.NewGeoPoint(b.Location.Latitude, b.Location.Longitude)
+	if err != nil {
+		return BranchChanged{}, false, fmt.Errorf("decode %s %s: location: %w", e.Type, e.ID, err)
+	}
+	return BranchChanged{
+		BusinessID: shared.IDFromUUID[shared.BusinessTag](p.BusinessID),
+		BranchID:   shared.IDFromUUID[shared.BranchTag](p.BranchID),
+		Version:    b.Version, Published: b.Status == string(domain.BranchPublished),
+		Name: name, City: b.CityCode, District: b.District, Address: b.Address,
+		Location: location, Phone: b.Phone, Timezone: b.Timezone, At: e.OccurredAt,
+	}, true, nil
 }

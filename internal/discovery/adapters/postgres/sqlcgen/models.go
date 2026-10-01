@@ -24,7 +24,7 @@ type BookingAppointment struct {
 	BusinessID       uuid.UUID
 	BranchID         uuid.UUID
 	StaffID          uuid.UUID
-	CustomerID       pgtype.UUID
+	CustomerID       *uuid.UUID
 	Status           string
 	Source           string
 	Assignment       string
@@ -34,10 +34,10 @@ type BookingAppointment struct {
 	PriceAmount      int64
 	PriceCurrency    string
 	CustomerNote     string
-	PendingUntil     *time.Time
+	PendingUntil     pgtype.Timestamptz
 	CancelledBy      *string
 	CancelReason     string
-	CancelledAt      *time.Time
+	CancelledAt      pgtype.Timestamptz
 	Version          int32
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
@@ -60,7 +60,7 @@ type BookingIdempotencyKey struct {
 	RequesterID   uuid.UUID
 	Key           uuid.UUID
 	RequestHash   []byte
-	AppointmentID pgtype.UUID
+	AppointmentID *uuid.UUID
 	CreatedAt     time.Time
 }
 
@@ -101,9 +101,9 @@ type BusinessBusiness struct {
 	Version         int32
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	SubmittedAt     *time.Time
-	ReviewedAt      *time.Time
-	ReviewedBy      pgtype.UUID
+	SubmittedAt     pgtype.Timestamptz
+	ReviewedAt      pgtype.Timestamptz
+	ReviewedBy      *uuid.UUID
 	RejectionReason string
 }
 
@@ -119,8 +119,8 @@ type BusinessInvitation struct {
 	InvitedBy   uuid.UUID
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
-	AcceptedAt  *time.Time
-	AcceptedBy  pgtype.UUID
+	AcceptedAt  pgtype.Timestamptz
+	AcceptedBy  *uuid.UUID
 }
 
 type BusinessStaffBranch struct {
@@ -132,7 +132,7 @@ type BusinessStaffBranch struct {
 type BusinessStaffMember struct {
 	ID          uuid.UUID
 	BusinessID  uuid.UUID
-	UserID      pgtype.UUID
+	UserID      *uuid.UUID
 	Role        string
 	Active      bool
 	CreatedAt   time.Time
@@ -201,7 +201,7 @@ type IamOtpChallenge struct {
 	Attempts   int16
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
-	ConsumedAt *time.Time
+	ConsumedAt pgtype.Timestamptz
 }
 
 type IamOtpPhoneGuard struct {
@@ -216,7 +216,7 @@ type IamRefreshToken struct {
 	SessionID uuid.UUID
 	CreatedAt time.Time
 	ExpiresAt time.Time
-	UsedAt    *time.Time
+	UsedAt    pgtype.Timestamptz
 }
 
 type IamSession struct {
@@ -224,7 +224,7 @@ type IamSession struct {
 	UserID          uuid.UUID
 	CreatedAt       time.Time
 	LastRefreshedAt time.Time
-	RevokedAt       *time.Time
+	RevokedAt       pgtype.Timestamptz
 	RevokeReason    *string
 }
 

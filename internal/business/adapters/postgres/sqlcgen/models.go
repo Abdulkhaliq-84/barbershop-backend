@@ -177,6 +177,23 @@ type CatalogServiceOffering struct {
 	DurationMinutes pgtype.Int2
 }
 
+type DiscoveryBranchListing struct {
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+	Version    int32
+	Listed     bool
+	NameAr     string
+	NameEn     string
+	CityCode   string
+	District   string
+	Address    string
+	Latitude   float64
+	Longitude  float64
+	Phone      string
+	Timezone   string
+	UpdatedAt  time.Time
+}
+
 type IamOtpChallenge struct {
 	ID         uuid.UUID
 	Phone      string

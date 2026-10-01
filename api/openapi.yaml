@@ -34,6 +34,8 @@ tags:
     description: When work can happen — branch opening hours, barber schedules, time off
   - name: booking
     description: Customers — when a branch can do some services, and booking them
+  - name: discovery
+    description: Customers — finding branches (public)
   - name: media
     description: Stored files, served through short-lived signed links
   - name: admin
@@ -570,6 +572,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Membership"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/cities:
+    get:
+      operationId: listCities
+      tags: [discovery]
+      summary: Cities (public)
+      description: |
+        Platform reference data, in the order the app lists them (the
+        largest first). A branch is filed under one (`city_code`), and
+        customers browse by them.
+      security: []
+      responses:
+        "200":
+          description: The cities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CityList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/branches:
+    get:
+      operationId: searchBranches
+      tags: [discovery]
+      summary: Find branches (public)
+      description: |
+        The published branches in a city, by Arabic name, 20 a page. Pass `next_cursor` from a page as `cursor` to get
+        the next one.
+
+        A list kept from the businesses' changes: a branch appears or
+        changes here moments after its owner publishes or edits it.
+
+        A city that isn't in `GET /v1/cities`: `422 unknown_city`.
+      security: []
+      parameters:
+        - name: city
+          in: query
+          required: true
+          description: A city code from `GET /v1/cities`.
+          schema:
+            type: string
+            pattern: "^[a-z][a-z_]{1,39}$"
+            example: riyadh
+        - name: cursor
+          in: query
+          description: "`next_cursor` from the previous page."
+          schema:
+            type: string
+            maxLength: 512
+      responses:
+        "200":
+          description: A page of branches
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchListingPage"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -2514,6 +2575,60 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ServiceCategory"
+
+    City:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          example: riyadh
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+
+    CityList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/City"
+
+    BranchListing:
+      type: object
+      description: A branch as customers find it.
+      required: [id, name, city, district, address, location]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The branch ID (`GET /v1/branches/{branch_id}/availability`, booking).
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city:
+          $ref: "#/components/schemas/City"
+        district:
+          type: string
+          example: العليا
+        address:
+          type: string
+          example: شارع العليا العام
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+
+    BranchListingPage:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BranchListing"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass as `cursor` for the next page; absent on the last page.
 
     ServiceDescription:
       type: object

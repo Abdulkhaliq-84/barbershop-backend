@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -30,16 +29,14 @@ func ParseBranchStatus(s string) (BranchStatus, error) {
 	}
 }
 
-// CityCode names a city, e.g. "riyadh". Customers search by city, so cities
-// are codes from a fixed list the app shows, not free text that would spell
-// Riyadh five ways. (The list itself becomes reference data in M6.)
+// CityCode names a city, e.g. "riyadh". Customers browse by city, so it is
+// a code from the app's fixed list (shared.Cities), not free text that would
+// spell Riyadh five ways.
 type CityCode string
 
-var cityCodePattern = regexp.MustCompile(`^[a-z][a-z_]{1,39}$`)
-
-// ParseCityCode validates a city code.
+// ParseCityCode accepts the code of a city on the list.
 func ParseCityCode(s string) (CityCode, error) {
-	if !cityCodePattern.MatchString(s) {
+	if _, err := shared.ParseCity(s); err != nil {
 		return "", ErrInvalidCityCode
 	}
 	return CityCode(s), nil
@@ -150,6 +147,7 @@ func (b *Branch) Edit(p BranchProfile, policy BookingPolicy, now time.Time) erro
 	}
 	b.profile, b.policy = p, policy
 	b.touch(now)
+	b.events = append(b.events, BranchUpdatedEvent{Business: b.business, Branch: b.id, At: b.updatedAt, Snapshot: b.snapshot()})
 	return nil
 }
 
@@ -199,7 +197,7 @@ func (b *Branch) Publish(business Status, r BranchReadiness, now time.Time) erro
 	}
 	b.status = BranchPublished
 	b.touch(now)
-	b.events = append(b.events, BranchPublishedEvent{Business: b.business, Branch: b.id, At: b.updatedAt})
+	b.events = append(b.events, BranchPublishedEvent{Business: b.business, Branch: b.id, At: b.updatedAt, Snapshot: b.snapshot()})
 	return nil
 }
 
@@ -211,13 +209,19 @@ func (b *Branch) Unpublish(now time.Time) error {
 	}
 	b.status = BranchUnpublished
 	b.touch(now)
-	b.events = append(b.events, BranchUnpublishedEvent{Business: b.business, Branch: b.id, At: b.updatedAt})
+	b.events = append(b.events, BranchUnpublishedEvent{Business: b.business, Branch: b.id, At: b.updatedAt, Snapshot: b.snapshot()})
 	return nil
 }
 
 // Events returns what happened to the branch since it was loaded, for the
 // repository to publish together with the change.
 func (b *Branch) Events() []Event { return b.events }
+
+// snapshot is the branch as of now, for its events. Call it after touch, so
+// it carries the new version.
+func (b *Branch) snapshot() BranchSnapshot {
+	return BranchSnapshot{Version: b.version, Status: b.status, Profile: b.profile}
+}
 
 // touch records a saved change: a new version and time.
 func (b *Branch) touch(now time.Time) {

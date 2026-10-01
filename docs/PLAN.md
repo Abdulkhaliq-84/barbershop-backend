@@ -170,6 +170,19 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    job (`outbox.Bus.Every`) ([ADR-0026](adr/0026-walk-ins-and-pending-expiry.md)).
    *Your turn:* "My appointments" with cursor pagination.
 
+**M6 in slices** (one PR each):
+
+1. M6.1 — `discovery` module: its own copy of each branch, kept from business's events (they
+   carry the branch; the newest version wins); cities as reference data; `GET /v1/cities` and
+   `GET /v1/branches?city=` ([ADR-0027](adr/0027-discovery-read-model.md)).
+   *Your turn:* each city's number of branches in `GET /v1/cities`.
+2. M6.2 — nearby: the location as PostGIS `geography` with a GiST index; `lat`, `lng`,
+   `radius_km`, nearest first, with the distance; `EXPLAIN ANALYZE`.
+3. M6.3 — text search: Arabic normalisation (fuzz-tested) and a trigram index on the names; `q`.
+4. M6.4 — catalog's events: the categories filter and the price from.
+   *Your turn:* sort by starting price.
+5. M6.5 — scheduling's events: open now; the branch's public page `GET /v1/branches/{id}`.
+
 ### Design track (in parallel, in Figma)
 
 | # | Deliverable | Feeds |

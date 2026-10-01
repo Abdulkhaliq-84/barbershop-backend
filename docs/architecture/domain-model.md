@@ -333,6 +333,18 @@ Arabic/English names), filters (category, open now, price), sort (distance, pric
 Arabic normalisation for search: strip diacritics/tatweel, unify alef forms (أ إ آ → ا), ى → ي,
 ة → ه — applied both when indexing and when querying.
 
+**Live since M6.1 (ADR-0027):** the `discovery` module and browsing by city.
+- business's branch events (`branch_published`, `branch_unpublished` and the new
+  `branch_updated`, recorded on every edit) carry the branch as of its version. discovery keeps
+  the newest copy of each: an older or repeated event changes nothing, and an unpublished
+  branch keeps a hidden row, so a late event can't bring it back.
+- Cities are reference data in code (`shared.Cities`); a branch must be in one of them.
+- `GET /v1/cities` lists them; `GET /v1/branches?city=` lists a city's published branches by
+  Arabic name, 20 a page, with a cursor. Both are public.
+- So far the copy holds business's part: names, city, district, address, location, phone and
+  time zone. The location becomes `geography` in M6.2; catalog's and scheduling's parts come in
+  M6.4–M6.5.
+
 ### 3.7 `billing` — Plans and entitlements
 
 | Aggregate | Key fields | Invariants |

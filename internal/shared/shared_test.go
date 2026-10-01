@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"regexp"
 	"testing"
 	"time"
 
@@ -215,4 +216,33 @@ func FuzzIntervalOverlaps(f *testing.F) {
 			t.Fatalf("%v covers %v but does not overlap it", a, b)
 		}
 	})
+}
+
+func TestCities(t *testing.T) {
+	t.Parallel()
+	code := regexp.MustCompile(`^[a-z][a-z_]{1,39}$`) // the API's city_code pattern
+	seen := map[string]bool{}
+	for _, c := range shared.Cities() {
+		if !code.MatchString(c.Code()) || seen[c.Code()] || c.Name().Ar() == "" || c.Name().En() == "" {
+			t.Errorf("city %q: bad code, a duplicate, or a name missing (%q, %q)", c.Code(), c.Name().Ar(), c.Name().En())
+		}
+		seen[c.Code()] = true
+		if got, err := shared.ParseCity(c.Code()); err != nil || got != c {
+			t.Errorf("ParseCity(%q) = %v, %v", c.Code(), got, err)
+		}
+	}
+	if first := shared.Cities()[0]; first.Code() != "riyadh" || first.Name().Ar() != "الرياض" {
+		t.Errorf("first city = %+v", first)
+	}
+	for _, code := range []string{"", "Riyadh", "atlantis"} {
+		if _, err := shared.ParseCity(code); !errors.Is(err, shared.ErrUnknownCity) {
+			t.Errorf("ParseCity(%q) = %v", code, err)
+		}
+	}
+	// Callers get a copy: changing it changes nobody else's list.
+	list := shared.Cities()
+	list[0] = list[1]
+	if shared.Cities()[0].Code() != "riyadh" {
+		t.Error("Cities shares its backing array")
+	}
 }
