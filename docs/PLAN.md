@@ -177,7 +177,8 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    `GET /v1/branches?city=` ([ADR-0027](adr/0027-discovery-read-model.md)).
    *Your turn:* each city's number of branches in `GET /v1/cities`.
 2. M6.2 — nearby: the location as PostGIS `geography` with a GiST index; `lat`, `lng`,
-   `radius_km`, nearest first, with the distance; `EXPLAIN ANALYZE`.
+   `radius_km`, nearest first, with the distance; `EXPLAIN ANALYZE`
+   ([ADR-0028](adr/0028-nearby-search.md)). *Your turn:* the map's visible area.
 3. M6.3 — text search: Arabic normalisation (fuzz-tested) and a trigram index on the names; `q`.
 4. M6.4 — catalog's events: the categories filter and the price from.
    *Your turn:* sort by starting price.

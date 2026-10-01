@@ -38,3 +38,22 @@ WHERE listed AND city_code = @city_code
 ORDER BY name_ar, branch_id
 LIMIT @page_size;
 
+
+-- name: ListingsNear :many
+-- A page of the listed branches within radius_m metres of a point, nearest
+-- first, then by ID, after the last one of the previous page (none for the
+-- first page); optionally only one city's. Distances are on a sphere: <->
+-- and ST_DWithin(…, false) agree, so the radius, the order and the cursor
+-- all use the same number. The GiST index finds the candidates.
+SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, updated_at,
+       (location <-> ST_MakePoint(@lng::float8, @lat::float8)::geography)::float8 AS distance_m
+FROM discovery.branch_listings
+WHERE listed
+  AND ST_DWithin(location, ST_MakePoint(@lng::float8, @lat::float8)::geography, @radius_m::float8, false)
+  AND (sqlc.narg(city_code)::text IS NULL OR city_code = sqlc.narg(city_code)::text)
+  AND (sqlc.narg(after_distance)::float8 IS NULL
+       OR (location <-> ST_MakePoint(@lng::float8, @lat::float8)::geography, branch_id)
+          > (sqlc.narg(after_distance)::float8, sqlc.narg(after_id)::uuid))
+ORDER BY location <-> ST_MakePoint(@lng::float8, @lat::float8)::geography, branch_id
+LIMIT @page_size;

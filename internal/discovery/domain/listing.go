@@ -10,6 +10,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -34,11 +35,39 @@ type Listing struct {
 // PageSize is how many listings one page holds.
 const PageSize = 20
 
-// Position is where a page of a city's listings ended: the last one's
-// Arabic name and branch ID. The next page starts after it.
+// Search errors.
+var (
+	ErrNoPlace = errors.New("search: a city, or a point to search near, is required")
+	ErrRadius  = errors.New("search: the radius is out of range")
+)
+
+// Search radius limits, in kilometres.
+const (
+	DefaultRadiusKm = 10
+	MaxRadiusKm     = 50
+)
+
+// Near is a search around a point: listed branches within RadiusM metres,
+// nearest first.
+type Near struct {
+	Point   shared.GeoPoint
+	RadiusM float64
+}
+
+// Found is a listing a search found. DistanceM is how far it is from the
+// point searched near, in metres; 0 when browsing a city by name.
+type Found struct {
+	Listing
+	DistanceM float64
+}
+
+// Position is where a page ended, so the next one starts after it: the
+// last listing's branch ID and its sort key, NameAr when browsing a city
+// by name, DistanceM when searching near a point.
 type Position struct {
-	NameAr string
-	Branch shared.BranchID
+	NameAr    string
+	DistanceM float64
+	Branch    shared.BranchID
 }
 
 // Listings stores discovery's copies.
@@ -49,4 +78,8 @@ type Listings interface {
 	// InCity returns up to limit listed branches in city, by Arabic name
 	// then ID, starting after the given position (nil: from the start).
 	InCity(ctx context.Context, city shared.City, after *Position, limit int) ([]Listing, error)
+	// Near returns up to limit listed branches within near's radius,
+	// nearest first then by ID, only city's if city isn't nil, starting
+	// after the given position (nil: from the start).
+	Near(ctx context.Context, near Near, city *shared.City, after *Position, limit int) ([]Found, error)
 }

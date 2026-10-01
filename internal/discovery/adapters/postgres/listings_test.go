@@ -2,7 +2,10 @@ package postgres_test
 
 import (
 	"log/slog"
+	"math"
 	"math/rand/v2"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -200,5 +203,172 @@ func TestInCity(t *testing.T) {
 	}
 	if got := inCity(t, r, "dammam", nil, 10); len(got) != 0 {
 		t.Errorf("a city with no branches: %+v", got)
+	}
+}
+
+func TestNear(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	// Due north of a point, 0.009° of latitude is about 1 km.
+	olaya, _ := shared.NewGeoPoint(24.6911, 46.6851)
+	north := func(ar string, km float64) domain.Listing {
+		l := listing(t, ar)
+		l.Location, _ = shared.NewGeoPoint(24.6911+0.009*km, 46.6851)
+		return l
+	}
+	jeddahCoded := north("أ", 0.5) // filed under another city, to test the filter
+	jeddahCoded.City, _ = shared.ParseCity("jeddah")
+	km1, km3, km9, km12 := north("ب", 1), north("ت", 3), north("ث", 9), north("ج", 12)
+	tie1, tie2 := north("ح", 2), north("خ", 2) // the same place: the ID decides
+	if tie2.Branch.String() < tie1.Branch.String() {
+		tie1, tie2 = tie2, tie1
+	}
+	hidden := north("د", 0.2)
+	hidden.Listed = false
+	for _, l := range []domain.Listing{km9, tie2, hidden, km1, km12, jeddahCoded, tie1, km3} {
+		if _, err := r.Keep(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	near := func(radiusKm float64, city *shared.City, after *domain.Position, limit int) []domain.Found {
+		t.Helper()
+		got, err := r.Near(ctx, domain.Near{Point: olaya, RadiusM: radiusKm * 1000}, city, after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	ids := func(found []domain.Found) []shared.BranchID {
+		out := make([]shared.BranchID, len(found))
+		for i, f := range found {
+			out[i] = f.Branch
+		}
+		return out
+	}
+
+	// Within 10 km, nearest first; hidden and too-far branches aren't there.
+	all := near(10, nil, nil, 20)
+	want := []shared.BranchID{jeddahCoded.Branch, km1.Branch, tie1.Branch, tie2.Branch, km3.Branch, km9.Branch}
+	if !slices.Equal(ids(all), want) {
+		t.Fatalf("within 10 km = %v, want %v", ids(all), want)
+	}
+	if all[1].Listing != km1 {
+		t.Errorf("listing read back = %+v, want %+v", all[1].Listing, km1)
+	}
+	// Distances in metres, close to the truth (a sphere, not the spheroid).
+	for i, km := range []float64{0.5, 1, 2, 2, 3, 9} {
+		if d := all[i].DistanceM; math.Abs(d-km*1000) > km*1000*0.01 {
+			t.Errorf("%d: %.0f m, want about %.0f", i, d, km*1000)
+		}
+	}
+	if got := near(0.6, nil, nil, 20); !slices.Equal(ids(got), want[:1]) {
+		t.Errorf("within 600 m = %v", ids(got))
+	}
+	riyadh, _ := shared.ParseCity("riyadh")
+	if got := near(10, &riyadh, nil, 20); !slices.Equal(ids(got), want[1:]) {
+		t.Errorf("in riyadh = %v", ids(got))
+	}
+
+	// Pages continue exactly after the last one shown, even between two
+	// branches at the same distance.
+	at := func(f domain.Found) *domain.Position {
+		return &domain.Position{DistanceM: f.DistanceM, Branch: f.Branch}
+	}
+	if got := near(10, nil, nil, 2); !slices.Equal(ids(got), want[:2]) {
+		t.Errorf("first page = %v", ids(got))
+	}
+	if got := near(10, nil, at(all[1]), 2); !slices.Equal(ids(got), want[2:4]) {
+		t.Errorf("second page = %v", ids(got))
+	}
+	if got := near(10, nil, at(all[2]), 2); !slices.Equal(ids(got), want[3:5]) {
+		t.Errorf("after the first of two at the same place = %v", ids(got))
+	}
+	if got := near(10, nil, at(all[5]), 2); len(got) != 0 {
+		t.Errorf("after the last = %v", ids(got))
+	}
+}
+
+// The search reads the GiST index, not every row.
+func TestNearUsesTheIndex(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO discovery.branch_listings
+			(branch_id, business_id, version, listed, name_ar, city_code, address, latitude, longitude, timezone, updated_at)
+		SELECT gen_random_uuid(), gen_random_uuid(), 1, true, 'صالون', 'riyadh', 'شارع', 17 + random() * 15, 37 + random() * 18, 'Asia/Riyadh', now()
+		FROM generate_series(1, 5000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `ANALYZE discovery.branch_listings`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, `EXPLAIN (COSTS OFF)
+		SELECT branch_id FROM discovery.branch_listings
+		WHERE listed AND ST_DWithin(location, ST_MakePoint(46.6851, 24.6911)::geography, 10000, false)
+		ORDER BY location <-> ST_MakePoint(46.6851, 24.6911)::geography, branch_id LIMIT 21`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(line + "\n")
+	}
+	if !strings.Contains(plan.String(), "branch_listings_location_idx") {
+		t.Errorf("the plan doesn't use the location index:\n%s", plan.String())
+	}
+}
+
+// Branches at the same place are ordered by ID, so paging one at a time
+// shows each exactly once, in that order, whatever order they were saved in.
+func TestNearTies(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	olaya, _ := shared.NewGeoPoint(24.6911, 46.6851)
+	var same []domain.Listing
+	for range 8 {
+		l := listing(t, "صالون")
+		l.Location, _ = shared.NewGeoPoint(24.70, 46.69)
+		same = append(same, l)
+	}
+	slices.SortFunc(same, func(a, b domain.Listing) int { return strings.Compare(b.Branch.String(), a.Branch.String()) })
+	for _, l := range same { // saved in descending ID order
+		if _, err := r.Keep(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slices.Reverse(same)
+	for _, size := range []int{1, 3} {
+		var seen []shared.BranchID
+		var after *domain.Position
+		for range 20 {
+			got, err := r.Near(ctx, domain.Near{Point: olaya, RadiusM: 10_000}, nil, after, size)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, f := range got {
+				seen = append(seen, f.Branch)
+			}
+			if len(got) < size {
+				break
+			}
+			last := got[len(got)-1]
+			after = &domain.Position{DistanceM: last.DistanceM, Branch: last.Branch}
+		}
+		want := make([]shared.BranchID, len(same))
+		for i, l := range same {
+			want[i] = l.Branch
+		}
+		if !slices.Equal(seen, want) {
+			t.Errorf("pages of %d = %v, want %v", size, seen, want)
+		}
 	}
 }

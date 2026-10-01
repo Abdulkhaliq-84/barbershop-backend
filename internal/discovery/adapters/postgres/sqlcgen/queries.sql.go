@@ -99,9 +99,26 @@ type ListingsInCityParams struct {
 	PageSize  int32
 }
 
+type ListingsInCityRow struct {
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+	Version    int32
+	Listed     bool
+	NameAr     string
+	NameEn     string
+	CityCode   string
+	District   string
+	Address    string
+	Latitude   float64
+	Longitude  float64
+	Phone      string
+	Timezone   string
+	UpdatedAt  time.Time
+}
+
 // A page of a city's listed branches, by Arabic name then ID, after the
 // last one of the previous page (none for the first page).
-func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) ([]DiscoveryBranchListing, error) {
+func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) ([]ListingsInCityRow, error) {
 	rows, err := q.db.Query(ctx, listingsInCity,
 		arg.CityCode,
 		arg.AfterName,
@@ -112,9 +129,9 @@ func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) 
 		return nil, err
 	}
 	defer rows.Close()
-	items := []DiscoveryBranchListing{}
+	items := []ListingsInCityRow{}
 	for rows.Next() {
-		var i DiscoveryBranchListing
+		var i ListingsInCityRow
 		if err := rows.Scan(
 			&i.BranchID,
 			&i.BusinessID,
@@ -130,6 +147,98 @@ func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) 
 			&i.Phone,
 			&i.Timezone,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listingsNear = `-- name: ListingsNear :many
+SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, updated_at,
+       (location <-> ST_MakePoint($1::float8, $2::float8)::geography)::float8 AS distance_m
+FROM discovery.branch_listings
+WHERE listed
+  AND ST_DWithin(location, ST_MakePoint($1::float8, $2::float8)::geography, $3::float8, false)
+  AND ($4::text IS NULL OR city_code = $4::text)
+  AND ($5::float8 IS NULL
+       OR (location <-> ST_MakePoint($1::float8, $2::float8)::geography, branch_id)
+          > ($5::float8, $6::uuid))
+ORDER BY location <-> ST_MakePoint($1::float8, $2::float8)::geography, branch_id
+LIMIT $7
+`
+
+type ListingsNearParams struct {
+	Lng           float64
+	Lat           float64
+	RadiusM       float64
+	CityCode      *string
+	AfterDistance *float64
+	AfterID       *uuid.UUID
+	PageSize      int32
+}
+
+type ListingsNearRow struct {
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+	Version    int32
+	Listed     bool
+	NameAr     string
+	NameEn     string
+	CityCode   string
+	District   string
+	Address    string
+	Latitude   float64
+	Longitude  float64
+	Phone      string
+	Timezone   string
+	UpdatedAt  time.Time
+	DistanceM  float64
+}
+
+// A page of the listed branches within radius_m metres of a point, nearest
+// first, then by ID, after the last one of the previous page (none for the
+// first page); optionally only one city's. Distances are on a sphere: <->
+// and ST_DWithin(…, false) agree, so the radius, the order and the cursor
+// all use the same number. The GiST index finds the candidates.
+func (q *Queries) ListingsNear(ctx context.Context, arg ListingsNearParams) ([]ListingsNearRow, error) {
+	rows, err := q.db.Query(ctx, listingsNear,
+		arg.Lng,
+		arg.Lat,
+		arg.RadiusM,
+		arg.CityCode,
+		arg.AfterDistance,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListingsNearRow{}
+	for rows.Next() {
+		var i ListingsNearRow
+		if err := rows.Scan(
+			&i.BranchID,
+			&i.BusinessID,
+			&i.Version,
+			&i.Listed,
+			&i.NameAr,
+			&i.NameEn,
+			&i.CityCode,
+			&i.District,
+			&i.Address,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Phone,
+			&i.Timezone,
+			&i.UpdatedAt,
+			&i.DistanceM,
 		); err != nil {
 			return nil, err
 		}

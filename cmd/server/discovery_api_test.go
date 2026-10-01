@@ -71,6 +71,36 @@ func TestDiscoveryAPI(t *testing.T) {
 		t.Errorf("kept phone %q, timezone %q, %v", phone, timezone, err)
 	}
 
+	// Near a place: within the radius, with the distance in metres. About
+	// 1.1 km from the branch; nothing near Jeddah; nothing filed under
+	// Jeddah near Riyadh.
+	near := func(query string) []any {
+		t.Helper()
+		r := a.do(t, http.MethodGet, "/v1/branches?"+query, "", "")
+		if r.status != http.StatusOK {
+			t.Fatalf("near %s: %d %v", query, r.status, r.body)
+		}
+		data, _ := r.body["data"].([]any)
+		return data
+	}
+	if got := near("lat=24.70&lng=46.69"); len(got) != 1 || got[0].(map[string]any)["id"] != branch {
+		t.Errorf("near the branch: %v", got)
+	} else if d, _ := got[0].(map[string]any)["distance_m"].(float64); d < 1050 || d > 1160 {
+		t.Errorf("distance = %v m, want about 1,100", got[0].(map[string]any)["distance_m"])
+	}
+	if got := near("lat=24.70&lng=46.69&radius_km=1"); len(got) != 0 {
+		t.Errorf("within 1 km: %v", got)
+	}
+	if got := near("lat=21.54&lng=39.17&radius_km=50"); len(got) != 0 {
+		t.Errorf("near Jeddah: %v", got)
+	}
+	if got := near("lat=24.70&lng=46.69&city=jeddah"); len(got) != 0 {
+		t.Errorf("filed under Jeddah: %v", got)
+	}
+	if got := listed("riyadh"); len(got) != 1 || got[0].(map[string]any)["distance_m"] != nil {
+		t.Errorf("by city, a distance: %v", got)
+	}
+
 	// Edited: the listing follows. Unpublished: gone.
 	path := biz + "/branches/" + branch // biz is its path
 	if r := a.do(t, http.MethodPatch, path, owner, `{"name":{"ar":"فرع الملقا","en":"Malqa"}}`, "If-Match", "2"); r.status != http.StatusOK {
@@ -105,6 +135,32 @@ func TestDiscoveryAPI(t *testing.T) {
 	if page.status != http.StatusOK || len(rest) != 1 || page.body["next_cursor"] != nil || rest[0].(map[string]any)["name"].(map[string]any)["ar"] != "صالون 20" {
 		t.Errorf("last page: %d %v", page.status, page.body)
 	}
+	// A cursor belongs to its search.
+	if r := a.do(t, http.MethodGet, "/v1/branches?lat=28.39&lng=36.57&cursor="+url.QueryEscape(next), "", ""); r.status != http.StatusBadRequest {
+		t.Errorf("a city's cursor near a place: %d %v", r.status, r.body)
+	}
+	// Near them: all 21 are at one place, so the IDs order them; two pages
+	// show each once.
+	seen, shown := map[any]bool{}, 0
+	for query, pages := "lat=28.39&lng=36.57", 0; ; pages++ {
+		r := a.do(t, http.MethodGet, "/v1/branches?"+query, "", "")
+		data, _ := r.body["data"].([]any)
+		for _, x := range data {
+			seen[x.(map[string]any)["id"]] = true
+		}
+		shown += len(data)
+		cursor, _ := r.body["next_cursor"].(string)
+		if r.status != http.StatusOK || cursor == "" || pages > 3 {
+			break
+		}
+		query = "lat=28.39&lng=36.57&cursor=" + url.QueryEscape(cursor)
+		if r := a.do(t, http.MethodGet, "/v1/branches?city=tabuk&cursor="+url.QueryEscape(cursor), "", ""); r.status != http.StatusBadRequest {
+			t.Errorf("a cursor from near a place, by city: %d %v", r.status, r.body)
+		}
+	}
+	if len(seen) != 21 || shown != 21 {
+		t.Errorf("paging near them showed %d, %d different, want 21", shown, len(seen))
+	}
 
 	for name, tt := range map[string]struct {
 		query  string
@@ -114,6 +170,10 @@ func TestDiscoveryAPI(t *testing.T) {
 		"a city not on the list": {"city=atlantis", http.StatusUnprocessableEntity, "unknown_city"},
 		"a city in capitals":     {"city=Riyadh", http.StatusBadRequest, "validation_failed"},
 		"no city":                {"", http.StatusBadRequest, "validation_failed"},
+		"lat without lng":        {"lat=24.7", http.StatusBadRequest, "validation_failed"},
+		"a radius alone":         {"city=riyadh&radius_km=5", http.StatusBadRequest, "validation_failed"},
+		"a radius of 51 km":      {"lat=24.7&lng=46.7&radius_km=51", http.StatusBadRequest, "validation_failed"},
+		"a latitude off Earth":   {"lat=91&lng=46.7", http.StatusBadRequest, "validation_failed"},
 		"a made-up cursor":       {"city=riyadh&cursor=bm90LWEtY3Vyc29y", http.StatusBadRequest, "validation_failed"},
 	} {
 		if r := a.do(t, http.MethodGet, "/v1/branches?"+tt.query, "", ""); r.status != tt.status || r.body["code"] != tt.code {

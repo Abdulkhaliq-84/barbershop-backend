@@ -601,8 +601,15 @@ paths:
       tags: [discovery]
       summary: Find branches (public)
       description: |
-        The published branches in a city, by Arabic name, 20 a page. Pass `next_cursor` from a page as `cursor` to get
-        the next one.
+        Published branches, 20 a page. Pass `next_cursor` from a page as
+        `cursor` to get the next one (with the same search).
+
+        - **Near a place** (`lat` and `lng`): the branches within
+          `radius_km`, nearest first, each with its `distance_m`. Add
+          `city` to keep only that city's.
+        - **In a city** (`city` alone): its branches by Arabic name.
+
+        Neither a city nor a place, or only one of `lat` and `lng`: `400`.
 
         A list kept from the businesses' changes: a branch appears or
         changes here moments after its owner publishes or edits it.
@@ -612,12 +619,36 @@ paths:
       parameters:
         - name: city
           in: query
-          required: true
           description: A city code from `GET /v1/cities`.
           schema:
             type: string
             pattern: "^[a-z][a-z_]{1,39}$"
             example: riyadh
+        - name: lat
+          in: query
+          description: Search near this latitude (with `lng`), e.g. the customer's location.
+          schema:
+            type: number
+            format: double
+            minimum: -90
+            maximum: 90
+            example: 24.6911
+        - name: lng
+          in: query
+          description: Search near this longitude (with `lat`).
+          schema:
+            type: number
+            format: double
+            minimum: -180
+            maximum: 180
+            example: 46.6851
+        - name: radius_km
+          in: query
+          description: How far from `lat`, `lng` to look, in kilometres; 10 if not given.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
         - name: cursor
           in: query
           description: "`next_cursor` from the previous page."
@@ -2616,6 +2647,10 @@ components:
           example: شارع العليا العام
         location:
           $ref: "#/components/schemas/GeoPoint"
+        distance_m:
+          type: integer
+          description: Metres from the place searched near (straight line); only when searching near a place.
+          example: 850
 
     BranchListingPage:
       type: object
