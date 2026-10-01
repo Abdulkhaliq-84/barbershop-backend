@@ -60,7 +60,7 @@ func Slots(day Day, r SlotRules, candidates []Candidate) []Slot {
 		}
 		var free []shared.StaffID
 		for _, c := range candidates {
-			if c.canTake(start) {
+			if c.CanTake(start) {
 				free = append(free, c.Staff)
 			}
 		}
@@ -80,16 +80,16 @@ func grid(day Day, loc *time.Location, step int) iter.Seq[time.Time] {
 	return func(yield func(time.Time) bool) {
 		end := day.AddDays(1).Start(loc)
 		for t := day.Start(loc); t.Before(end); t = t.Add(time.Minute) {
-			local := t.In(loc)
-			if (local.Hour()*60+local.Minute())%step == 0 && !yield(t) {
+			if OnGrid(t, loc, time.Duration(step)*time.Minute) && !yield(t) {
 				return
 			}
 		}
 	}
 }
 
-// canTake reports whether the candidate could work [start, start+Length).
-func (c Candidate) canTake(start time.Time) bool {
+// CanTake reports whether the candidate could work [start, start+Length):
+// inside one of their windows, clear of their appointments.
+func (c Candidate) CanTake(start time.Time) bool {
 	span, err := shared.NewInterval(start, start.Add(c.Length))
 	if err != nil {
 		return false // no length: nothing to book
@@ -110,4 +110,12 @@ func (c Candidate) canTake(start time.Time) bool {
 		}
 	}
 	return true
+}
+
+// OnGrid reports whether t's local clock, in loc, is a whole number of
+// intervals after midnight — a start time the branch offers.
+func OnGrid(t time.Time, loc *time.Location, interval time.Duration) bool {
+	step := int(interval / time.Minute)
+	local := t.In(loc)
+	return step > 0 && local.Second() == 0 && local.Nanosecond() == 0 && (local.Hour()*60+local.Minute())%step == 0
 }

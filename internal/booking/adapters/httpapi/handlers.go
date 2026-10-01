@@ -18,12 +18,13 @@ import (
 // Handlers implement booking's operations of the API.
 type Handlers struct {
 	availability *app.AvailabilityHandlers
+	book         *app.BookHandlers
 	logger       *slog.Logger
 }
 
 // NewHandlers wires the HTTP adapter to the use cases.
-func NewHandlers(availability *app.AvailabilityHandlers, logger *slog.Logger) *Handlers {
-	return &Handlers{availability: availability, logger: logger}
+func NewHandlers(availability *app.AvailabilityHandlers, book *app.BookHandlers, logger *slog.Logger) *Handlers {
+	return &Handlers{availability: availability, book: book, logger: logger}
 }
 
 // GetAvailability handles GET /v1/branches/{branch_id}/availability.
@@ -53,7 +54,7 @@ func (h *Handlers) GetAvailability(ctx context.Context, req apigen.GetAvailabili
 	for _, o := range a.Offers {
 		out.Barbers = append(out.Barbers, apigen.BarberOffer{
 			Id: o.ID.UUID(), DisplayName: o.Name, DurationMinutes: int(o.Duration.Minutes()),
-			Price: apigen.Money{Amount: o.Price.Amount(), Currency: apigen.MoneyCurrency(o.Price.Currency())},
+			Price: toAPIMoney(o.Price),
 		})
 	}
 	for _, s := range a.Slots {
@@ -70,7 +71,21 @@ func (h *Handlers) GetAvailability(ctx context.Context, req apigen.GetAvailabili
 // outages: they are logged and answered with a generic 500.
 func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apigen.ProblemResponseHeaders) {
 	status, code, detail := http.StatusInternalServerError, "internal", ""
+	var headers apigen.ProblemResponseHeaders
 	switch {
+	case errors.Is(err, httpx.ErrNoPrincipal):
+		status, code, detail = http.StatusUnauthorized, "unauthorized", "a valid access token is required"
+		headers.WWWAuthenticate = new(httpx.BearerChallenge)
+	case errors.Is(err, domain.ErrSlotUnavailable):
+		status, code, detail = http.StatusConflict, "slot_unavailable", "that time was just taken or is no longer free; ask for availability again"
+	case errors.Is(err, domain.ErrTooManyBookings):
+		status, code, detail = http.StatusConflict, "booking_limit_reached", "you already hold the most upcoming bookings this branch allows"
+	case errors.Is(err, domain.ErrInvalidStart):
+		status, code, detail = http.StatusUnprocessableEntity, "invalid_start", "not a start time this branch offers (its grid, lead time and horizon)"
+	case errors.Is(err, domain.ErrIdempotencyReused):
+		status, code, detail = http.StatusUnprocessableEntity, "idempotency_key_reused", "this Idempotency-Key was used for a different booking"
+	case errors.Is(err, domain.ErrNoteTooLong):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "note: at most 300 characters"
 	case errors.Is(err, domain.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, domain.ErrNoServices):
@@ -82,5 +97,5 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 	default:
 		h.logger.ErrorContext(ctx, "booking request failed", slog.String("error_type", fmt.Sprintf("%T", err)))
 	}
-	return httpx.APIProblem(ctx, status, code, detail), apigen.ProblemResponseHeaders{}
+	return httpx.APIProblem(ctx, status, code, detail), headers
 }

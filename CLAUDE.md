@@ -32,7 +32,9 @@ windows — opening hours ∩ schedule − time off as real instants, the pure f
 call through `scheduling.Module.WorkingWindows`. M5 (booking) is in progress: M5.1 branch publishing,
 with readiness from catalog and scheduling answered in `main` so `business` imports neither
 (ADR-0022); M5.2 the `booking` module and public availability — a pure slot calculator over
-business, catalog and scheduling (ADR-0023).
+business, catalog and scheduling (ADR-0023); M5.3 booking an appointment — `Idempotency-Key`
+looked up first, the exclusion constraint has the last word, the barber's hours re-read under
+`database.LockStaff` (shared with scheduling), any barber tried in savepoints (ADR-0024).
 
 ## 2. Where things are
 

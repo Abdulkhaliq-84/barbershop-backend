@@ -161,7 +161,8 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 2. M5.2 — `booking` module: the availability calculator (pure; fuzz tests, benchmarks) and
    `GET /v1/branches/{id}/availability` for customers.
 3. M5.3 — book: `POST /v1/appointments` with `Idempotency-Key`, the exclusion constraint
-   (`409 slot_unavailable`), any-barber assignment, price snapshots.
+   (`409 slot_unavailable`), any-barber assignment, price snapshots
+   ([ADR-0024](adr/0024-booking-an-appointment.md)).
 4. M5.4 — cancellation policy, shop actions (confirm, reject, complete, no-show) and staff bookings.
 5. M5.5 — pending expiry as a scheduled River job; booking events.
    *Your turn:* "My appointments" with cursor pagination.

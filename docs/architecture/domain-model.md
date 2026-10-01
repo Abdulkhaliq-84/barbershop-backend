@@ -288,6 +288,17 @@ any barber      → union of start times; each keeps the list of barbers free at
   windows and appointments at the same time (`errgroup`).
 - The appointments table (with the exclusion constraint) exists; booking writes to it from M5.3.
 
+**Live since M5.3 (ADR-0024):** booking an appointment.
+- `POST /v1/appointments` (signed in, `Idempotency-Key` required) re-checks the rules, then saves
+  the first free barber in one transaction: the exclusion constraint has the last word
+  (`409 slot_unavailable`). A retry with the same key gets the same appointment.
+- `domain.Book` builds the appointment: items are snapshots (name, the barber's duration and
+  price), `busy_until = end + buffer`, `confirmed` or `pending` by the branch policy, and an
+  `AppointmentBooked` event published with it (the outbox).
+- The barber's hours are re-read under `database.LockStaff`, the lock scheduling takes to change
+  them. "Any barber" tries each free barber in a savepoint, least booked that day first.
+- `GET /v1/me/appointments/{id}` returns the customer's own appointment (someone else's is `404`).
+
 ### 3.6 `discovery` — Search read model
 
 A denormalised `branch_listing` per published branch: names {ar,en} (+ normalised search text),

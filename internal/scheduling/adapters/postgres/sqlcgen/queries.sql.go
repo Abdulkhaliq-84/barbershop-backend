@@ -379,17 +379,6 @@ func (q *Queries) InsertTimeOff(ctx context.Context, arg InsertTimeOffParams) er
 	return err
 }
 
-const lockStaffSchedules = `-- name: LockStaffSchedules :exec
-SELECT pg_advisory_xact_lock(hashtextextended('scheduling.staff:' || $1::text, 0))
-`
-
-// Serializes changes to one person's schedules across branches, so two
-// branches can't both give them the same hours at once.
-func (q *Queries) LockStaffSchedules(ctx context.Context, staffID string) error {
-	_, err := q.db.Exec(ctx, lockStaffSchedules, staffID)
-	return err
-}
-
 const openingHours = `-- name: OpeningHours :many
 SELECT business_id, branch_id, weekday, start_minute, duration_minutes FROM scheduling.opening_hours WHERE business_id = $1 AND branch_id = $2 ORDER BY weekday, start_minute
 `

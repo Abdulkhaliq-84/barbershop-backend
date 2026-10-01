@@ -23,11 +23,6 @@ DELETE FROM scheduling.opening_hours WHERE business_id = $1 AND branch_id = $2;
 -- name: InsertOpeningHour :exec
 INSERT INTO scheduling.opening_hours (business_id, branch_id, weekday, start_minute, duration_minutes) VALUES ($1, $2, $3, $4, $5);
 
--- name: LockStaffSchedules :exec
--- Serializes changes to one person's schedules across branches, so two
--- branches can't both give them the same hours at once.
-SELECT pg_advisory_xact_lock(hashtextextended('scheduling.staff:' || @staff_id::text, 0));
-
 -- name: ScheduleByKey :one
 SELECT * FROM scheduling.barber_schedules WHERE business_id = $1 AND branch_id = $2 AND staff_id = $3;
 

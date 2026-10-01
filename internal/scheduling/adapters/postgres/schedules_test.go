@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -125,5 +129,41 @@ func TestTimeOff(t *testing.T) {
 	}
 	if err := repo.Delete(ctx, business, staff, first.ID()); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("delete twice: %v", err)
+	}
+}
+
+// A booking checks a barber's hours holding database.LockStaff: changing
+// their schedule or adding their time off waits until it commits, so no
+// appointment lands in hours that were just taken away.
+func TestChangesWaitForBookings(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	schedules, timeOffs := postgres.NewSchedules(pool), postgres.NewTimeOffs(pool)
+	business, branch, staff := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag](), shared.NewID[shared.StaffTag]()
+	off, err := domain.NewTimeOff(shared.NewID[domain.TimeOffTag](), business, staff, t0.Add(24*time.Hour), t0.Add(26*time.Hour), "", t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := dbtest.OthersQueued(t, pool, 2)
+	changes := make(chan error, 2)
+	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error { // the booking
+		if err := database.LockStaff(ctx, tx, staff.UUID()); err != nil {
+			return err
+		}
+		go func() {
+			changes <- setSchedule(schedules, business, branch, staff, 0, hours(t, domain.WeeklyInterval{Day: time.Thursday, Start: 9 * 60, Minutes: 60}), nil)
+		}()
+		go func() { changes <- timeOffs.Add(ctx, off) }()
+		queued() // both wait for the booking
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-changes; err != nil {
+			t.Error(err)
+		}
 	}
 }
