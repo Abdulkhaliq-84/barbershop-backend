@@ -181,7 +181,8 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    ([ADR-0028](adr/0028-nearby-search.md)). *Your turn:* the map's visible area.
 3. M6.3 — text search: Arabic normalisation (fuzz-tested) and a trigram index on the names; `q`
    ([ADR-0029](adr/0029-search-by-name.md)). *Your turn:* search the district too.
-4. M6.4 — catalog's events: the categories filter and the price from.
+4. M6.4 — catalog's events: the categories filter and the price from; only branches offering
+   something are shown ([ADR-0030](adr/0030-categories-and-price-from.md)).
    *Your turn:* sort by starting price.
 5. M6.5 — scheduling's events: open now; the branch's public page `GET /v1/branches/{id}`.
 

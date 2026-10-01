@@ -15,16 +15,25 @@ import (
 // listings is an in-memory domain.Listings holding a city's branches in
 // search order (by name, or by distance: the order is the fake's data).
 type listings struct {
-	all    []domain.Listing
-	asked  int // the limit of the last call
-	near   *domain.Near
-	filter *domain.Filter // the last Near or Matching call's
-	err    error
+	all      []domain.Listing
+	asked    int // the limit of the last call
+	near     *domain.Near
+	filter   *domain.Filter   // the last Near or Matching call's
+	category *shared.Category // the last InCity call's
+	kept     *domain.Service  // the last KeepService call's
+	err      error
 }
 
 func (l *listings) Keep(context.Context, domain.Listing) (bool, error) { return true, l.err }
 
-func (l *listings) InCity(_ context.Context, _ shared.City, after *domain.Position, limit int) ([]domain.Listing, error) {
+func (l *listings) KeepService(_ context.Context, s domain.Service) (bool, error) {
+	l.kept = &s
+	return true, l.err
+}
+
+// page returns up to limit branches after the given one, the i-th from
+// 10·i SAR.
+func (l *listings) page(after *domain.Position, limit int) []domain.Found {
 	l.asked = limit
 	start := 0
 	if after != nil {
@@ -34,29 +43,36 @@ func (l *listings) InCity(_ context.Context, _ shared.City, after *domain.Positi
 			}
 		}
 	}
-	return l.all[start:min(start+limit, len(l.all))], l.err
+	var out []domain.Found
+	for i, x := range l.all[start:min(start+limit, len(l.all))] {
+		out = append(out, domain.Found{Listing: x, PriceFrom: shared.Halalas(int64(1000 * (start + i)))})
+	}
+	return out
+}
+
+func (l *listings) InCity(_ context.Context, _ shared.City, category *shared.Category, after *domain.Position, limit int) ([]domain.Found, error) {
+	l.category = category
+	return l.page(after, limit), l.err
 }
 
 // Near returns the same branches, the i-th 100·i metres away.
-func (l *listings) Near(ctx context.Context, near domain.Near, f domain.Filter, after *domain.Position, limit int) ([]domain.Found, error) {
+func (l *listings) Near(_ context.Context, near domain.Near, f domain.Filter, after *domain.Position, limit int) ([]domain.Found, error) {
 	l.near, l.filter = &near, &f
-	got, err := l.InCity(ctx, shared.City{}, after, limit)
-	found := make([]domain.Found, len(got))
-	for i, x := range got {
-		found[i] = domain.Found{Listing: x, DistanceM: float64(100 * slices.Index(l.all, x))}
+	found := l.page(after, limit)
+	for i, x := range found {
+		found[i].DistanceM = float64(100 * slices.Index(l.all, x.Listing))
 	}
-	return found, err
+	return found, l.err
 }
 
 // Matching returns the same branches, the i-th scoring 1 - i/100.
-func (l *listings) Matching(ctx context.Context, f domain.Filter, after *domain.Position, limit int) ([]domain.Found, error) {
+func (l *listings) Matching(_ context.Context, f domain.Filter, after *domain.Position, limit int) ([]domain.Found, error) {
 	l.filter = &f
-	got, err := l.InCity(ctx, shared.City{}, after, limit)
-	found := make([]domain.Found, len(got))
-	for i, x := range got {
-		found[i] = domain.Found{Listing: x, Score: 1 - float64(slices.Index(l.all, x))/100}
+	found := l.page(after, limit)
+	for i, x := range found {
+		found[i].Score = 1 - float64(slices.Index(l.all, x.Listing))/100
 	}
-	return found, err
+	return found, l.err
 }
 
 func branches(t *testing.T, n int) []domain.Listing {
@@ -245,5 +261,56 @@ func TestErrors(t *testing.T) {
 	}
 	if err := h.Keep(t.Context(), domain.Listing{}); !errors.Is(err, boom) {
 		t.Errorf("keep: %v", err)
+	}
+	if err := h.KeepService(t.Context(), domain.Service{}); !errors.Is(err, boom) {
+		t.Errorf("keep a service: %v", err)
+	}
+}
+
+// A category reaches the store whatever the search's order, and each
+// branch comes with its price from.
+func TestSearchByCategory(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	riyadh, _ := shared.ParseCity("riyadh")
+	beard, _ := shared.ParseCategory("beard")
+	olaya, _ := shared.NewGeoPoint(24.6911, 46.6851)
+	store := &listings{all: branches(t, 3)}
+	h := app.NewHandlers(store)
+
+	page, err := h.Search(ctx, app.Search{City: &riyadh, Category: &beard}, nil)
+	if err != nil || store.category == nil || *store.category != beard {
+		t.Fatalf("in a city: category %v, %v", store.category, err)
+	}
+	if len(page.Found) != 3 || page.Found[2].PriceFrom != shared.Halalas(2000) {
+		t.Errorf("found %+v", page.Found)
+	}
+	if _, err := h.Search(ctx, app.Search{City: &riyadh}, nil); err != nil || store.category != nil {
+		t.Errorf("any category: %v, %v", store.category, err)
+	}
+	if _, err := h.Search(ctx, app.Search{Near: &domain.Near{Point: olaya, RadiusM: 1000}, Category: &beard}, nil); err != nil ||
+		store.filter.Category == nil || *store.filter.Category != beard {
+		t.Errorf("near a place: %+v, %v", store.filter, err)
+	}
+	if _, err := h.Search(ctx, app.Search{Text: "صالون", Category: &beard}, nil); err != nil ||
+		store.filter.Category == nil || *store.filter.Category != beard {
+		t.Errorf("by name: %+v, %v", store.filter, err)
+	}
+	// A category alone is not a place to search.
+	if _, err := h.Search(ctx, app.Search{Category: &beard}, nil); !errors.Is(err, domain.ErrNoPlace) {
+		t.Errorf("a category alone: %v", err)
+	}
+}
+
+func TestKeepService(t *testing.T) {
+	t.Parallel()
+	store := &listings{}
+	beard, _ := shared.ParseCategory("beard")
+	s := domain.Service{
+		Service: shared.NewID[shared.ServiceTag](), Branch: shared.NewID[shared.BranchTag](), Version: 2,
+		Offered: true, Category: beard, PriceFrom: shared.Halalas(3500),
+	}
+	if err := app.NewHandlers(store).KeepService(t.Context(), s); err != nil || store.kept == nil || *store.kept != s {
+		t.Errorf("kept %+v, %v", store.kept, err)
 	}
 }

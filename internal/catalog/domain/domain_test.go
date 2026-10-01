@@ -21,15 +21,11 @@ func details(t *testing.T) domain.ServiceDetails {
 	return domain.ServiceDetails{Category: "haircut", Name: name, Duration: 30 * time.Minute, Price: shared.Halalas(6000)}
 }
 
-func TestCategories(t *testing.T) {
+func TestParseCategory(t *testing.T) {
 	t.Parallel()
-	cats := domain.Categories()
-	if len(cats) != 7 || cats[0].Code != "haircut" || cats[0].Name.Ar() == "" || cats[0].Icon == "" {
-		t.Fatalf("categories = %+v", cats)
-	}
-	cats[0].Code = "changed" // a copy: the reference data can't be changed from outside
-	if domain.Categories()[0].Code != "haircut" {
-		t.Error("Categories returned the shared slice")
+	// The codes are shared.Categories'.
+	if c, err := domain.ParseCategory("beard"); err != nil || c != "beard" {
+		t.Errorf("beard: %q, %v", c, err)
 	}
 	if _, err := domain.ParseCategory("massage"); !errors.Is(err, domain.ErrUnknownCategory) {
 		t.Errorf("unknown category: %v", err)
@@ -170,5 +166,75 @@ func TestSetOfferings(t *testing.T) {
 	s.Offerings()[0].Staff = shared.StaffID{}
 	if s.Offerings()[0].Staff.IsZero() {
 		t.Error("Offerings returned the service's own slice")
+	}
+}
+
+// Every saved change records one event carrying the service as of its
+// version; a refused change records none.
+func TestServiceEvents(t *testing.T) {
+	t.Parallel()
+	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
+	id := shared.NewID[domain.ServiceTag]()
+	s, err := domain.NewService(id, business, branch, details(t), t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, ok := s.Events()[0].(domain.ServiceCreatedEvent)
+	if len(s.Events()) != 1 || !ok || created.Business != business || created.Branch != branch || created.Service != id ||
+		!created.At.Equal(s.CreatedAt()) || created.Snapshot.Version != 1 || !created.Snapshot.Active ||
+		created.Snapshot.Details != s.Details() || len(created.Snapshot.Offerings) != 0 {
+		t.Fatalf("events = %+v", s.Events())
+	}
+
+	a := shared.NewID[shared.StaffTag]()
+	if err := s.SetOfferings([]domain.Offering{{Staff: a}}, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	d := s.Details()
+	d.Category = "beard"
+	if err := s.Edit(d, false, t0.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	d.Duration = 7 * time.Minute
+	if err := s.Edit(d, true, t0.Add(3*time.Hour)); err == nil {
+		t.Fatal("a 7-minute service was accepted")
+	}
+	events := s.Events()
+	if len(events) != 3 {
+		t.Fatalf("%d events, want 3", len(events))
+	}
+	offered, ok1 := events[1].(domain.ServiceUpdatedEvent)
+	edited, ok2 := events[2].(domain.ServiceUpdatedEvent)
+	if !ok1 || !ok2 || offered.Snapshot.Version != 2 || len(offered.Snapshot.Offerings) != 1 || !offered.Snapshot.Active ||
+		offered.Snapshot.Details.Category != "haircut" || !offered.At.Equal(t0.Add(time.Hour).Truncate(time.Microsecond)) {
+		t.Errorf("offerings set: %+v", events[1])
+	}
+	if edited.Snapshot.Version != 3 || edited.Snapshot.Active || edited.Snapshot.Details.Category != "beard" ||
+		len(edited.Snapshot.Offerings) != 1 || edited.Service != id || !edited.At.Equal(t0.Add(2*time.Hour).Truncate(time.Microsecond)) {
+		t.Errorf("edited: %+v", events[2])
+	}
+}
+
+func TestPriceFrom(t *testing.T) {
+	t.Parallel()
+	price := func(n int64) *shared.Money { m := shared.Halalas(n); return &m }
+	staff := func() shared.StaffID { return shared.NewID[shared.StaffTag]() }
+	d := details(t) // 60 SAR
+	for name, tt := range map[string]struct {
+		offerings []domain.Offering
+		want      int64
+		ok        bool
+	}{
+		"nobody performs it": {nil, 0, false},
+		"at its own price":   {[]domain.Offering{{Staff: staff()}}, 6000, true},
+		"a dearer barber":    {[]domain.Offering{{Staff: staff(), Price: price(9000)}, {Staff: staff()}}, 6000, true},
+		"a cheaper barber":   {[]domain.Offering{{Staff: staff()}, {Staff: staff(), Price: price(4500)}}, 4500, true},
+		"only dearer ones":   {[]domain.Offering{{Staff: staff(), Price: price(9000)}, {Staff: staff(), Price: price(7000)}}, 7000, true},
+		"free":               {[]domain.Offering{{Staff: staff(), Price: price(0)}, {Staff: staff()}}, 0, true},
+	} {
+		got, ok := domain.ServiceSnapshot{Details: d, Offerings: tt.offerings}.PriceFrom()
+		if ok != tt.ok || (ok && got != shared.Halalas(tt.want)) {
+			t.Errorf("%s: %v, %v; want %d, %v", name, got, ok, tt.want, tt.ok)
+		}
 	}
 }

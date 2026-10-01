@@ -45,7 +45,7 @@ func newService(t *testing.T, business shared.BusinessID, branch shared.BranchID
 func TestRoundTripAndOrder(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	repo := postgres.NewServices(migrated(t))
+	repo := postgres.NewServices(migrated(t), discardEvents{})
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 	first := newService(t, business, branch, 5, t0)
 	second := newService(t, business, branch, 1, t0.Add(time.Minute))
@@ -74,7 +74,7 @@ func TestRoundTripAndOrder(t *testing.T) {
 func TestScopedByBusinessAndBranch(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	repo := postgres.NewServices(migrated(t))
+	repo := postgres.NewServices(migrated(t), discardEvents{})
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 	s := newService(t, business, branch, 0, t0)
 	if err := repo.Add(ctx, s); err != nil {
@@ -99,7 +99,7 @@ func TestScopedByBusinessAndBranch(t *testing.T) {
 func TestUpdateAndVersion(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	repo := postgres.NewServices(migrated(t))
+	repo := postgres.NewServices(migrated(t), discardEvents{})
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 	s := newService(t, business, branch, 0, t0)
 	if err := repo.Add(ctx, s); err != nil {
@@ -132,7 +132,7 @@ func TestUpdateAndVersion(t *testing.T) {
 func TestParallelUpdatesOfTheSameVersion(t *testing.T) {
 	t.Parallel()
 	pool := migrated(t)
-	repo := postgres.NewServices(pool)
+	repo := postgres.NewServices(pool, discardEvents{})
 	queued := dbtest.OthersQueued(t, pool, 1)
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 	s := newService(t, business, branch, 0, t0)
@@ -175,7 +175,7 @@ func TestSchemaConstraints(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	pool := migrated(t)
-	repo := postgres.NewServices(pool)
+	repo := postgres.NewServices(pool, discardEvents{})
 	s := newService(t, shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag](), 0, t0)
 	if err := repo.Add(ctx, s); err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestOfferingsRoundTrip(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	pool := migrated(t)
-	repo := postgres.NewServices(pool)
+	repo := postgres.NewServices(pool, discardEvents{})
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
 	first, second := newService(t, business, branch, 0, t0), newService(t, business, branch, 1, t0)
 	for _, s := range []*domain.Service{first, second} {

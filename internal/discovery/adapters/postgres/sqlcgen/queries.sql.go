@@ -84,18 +84,72 @@ func (q *Queries) KeepListing(ctx context.Context, arg KeepListingParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const keepService = `-- name: KeepService :execrows
+INSERT INTO discovery.branch_services (
+    service_id, branch_id, business_id, version, offered, category_code, price_from, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+ON CONFLICT (service_id) DO UPDATE SET
+    branch_id     = excluded.branch_id,
+    business_id   = excluded.business_id,
+    version       = excluded.version,
+    offered       = excluded.offered,
+    category_code = excluded.category_code,
+    price_from    = excluded.price_from,
+    updated_at    = excluded.updated_at
+WHERE discovery.branch_services.version < excluded.version
+`
+
+type KeepServiceParams struct {
+	ServiceID    uuid.UUID
+	BranchID     uuid.UUID
+	BusinessID   uuid.UUID
+	Version      int32
+	Offered      bool
+	CategoryCode string
+	PriceFrom    int64
+	UpdatedAt    time.Time
+}
+
+// Saves discovery's copy of a service, unless the copy already holds this
+// version or a newer one: events can arrive twice and out of order.
+func (q *Queries) KeepService(ctx context.Context, arg KeepServiceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, keepService,
+		arg.ServiceID,
+		arg.BranchID,
+		arg.BusinessID,
+		arg.Version,
+		arg.Offered,
+		arg.CategoryCode,
+		arg.PriceFrom,
+		arg.UpdatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listingsInCity = `-- name: ListingsInCity :many
 SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
-       latitude, longitude, phone, timezone, updated_at
-FROM discovery.branch_listings
-WHERE listed AND city_code = $1
-  AND ($2::text IS NULL
-       OR (name_ar, branch_id) > ($2::text, $3::uuid))
+       latitude, longitude, phone, timezone, updated_at,
+       (SELECT min(s.price_from) FROM discovery.branch_services s
+        WHERE s.branch_id = l.branch_id AND s.offered
+          AND ($1::text IS NULL OR s.category_code = $1::text))::bigint AS price_from
+FROM discovery.branch_listings l
+WHERE listed AND city_code = $2
+  AND EXISTS (SELECT FROM discovery.branch_services s
+              WHERE s.branch_id = l.branch_id AND s.offered
+                AND ($1::text IS NULL OR s.category_code = $1::text))
+  AND ($3::text IS NULL
+       OR (name_ar, branch_id) > ($3::text, $4::uuid))
 ORDER BY name_ar, branch_id
-LIMIT $4
+LIMIT $5
 `
 
 type ListingsInCityParams struct {
+	Category  *string
 	CityCode  string
 	AfterName *string
 	AfterID   *uuid.UUID
@@ -117,12 +171,16 @@ type ListingsInCityRow struct {
 	Phone      string
 	Timezone   string
 	UpdatedAt  time.Time
+	PriceFrom  int64
 }
 
 // A page of a city's listed branches, by Arabic name then ID, after the
-// last one of the previous page (none for the first page).
+// last one of the previous page (none for the first page). Like every
+// search, only branches offering a service (in category, if given), each
+// with the least one costs: its price_from.
 func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) ([]ListingsInCityRow, error) {
 	rows, err := q.db.Query(ctx, listingsInCity,
+		arg.Category,
 		arg.CityCode,
 		arg.AfterName,
 		arg.AfterID,
@@ -150,6 +208,7 @@ func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) 
 			&i.Phone,
 			&i.Timezone,
 			&i.UpdatedAt,
+			&i.PriceFrom,
 		); err != nil {
 			return nil, err
 		}
@@ -164,20 +223,27 @@ func (q *Queries) ListingsInCity(ctx context.Context, arg ListingsInCityParams) 
 const listingsMatching = `-- name: ListingsMatching :many
 SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
        latitude, longitude, phone, timezone, updated_at,
-       word_similarity($1::text, search_text)::float8 AS sort_key
-FROM discovery.branch_listings
+       (SELECT min(s.price_from) FROM discovery.branch_services s
+        WHERE s.branch_id = l.branch_id AND s.offered
+          AND ($1::text IS NULL OR s.category_code = $1::text))::bigint AS price_from,
+       word_similarity($2::text, search_text)::float8 AS sort_key
+FROM discovery.branch_listings l
 WHERE listed
-  AND (search_text LIKE '%' || $2::text || '%' OR $1::text <% search_text)
-  AND ($3::text IS NULL OR city_code = $3::text)
-  AND ($4::float8 IS NULL
-       OR word_similarity($1::text, search_text)::float8 < $4::float8
-       OR (word_similarity($1::text, search_text)::float8 = $4::float8
-           AND branch_id > $5::uuid))
-ORDER BY word_similarity($1::text, search_text)::float8 DESC, branch_id
-LIMIT $6
+  AND (search_text LIKE '%' || $3::text || '%' OR $2::text <% search_text)
+  AND EXISTS (SELECT FROM discovery.branch_services s
+              WHERE s.branch_id = l.branch_id AND s.offered
+                AND ($1::text IS NULL OR s.category_code = $1::text))
+  AND ($4::text IS NULL OR city_code = $4::text)
+  AND ($5::float8 IS NULL
+       OR word_similarity($2::text, search_text)::float8 < $5::float8
+       OR (word_similarity($2::text, search_text)::float8 = $5::float8
+           AND branch_id > $6::uuid))
+ORDER BY word_similarity($2::text, search_text)::float8 DESC, branch_id
+LIMIT $7
 `
 
 type ListingsMatchingParams struct {
+	Category   *string
 	Text       string
 	TextLike   string
 	CityCode   *string
@@ -201,6 +267,7 @@ type ListingsMatchingRow struct {
 	Phone      string
 	Timezone   string
 	UpdatedAt  time.Time
+	PriceFrom  int64
 	SortKey    float64
 }
 
@@ -210,8 +277,10 @@ type ListingsMatchingRow struct {
 // it contains the search, or a part of it is close to the search
 // (word_similarity at least pg_trgm.word_similarity_threshold, which the
 // caller sets). The trigram index finds both. sort_key is the match, 0–1.
+// Offering a service and price_from as in ListingsInCity.
 func (q *Queries) ListingsMatching(ctx context.Context, arg ListingsMatchingParams) ([]ListingsMatchingRow, error) {
 	rows, err := q.db.Query(ctx, listingsMatching,
+		arg.Category,
 		arg.Text,
 		arg.TextLike,
 		arg.CityCode,
@@ -241,6 +310,7 @@ func (q *Queries) ListingsMatching(ctx context.Context, arg ListingsMatchingPara
 			&i.Phone,
 			&i.Timezone,
 			&i.UpdatedAt,
+			&i.PriceFrom,
 			&i.SortKey,
 		); err != nil {
 			return nil, err
@@ -256,22 +326,29 @@ func (q *Queries) ListingsMatching(ctx context.Context, arg ListingsMatchingPara
 const listingsNear = `-- name: ListingsNear :many
 SELECT branch_id, business_id, version, listed, name_ar, name_en, city_code, district, address,
        latitude, longitude, phone, timezone, updated_at,
-       (location <-> ST_MakePoint($1::float8, $2::float8)::geography)::float8 AS sort_key
-FROM discovery.branch_listings
+       (SELECT min(s.price_from) FROM discovery.branch_services s
+        WHERE s.branch_id = l.branch_id AND s.offered
+          AND ($1::text IS NULL OR s.category_code = $1::text))::bigint AS price_from,
+       (location <-> ST_MakePoint($2::float8, $3::float8)::geography)::float8 AS sort_key
+FROM discovery.branch_listings l
 WHERE listed
-  AND ST_DWithin(location, ST_MakePoint($1::float8, $2::float8)::geography, $3::float8, false)
-  AND ($4::text IS NULL OR city_code = $4::text)
-  AND ($5::text IS NULL
-       OR search_text LIKE '%' || $6::text || '%'
-       OR $5::text <% search_text)
-  AND ($7::float8 IS NULL
-       OR (location <-> ST_MakePoint($1::float8, $2::float8)::geography, branch_id)
-          > ($7::float8, $8::uuid))
-ORDER BY location <-> ST_MakePoint($1::float8, $2::float8)::geography, branch_id
-LIMIT $9
+  AND ST_DWithin(location, ST_MakePoint($2::float8, $3::float8)::geography, $4::float8, false)
+  AND EXISTS (SELECT FROM discovery.branch_services s
+              WHERE s.branch_id = l.branch_id AND s.offered
+                AND ($1::text IS NULL OR s.category_code = $1::text))
+  AND ($5::text IS NULL OR city_code = $5::text)
+  AND ($6::text IS NULL
+       OR search_text LIKE '%' || $7::text || '%'
+       OR $6::text <% search_text)
+  AND ($8::float8 IS NULL
+       OR (location <-> ST_MakePoint($2::float8, $3::float8)::geography, branch_id)
+          > ($8::float8, $9::uuid))
+ORDER BY location <-> ST_MakePoint($2::float8, $3::float8)::geography, branch_id
+LIMIT $10
 `
 
 type ListingsNearParams struct {
+	Category      *string
 	Lng           float64
 	Lat           float64
 	RadiusM       float64
@@ -298,6 +375,7 @@ type ListingsNearRow struct {
 	Phone      string
 	Timezone   string
 	UpdatedAt  time.Time
+	PriceFrom  int64
 	SortKey    float64
 }
 
@@ -307,9 +385,11 @@ type ListingsNearRow struct {
 // and ST_DWithin(…, false) agree, so the radius, the order and the cursor
 // all use the same number. The GiST index finds the candidates. sort_key
 // is the distance in metres (the same name as ListingsMatching's, so the
-// two queries share a row type).
+// two queries share a row type). Offering a service and price_from as in
+// ListingsInCity.
 func (q *Queries) ListingsNear(ctx context.Context, arg ListingsNearParams) ([]ListingsNearRow, error) {
 	rows, err := q.db.Query(ctx, listingsNear,
+		arg.Category,
 		arg.Lng,
 		arg.Lat,
 		arg.RadiusM,
@@ -342,6 +422,7 @@ func (q *Queries) ListingsNear(ctx context.Context, arg ListingsNearParams) ([]L
 			&i.Phone,
 			&i.Timezone,
 			&i.UpdatedAt,
+			&i.PriceFrom,
 			&i.SortKey,
 		); err != nil {
 			return nil, err

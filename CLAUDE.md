@@ -46,7 +46,9 @@ public `GET /v1/cities` and `GET /v1/branches?city=` (ADR-0027); M6.2 nearby sea
 generated `geography` column with a partial GiST index, sphere distances everywhere, pages by
 `(distance, branch ID)` (ADR-0028); M6.3 search by name — `domain.Normalize` (Arabic folding,
 fuzz-tested) on names and searches, a partial GIN trigram index, word similarity ≥ 0.5 set per
-search (ADR-0029).
+search (ADR-0029); M6.4 categories and the price from — catalog's service events (with the
+cheapest performer's price), discovery's copy per service, `category` and `price_from` answered
+at search time from one index, and only branches offering something shown (ADR-0030).
 
 ## 2. Where things are
 
@@ -58,7 +60,7 @@ search (ADR-0029).
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0029) |
+| Why a decision was made | `docs/adr/` (0001–0030) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 

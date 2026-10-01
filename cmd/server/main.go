@@ -184,7 +184,7 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Pool: pool, Clock: clock.System{}, Logger: logger,
 		Media: mediaModule, Users: iamModule, Billing: billingModule, Events: bus, Readiness: readiness,
 	})
-	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
+	catalogModule := catalog.New(catalog.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule, Events: bus})
 	schedulingModule := scheduling.New(scheduling.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Business: businessModule})
 	readiness.catalog, readiness.scheduling = catalogModule, schedulingModule
 	bookingModule := booking.New(booking.Deps{
@@ -237,6 +237,11 @@ func subscribe(bus *outbox.Bus, billingModule *billing.Module, discoveryModule *
 	// edited. The two types have the same fields, so a conversion does.
 	business.OnBranchChanged(bus, "discovery.keep_branch", func(ctx context.Context, e business.BranchChanged) error {
 		return discoveryModule.KeepBranch(ctx, discovery.Branch(e))
+	})
+	// And of what each branch sells, for the category filter and the price
+	// from: services added or changed, turned off, or given barbers.
+	catalog.OnServiceChanged(bus, "discovery.keep_service", func(ctx context.Context, e catalog.ServiceChanged) error {
+		return discoveryModule.KeepService(ctx, discovery.Service(e))
 	})
 }
 

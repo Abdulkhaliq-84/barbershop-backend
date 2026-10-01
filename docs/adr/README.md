@@ -34,3 +34,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0027](0027-discovery-read-model.md) | Discovery keeps its own copy of each branch, from events that carry the branch | Accepted |
 | [0028](0028-nearby-search.md) | Nearby search: a generated geography column, one distance everywhere, pages by distance | Accepted |
 | [0029](0029-search-by-name.md) | Search by name: normalise in Go, match with trigrams, a lower threshold | Accepted |
+| [0030](0030-categories-and-price-from.md) | Categories and price from: catalog's events, a copy per service, answered at search time | Accepted |

@@ -51,7 +51,7 @@ func TestDiscoveryAPI(t *testing.T) {
 	}
 
 	// Published: listed, a moment later, with what customers need.
-	owner, biz, branch, _, _ := a.published(t)
+	owner, biz, branch, service, me := a.published(t)
 	var b map[string]any
 	until(t, "the published branch to be listed", func() bool {
 		got := listed("riyadh")
@@ -62,7 +62,8 @@ func TestDiscoveryAPI(t *testing.T) {
 	})
 	if b["id"] != branch || b["name"].(map[string]any)["ar"] != "فرع العليا" || b["district"] != "العليا" || b["address"] != "شارع العليا العام" ||
 		b["city"].(map[string]any)["code"] != "riyadh" || b["city"].(map[string]any)["name"].(map[string]any)["en"] != "Riyadh" ||
-		b["location"].(map[string]any)["latitude"] != 24.6911 || b["location"].(map[string]any)["longitude"] != 46.6851 {
+		b["location"].(map[string]any)["latitude"] != 24.6911 || b["location"].(map[string]any)["longitude"] != 46.6851 ||
+		priceFrom(b) != 6000 || b["price_from"].(map[string]any)["currency"] != "SAR" {
 		t.Errorf("listing = %v", b)
 	}
 	// Kept for the branch's public page (M6.5), not listed yet.
@@ -118,8 +119,47 @@ func TestDiscoveryAPI(t *testing.T) {
 		}
 	}
 
-	// Edited: the listing follows. Unpublished: gone.
+	// What it sells: only branches offering a service of the category, in
+	// any kind of search, from the least it costs.
+	for query, found := range map[string]bool{
+		"city=riyadh&category=haircut":                 true,
+		"city=riyadh&category=beard":                   false,
+		"lat=24.70&lng=46.69&category=haircut":         true,
+		"lat=24.70&lng=46.69&category=beard":           false,
+		"q=olaya&category=haircut":                     true,
+		"q=olaya&category=kids":                        false,
+		"q=olaya&lat=24.70&lng=46.69&category=haircut": true,
+	} {
+		if got := near(query); (len(got) == 1 && got[0].(map[string]any)["id"] == branch) != found || (!found && len(got) != 0) {
+			t.Errorf("%s: %v", query, got)
+		}
+	}
 	path := biz + "/branches/" + branch // biz is its path
+	services := path + "/services/" + service
+	// The owner, its one barber, charges less than the service's price: the
+	// price from is theirs.
+	if r := a.do(t, http.MethodPut, services+"/offerings", owner,
+		`{"offerings":[{"staff_id":"`+me+`","price":{"amount":4500,"currency":"SAR"}}]}`, "If-Match", "2"); r.status != http.StatusOK {
+		t.Fatalf("offerings: %d %v", r.status, r.body)
+	}
+	until(t, "the owner's own price as the price from", func() bool {
+		got := listed("riyadh")
+		return len(got) == 1 && priceFrom(got[0]) == 4500
+	})
+	// Turned off, the branch offers nothing: it isn't shown. On again, it is.
+	if r := a.do(t, http.MethodPatch, services, owner, `{"active":false}`, "If-Match", "3"); r.status != http.StatusOK {
+		t.Fatalf("turn off: %d %v", r.status, r.body)
+	}
+	until(t, "a branch offering nothing to go", func() bool { return len(listed("riyadh")) == 0 })
+	if r := a.do(t, http.MethodPatch, services, owner, `{"active":true,"category":"beard"}`, "If-Match", "4"); r.status != http.StatusOK {
+		t.Fatalf("turn on: %d %v", r.status, r.body)
+	}
+	until(t, "the branch back, now for beards", func() bool { return len(near("city=riyadh&category=beard")) == 1 })
+	if got := near("city=riyadh&category=haircut"); len(got) != 0 {
+		t.Errorf("no haircut any more: %v", got)
+	}
+
+	// Edited: the listing follows. Unpublished: gone.
 	if r := a.do(t, http.MethodPatch, path, owner, `{"name":{"ar":"فرع الملقا","en":"Malqa"}}`, "If-Match", "2"); r.status != http.StatusOK {
 		t.Fatalf("edit: %d %v", r.status, r.body)
 	}
@@ -140,10 +180,16 @@ func TestDiscoveryAPI(t *testing.T) {
 
 	// A city's listings come 20 a page; next_cursor leads through them.
 	for i := range 21 {
+		branch, business := uuid.New(), uuid.New()
 		if _, err := a.pool.Exec(t.Context(), `INSERT INTO discovery.branch_listings
 			(branch_id, business_id, version, listed, name_ar, city_code, address, latitude, longitude, timezone, updated_at, search_text)
 			VALUES ($1, $2, 1, true, $3, 'tabuk', 'شارع الأمير', 28.38, 36.57, 'Asia/Riyadh', now(), $3)`,
-			uuid.New(), uuid.New(), fmt.Sprintf("صالون %02d", i)); err != nil {
+			branch, business, fmt.Sprintf("صالون %02d", i)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.pool.Exec(t.Context(), `INSERT INTO discovery.branch_services
+			(service_id, branch_id, business_id, version, offered, category_code, price_from, updated_at)
+			VALUES ($1, $2, $3, 1, true, 'haircut', 5000, now())`, uuid.New(), branch, business); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -212,6 +258,8 @@ func TestDiscoveryAPI(t *testing.T) {
 		code   string
 	}{
 		"a city not on the list": {"city=atlantis", http.StatusUnprocessableEntity, "unknown_city"},
+		"a category not on it":   {"city=riyadh&category=massage", http.StatusUnprocessableEntity, "unknown_category"},
+		"a category alone":       {"category=haircut", http.StatusBadRequest, "validation_failed"},
 		"a city in capitals":     {"city=Riyadh", http.StatusBadRequest, "validation_failed"},
 		"no city":                {"", http.StatusBadRequest, "validation_failed"},
 		"a one-letter name":      {"q=x", http.StatusBadRequest, "validation_failed"},
@@ -227,4 +275,14 @@ func TestDiscoveryAPI(t *testing.T) {
 			t.Errorf("%s: %d %v, want %d %s", name, r.status, r.body, tt.status, tt.code)
 		}
 	}
+}
+
+// priceFrom is a listing's price_from amount, in halalas; -1 if it has none.
+func priceFrom(listing any) float64 {
+	p, ok := listing.(map[string]any)["price_from"].(map[string]any)
+	if !ok {
+		return -1
+	}
+	amount, _ := p["amount"].(float64)
+	return amount
 }

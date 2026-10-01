@@ -159,14 +159,15 @@ Events: `BusinessRegistered`, `BusinessSubmittedForReview`, `BusinessApproved`, 
 | `Service` | id, business id, branch id, category, name {ar,en}, description, duration, price (Money, VAT-inclusive), active, sort order, **offerings** [{staff id, price override?, duration override?}] | duration 5–480 min in 5-min steps; price ≥ 0; Arabic name required; offerings only for barbers of that branch |
 | `Category` (platform reference data) | code, name {ar,en}, icon | managed by platform admins (Haircut, Beard, Shave, Kids, Skin care, Colour, Packages) |
 
-Events: `ServiceCreated`, `ServiceUpdated`, `ServiceDeactivated`.
+Events: `ServiceCreated`, `ServiceUpdated` (details, active or not, or who performs it), each
+carrying the service as of its version and its price from (ADR-0030).
 
 **Live since M4.1 (ADR-0020):** categories are reference data in code (haircut, beard, shave, kids,
 skin care, colour, packages). A service belongs to one branch. Anyone working there lists the menu;
 the owner or a manager of that branch adds and edits it (`If-Match` versions). Services are never
 deleted, only deactivated. Authorization is `business.AuthorizeBranch`: the caller must be staff with
-the role, the branch must be the business's, and the caller must work there. The events come with
-their first subscriber (discovery, M6).
+the role, the branch must be the business's, and the caller must work there. The events came with
+their first subscriber (discovery, M6.4).
 
 **Offerings (M4.2):** `PUT …/services/{id}/offerings` replaces who performs a service, each optionally
 at their own price or duration (same rules as the service). Everyone listed must be active staff
@@ -359,6 +360,15 @@ Arabic normalisation for search: strip diacritics/tatweel, unify alef forms (أ 
   (`search_text`, saved with the copy) and to searches alike. It is fuzz-tested.
 - A partial GIN trigram index answers both "contains" (`LIKE`) and "close to" (`<%`, word
   similarity ≥ 0.5, set per search).
+
+**Live since M6.4 (ADR-0030):** categories and the price from.
+- catalog publishes `service_created` and `service_updated` with the service as of its version
+  and its price from (the cheapest performer's). discovery keeps a copy per service, the newest
+  version winning; a service is *offered* when active and someone performs it.
+- Every search shows only branches offering a service; `category` narrows it to those offering
+  one of that kind. Each branch comes with `price_from`, the least a service there costs (of
+  the category, if given). Both are answered at search time from one index on the services.
+- Categories are reference data in the shared kernel (`shared.Categories`), like cities.
 
 ### 3.7 `billing` — Plans and entitlements
 

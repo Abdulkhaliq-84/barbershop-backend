@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"errors"
 	"log/slog"
 	"math"
 	"math/rand/v2"
@@ -46,17 +47,49 @@ func listing(t *testing.T, ar string) domain.Listing {
 	}
 }
 
+// offer keeps an offered service at l's branch: one of category's, from
+// halalas.
+func offer(t *testing.T, r *postgres.Listings, l domain.Listing, category string, halalas int64) domain.Service {
+	t.Helper()
+	c, err := shared.ParseCategory(category)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := domain.Service{
+		Service: shared.NewID[shared.ServiceTag](), Branch: l.Branch, Business: l.Business, Version: 1,
+		Offered: true, Category: c, PriceFrom: shared.Halalas(halalas), UpdatedAt: t0,
+	}
+	if _, err := r.KeepService(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// keepOffering keeps l and a haircut from 60 SAR there: searches find only
+// branches that offer something.
+func keepOffering(t *testing.T, r *postgres.Listings, l domain.Listing) {
+	t.Helper()
+	if _, err := r.Keep(t.Context(), l); err != nil {
+		t.Fatal(err)
+	}
+	offer(t, r, l, "haircut", 6000)
+}
+
 func inCity(t *testing.T, r *postgres.Listings, code string, after *domain.Position, limit int) []domain.Listing {
 	t.Helper()
 	city, err := shared.ParseCity(code)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := r.InCity(t.Context(), city, after, limit)
+	got, err := r.InCity(t.Context(), city, nil, after, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return got
+	out := make([]domain.Listing, len(got))
+	for i, f := range got {
+		out[i] = f.Listing
+	}
+	return out
 }
 
 // stored reads a copy back, listed or not.
@@ -85,6 +118,7 @@ func TestKeep(t *testing.T) {
 
 	// Published: a copy, listed and complete.
 	v2 := listing(t, "صالون الأناقة")
+	offer(t, r, v2, "haircut", 6000)
 	if !keep(v2) {
 		t.Fatal("the first event wasn't saved")
 	}
@@ -170,7 +204,6 @@ func TestKeepConcurrently(t *testing.T) {
 
 func TestInCity(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
 	pool := migrated(t)
 	r := postgres.NewListings(pool)
 	// Code point order: أ (U+0623) < ب (U+0628) < ت (U+062A). Two share a
@@ -184,9 +217,7 @@ func TestInCity(t *testing.T) {
 	jeddah := listing(t, "أ")
 	jeddah.City, _ = shared.ParseCity("jeddah")
 	for _, l := range []domain.Listing{ta, ba2, hidden, alef, jeddah, ba1} {
-		if _, err := r.Keep(ctx, l); err != nil {
-			t.Fatal(err)
-		}
+		keepOffering(t, r, l)
 	}
 
 	want := []domain.Listing{alef, ba1, ba2, ta}
@@ -228,9 +259,7 @@ func TestNear(t *testing.T) {
 	hidden := north("د", 0.2)
 	hidden.Listed = false
 	for _, l := range []domain.Listing{km9, tie2, hidden, km1, km12, jeddahCoded, tie1, km3} {
-		if _, err := r.Keep(ctx, l); err != nil {
-			t.Fatal(err)
-		}
+		keepOffering(t, r, l)
 	}
 	near := func(radiusKm float64, city *shared.City, after *domain.Position, limit int) []domain.Found {
 		t.Helper()
@@ -341,9 +370,7 @@ func TestNearTies(t *testing.T) {
 	}
 	slices.SortFunc(same, func(a, b domain.Listing) int { return strings.Compare(b.Branch.String(), a.Branch.String()) })
 	for _, l := range same { // saved in descending ID order
-		if _, err := r.Keep(ctx, l); err != nil {
-			t.Fatal(err)
-		}
+		keepOffering(t, r, l)
 	}
 	slices.Reverse(same)
 	for _, size := range []int{1, 3} {
@@ -391,9 +418,7 @@ func TestMatching(t *testing.T) {
 	hidden := named("الأناقة المخفية", "", "riyadh")
 	hidden.Listed = false
 	for _, l := range []domain.Listing{elite, nearly, hidden, royal, elegance} {
-		if _, err := r.Keep(ctx, l); err != nil {
-			t.Fatal(err)
-		}
+		keepOffering(t, r, l)
 	}
 	var stored string
 	if err := pool.QueryRow(ctx, `SELECT search_text FROM discovery.branch_listings WHERE branch_id = $1`, elegance.Branch.UUID()).Scan(&stored); err != nil ||
@@ -512,5 +537,216 @@ func TestMatchingUsesTheIndex(t *testing.T) {
 	}
 	if !strings.Contains(plan.String(), "branch_listings_search_idx") {
 		t.Errorf("the plan doesn't use the name index:\n%s", plan.String())
+	}
+}
+
+// A service's copy keeps the newest version, like a branch's.
+func TestKeepService(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	l := listing(t, "صالون")
+	if _, err := r.Keep(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	keep := func(s domain.Service) bool {
+		t.Helper()
+		saved, err := r.KeepService(ctx, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return saved
+	}
+	stored := func(s domain.Service) (version int, offered bool, category string, price int64) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT version, offered, category_code, price_from FROM discovery.branch_services WHERE service_id = $1`,
+			s.Service.UUID()).Scan(&version, &offered, &category, &price); err != nil {
+			t.Fatal(err)
+		}
+		return version, offered, category, price
+	}
+
+	v2 := offer(t, r, l, "haircut", 6000) // version 1
+	v2.Version, v2.PriceFrom = 2, shared.Halalas(5500)
+	if !keep(v2) || keep(v2) {
+		t.Fatal("version 2: saved once, then not again")
+	}
+	v1 := v2
+	v1.Version, v1.Offered = 1, false
+	if keep(v1) {
+		t.Error("an older version replaced a newer one")
+	}
+	if v, offered, c, p := stored(v2); v != 2 || !offered || c != "haircut" || p != 5500 {
+		t.Errorf("after an old event: v%d offered %v %s %d", v, offered, c, p)
+	}
+	// Turned off, then recategorised while off.
+	v3 := v2
+	v3.Version, v3.Offered = 3, false
+	v4 := v3
+	v4.Version, v4.Category = 4, mustCategory(t, "beard")
+	if !keep(v4) || keep(v3) {
+		t.Error("out of order: v4 then v3")
+	}
+	if v, offered, c, _ := stored(v2); v != 4 || offered || c != "beard" {
+		t.Errorf("after v4: v%d offered %v %s", v, offered, c)
+	}
+	// Prices are kept in SAR.
+	v5 := v4
+	v5.Version, v5.PriceFrom = 5, shared.Money{}
+	if _, err := r.KeepService(ctx, v5); !errors.Is(err, domain.ErrNotSAR) {
+		t.Errorf("no currency: %v", err)
+	}
+}
+
+func mustCategory(t *testing.T, code string) shared.Category {
+	t.Helper()
+	c, err := shared.ParseCategory(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// Every search finds only listed branches offering a service (of the
+// category, if given), each with the least such a service costs.
+func TestCategoryAndPriceFrom(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	riyadh, _ := shared.ParseCity("riyadh")
+	olaya, _ := shared.NewGeoPoint(24.6911, 46.6851)
+	near := domain.Near{Point: olaya, RadiusM: 10_000}
+	keep := func(name string) domain.Listing {
+		t.Helper()
+		l := listing(t, name)
+		if _, err := r.Keep(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	both := keep("صالون أ") // a haircut from 60 SAR, a beard trim from 35
+	offer(t, r, both, "haircut", 6000)
+	trim := offer(t, r, both, "beard", 3500)
+	cuts := keep("صالون ب") // a haircut from 50; a beard trim at 20 that nobody performs
+	offer(t, r, cuts, "haircut", 5000)
+	idle := offer(t, r, cuts, "beard", 2000)
+	idle.Version, idle.Offered = 2, false
+	if _, err := r.KeepService(ctx, idle); err != nil {
+		t.Fatal(err)
+	}
+	keep("صالون ج")                 // listed, but nothing to choose
+	hidden := listing(t, "صالون د") // offers a beard trim, but unpublished
+	hidden.Listed = false
+	if _, err := r.Keep(ctx, hidden); err != nil {
+		t.Fatal(err)
+	}
+	offer(t, r, hidden, "beard", 1000)
+
+	type seen struct {
+		branch shared.BranchID
+		price  int64
+	}
+	for _, tt := range []struct {
+		category string // "": any
+		want     []seen
+	}{
+		{"", []seen{{both.Branch, 3500}, {cuts.Branch, 5000}}},
+		{"haircut", []seen{{both.Branch, 6000}, {cuts.Branch, 5000}}},
+		{"beard", []seen{{both.Branch, 3500}}},
+		{"kids", nil},
+	} {
+		var category *shared.Category
+		if tt.category != "" {
+			category = new(mustCategory(t, tt.category))
+		}
+		f := domain.Filter{Category: category}
+		inCity, err1 := r.InCity(ctx, riyadh, category, nil, 10)
+		nearby, err2 := r.Near(ctx, near, f, nil, 10)
+		f.Text = "صالون"
+		named, err3 := r.Matching(ctx, f, nil, 10)
+		for search, got := range map[string][]domain.Found{"in a city": inCity, "near": nearby, "by name": named} {
+			var gotSeen []seen
+			for _, x := range got {
+				gotSeen = append(gotSeen, seen{x.Branch, x.PriceFrom.Amount()})
+				if x.PriceFrom.Currency() != shared.SAR {
+					t.Errorf("%s %q: price %v", search, tt.category, x.PriceFrom)
+				}
+			}
+			slices.SortFunc(gotSeen, func(a, b seen) int { return strings.Compare(a.branch.String(), b.branch.String()) })
+			want := slices.Clone(tt.want)
+			slices.SortFunc(want, func(a, b seen) int { return strings.Compare(a.branch.String(), b.branch.String()) })
+			if !slices.Equal(gotSeen, want) {
+				t.Errorf("%s, category %q: %v, want %v", search, tt.category, gotSeen, want)
+			}
+		}
+		if err := errors.Join(err1, err2, err3); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The owner turns the beard trim off: the branch leaves the beard
+	// search, and its price from goes back up to the haircut's.
+	trim.Version, trim.Offered = 2, false
+	if _, err := r.KeepService(ctx, trim); err != nil {
+		t.Fatal(err)
+	}
+	beards, err := r.InCity(ctx, riyadh, new(mustCategory(t, "beard")), nil, 10)
+	if err != nil || len(beards) != 0 {
+		t.Errorf("beard trims after it was turned off: %d, %v", len(beards), err)
+	}
+	all, err := r.InCity(ctx, riyadh, nil, nil, 10)
+	if err != nil || len(all) != 2 || all[0].Branch != both.Branch || all[0].PriceFrom != shared.Halalas(6000) {
+		t.Errorf("after the trim was turned off: %+v, %v", all, err)
+	}
+}
+
+// Whether a branch offers a category, and from how much, are read from the
+// services index, not every service.
+func TestCategoryUsesTheIndex(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO discovery.branch_listings
+			(branch_id, business_id, version, listed, name_ar, city_code, address, latitude, longitude, timezone, updated_at)
+		SELECT gen_random_uuid(), gen_random_uuid(), 1, true, md5(g::text), 'riyadh', 'شارع', 24.7, 46.7, 'Asia/Riyadh', now()
+		FROM generate_series(1, 2000) g`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO discovery.branch_services
+			(service_id, branch_id, business_id, version, offered, category_code, price_from, updated_at)
+		SELECT gen_random_uuid(), branch_id, business_id, 1, true,
+		       (ARRAY['haircut','beard','shave','kids','skincare','colour','packages'])[1 + floor(random() * 7)::int], 5000, now()
+		FROM discovery.branch_listings, generate_series(1, 8)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `ANALYZE discovery.branch_listings, discovery.branch_services`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, `EXPLAIN (COSTS OFF)
+		SELECT branch_id,
+		       (SELECT min(s.price_from) FROM discovery.branch_services s
+		        WHERE s.branch_id = l.branch_id AND s.offered AND s.category_code = 'kids')
+		FROM discovery.branch_listings l
+		WHERE listed AND city_code = 'riyadh'
+		  AND EXISTS (SELECT FROM discovery.branch_services s
+		              WHERE s.branch_id = l.branch_id AND s.offered AND s.category_code = 'kids')
+		ORDER BY name_ar, branch_id LIMIT 21`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(line + "\n")
+	}
+	if strings.Contains(plan.String(), "Seq Scan on branch_services") || !strings.Contains(plan.String(), "branch_services_branch_idx") {
+		t.Errorf("the plan doesn't use the services index:\n%s", plan.String())
 	}
 }
