@@ -24,7 +24,7 @@ type BookingAppointment struct {
 	BusinessID       uuid.UUID
 	BranchID         uuid.UUID
 	StaffID          uuid.UUID
-	CustomerID       uuid.UUID
+	CustomerID       pgtype.UUID
 	Status           string
 	Source           string
 	Assignment       string
@@ -42,6 +42,7 @@ type BookingAppointment struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	CancellableUntil time.Time
+	CustomerName     string
 }
 
 type BookingAppointmentItem struct {
@@ -56,7 +57,7 @@ type BookingAppointmentItem struct {
 }
 
 type BookingIdempotencyKey struct {
-	CustomerID    uuid.UUID
+	RequesterID   uuid.UUID
 	Key           uuid.UUID
 	RequestHash   []byte
 	AppointmentID pgtype.UUID

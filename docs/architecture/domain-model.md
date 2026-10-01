@@ -213,7 +213,7 @@ Events: `OpeningHoursChanged`, `ClosureAdded`, `BarberScheduleChanged`, `TimeOff
 
 | Aggregate | Key fields |
 |---|---|
-| `Appointment` | id, business id, branch id, barber id, customer id, **items** [service id, name snapshot {ar,en}, duration, price], total duration, total price, start/end (UTC), status, source (`customer_app` / `staff`), assignment (`requested_barber` / `any_barber`), customer note, cancellation {by, reason, at}, version |
+| `Appointment` | id, business id, branch id, barber id, customer id (or, for a walk-in, a customer name), **items** [service id, name snapshot {ar,en}, duration, price], total duration, total price, start/end (UTC), status, source (`customer_app` / `staff`), assignment (`requested_barber` / `any_barber`), customer note, cancellation {by, reason, at}, version |
 
 Items are **snapshots** — if the shop changes the price tomorrow, today's booking keeps its price.
 
@@ -244,7 +244,7 @@ stateDiagram-v2
 2. The whole appointment `[start, start + total duration + buffer)` fits inside one working window of the barber.
 3. The barber has an offering for **every** item (v1: one barber performs all items, back-to-back).
 4. `start ≥ now + lead time` and `start ≤ today + horizon` (branch-local) for customer bookings;
-   staff bookings may bypass lead time.
+   staff bookings may start at any whole minute from 15 minutes ago to the horizon.
 5. The branch is published and the business is `Active`.
 6. The customer has fewer than *max active future bookings* at this branch.
 7. Customer cancellation is only allowed until *cancellation window* before start; staff can always cancel.
@@ -299,7 +299,7 @@ any barber      → union of start times; each keeps the list of barbers free at
   them. "Any barber" tries each free barber in a savepoint, least booked that day first.
 - `GET /v1/me/appointments/{id}` returns the customer's own appointment (someone else's is `404`).
 
-**Live since M5.4 (ADR-0025):** the lifecycle above, except expiry (M5.5).
+**Live since M5.4 (ADR-0025):** the lifecycle above; expiry since M5.5.
 - The customer cancels (`POST /v1/me/appointments/{id}/cancel`): a pending booking until it
   starts, a confirmed one until `cancellable_until` — the start minus the branch's cancellation
   window, kept with the booking (invariant 7).
@@ -310,6 +310,15 @@ any barber      → union of start times; each keeps the list of barbers free at
   (`booking.appointment_confirmed`, `…_rejected`, `…_cancelled`, `…_completed`, `…_no_show`).
 - `GET …/branches/{id}/appointments?date=` is the shop's day: a barber's own, or all for
   managers.
+
+**Live since M5.5 (ADR-0026):** walk-ins and expiry.
+- The shop books a walk-in (`POST …/branches/{id}/appointments`): a name instead of a customer
+  account, a named barber, any whole minute from 15 minutes ago to the horizon, no lead time or
+  booking limit, confirmed at once. Invariants 1–3 and 5 still hold.
+- The idempotency key belongs to whoever asked: the customer, or the staff member.
+- `booking.expire_pending`, a scheduled task (`outbox.Bus.Every`), runs every minute: due pending
+  bookings are expired in batches of 100 (`FOR UPDATE SKIP LOCKED`), freeing the barber's time,
+  each with a `booking.appointment_expired` event.
 
 ### 3.6 `discovery` — Search read model
 

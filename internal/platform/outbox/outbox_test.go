@@ -391,3 +391,52 @@ func TestRunStoppedDuringStartup(t *testing.T) {
 		}
 	}
 }
+
+// A scheduled task runs as the worker starts, and a failing run neither
+// stops the worker nor piles up retries.
+func TestEvery(t *testing.T) {
+	t.Parallel()
+	pool := migrated(t)
+	bus, err := outbox.New(pool, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	runs := map[string]int{}
+	tick := func(name string, err error) outbox.Task {
+		return func(context.Context) error {
+			mu.Lock()
+			defer mu.Unlock()
+			runs[name]++
+			return err
+		}
+	}
+	bus.Every("test.tidy", time.Hour, tick("test.tidy", nil))
+	bus.Every("test.broken", time.Hour, tick("test.broken", errors.New("boom")))
+	runWorker(t, bus)
+	eventually(t, "both tasks to run", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return runs["test.tidy"] == 1 && runs["test.broken"] == 1
+	})
+	// The failed run is final: no retry is waiting.
+	eventually(t, "the failed run to be discarded", func() bool { return countJobs(t, pool, "discarded") == 1 })
+	if n := countJobs(t, pool, "retryable"); n != 0 {
+		t.Errorf("%d retries waiting", n)
+	}
+}
+
+func TestEveryTwicePanics(t *testing.T) {
+	t.Parallel()
+	bus, err := outbox.New(migrated(t), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus.Every("test.tidy", time.Minute, func(context.Context) error { return nil })
+	defer func() {
+		if recover() == nil {
+			t.Error("registering a task twice didn't panic")
+		}
+	}()
+	bus.Every("test.tidy", time.Minute, func(context.Context) error { return nil })
+}

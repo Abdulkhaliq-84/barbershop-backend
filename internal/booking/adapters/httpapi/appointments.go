@@ -74,7 +74,7 @@ func (h *Handlers) GetMyAppointment(ctx context.Context, req apigen.GetMyAppoint
 func toAPIAppointment(v app.AppointmentView) apigen.Appointment {
 	s := v.Snapshot()
 	out := apigen.Appointment{
-		Id: s.ID.UUID(), BranchId: s.Branch.UUID(), CustomerId: s.Customer.UUID(),
+		Id: s.ID.UUID(), BranchId: s.Branch.UUID(),
 		Barber:     apigen.AppointmentBarber{Id: s.Barber.UUID(), DisplayName: v.BarberName},
 		Status:     apigen.AppointmentStatus(s.Status),
 		Source:     apigen.AppointmentSource(s.Source),
@@ -83,6 +83,12 @@ func toAPIAppointment(v app.AppointmentView) apigen.Appointment {
 		CancellableUntil: s.CancellableUntil.UTC(),
 		Items:            make([]apigen.AppointmentItem, 0, len(s.Items)),
 		Price:            toAPIMoney(s.Price), Note: s.Note, CreatedAt: s.CreatedAt, Version: s.Version,
+	}
+	if !s.Customer.IsZero() {
+		out.CustomerId = new(s.Customer.UUID())
+	}
+	if s.CustomerName != "" {
+		out.CustomerName = new(s.CustomerName)
 	}
 	if c := s.Cancellation; c != nil {
 		out.Cancellation = &apigen.Cancellation{By: apigen.CancellationBy(c.By), Reason: c.Reason, At: c.At.UTC()}

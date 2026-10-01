@@ -821,6 +821,52 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+    post:
+      operationId: bookWalkIn
+      tags: [booking]
+      summary: Book a walk-in (staff of the branch)
+      description: |
+        The shop books someone without the app — a walk-in, or a customer
+        who phoned — by name. The owner and the branch's managers book
+        any barber there; a barber books themselves (others: `403`).
+
+        Unlike the app: any whole minute, not only the slot grid; from 15
+        minutes ago (they may be in the chair already), no lead time;
+        still within the booking horizon (`422 invalid_start`). The barber
+        must perform every service (`422 barber_unavailable`), be working
+        then and be free (`409 slot_unavailable`). It is confirmed at once.
+        A branch that isn't published, or whose business isn't active,
+        takes no bookings: `409 branch_not_bookable`.
+
+        `Idempotency-Key` works as for the app, per staff member.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalkInRequest"
+      responses:
+        "201":
+          description: The appointment (or the one this key already made)
+          headers:
+            Idempotent-Replayed:
+              description: "`true` when this is a retry's answer."
+              schema:
+                type: boolean
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/service-categories:
     get:
       operationId: listServiceCategories
@@ -1519,7 +1565,7 @@ components:
             `registration_limit_reached`, `branch_not_ready`, `business_not_active`,
             `service_unavailable`, `barber_unavailable`, `slot_unavailable`, `invalid_start`,
             `booking_limit_reached`, `idempotency_key_reused`, `invalid_transition`,
-            `cancellation_window_passed`, `appointment_not_started`.
+            `cancellation_window_passed`, `appointment_not_started`, `branch_not_bookable`.
           example: otp_cooldown
         detail:
           type: string
@@ -2249,7 +2295,7 @@ components:
 
     Appointment:
       type: object
-      required: [id, branch_id, customer_id, barber, status, source, assignment, starts_at, ends_at, cancellable_until, items, price, note, created_at, version]
+      required: [id, branch_id, barber, status, source, assignment, starts_at, ends_at, cancellable_until, items, price, note, created_at, version]
       properties:
         id:
           type: string
@@ -2260,7 +2306,10 @@ components:
         customer_id:
           type: string
           format: uuid
-          description: Who booked it (a user ID).
+          description: Who booked it in the app (a user ID); absent for a walk-in.
+        customer_name:
+          type: string
+          description: A walk-in's name, as the shop gave it; absent for app bookings.
         barber:
           $ref: "#/components/schemas/AppointmentBarber"
         status:
@@ -2320,6 +2369,33 @@ components:
         at:
           type: string
           format: date-time
+
+    WalkInRequest:
+      type: object
+      additionalProperties: false
+      required: [starts_at, service_ids, barber_id, customer_name]
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          description: A whole minute.
+        service_ids:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            format: uuid
+        barber_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        note:
+          type: string
+          maxLength: 300
 
     CancelRequest:
       type: object

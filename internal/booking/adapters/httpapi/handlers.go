@@ -97,6 +97,12 @@ func (h *Handlers) problem(ctx context.Context, err error) (apigen.Problem, apig
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "reason: at most 300 characters"
 	case errors.Is(err, errReasonNotAllowed):
 		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "reason: only with cancel"
+	case errors.Is(err, domain.ErrBranchNotBookable):
+		status, code, detail = http.StatusConflict, "branch_not_bookable", "the branch takes no bookings until it is published and its business is active"
+	case errors.Is(err, domain.ErrNoCustomer):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "customer_name: required"
+	case errors.Is(err, domain.ErrCustomerNameTooLong):
+		status, code, detail = http.StatusUnprocessableEntity, "validation_failed", "customer_name: at most 100 characters"
 	case errors.Is(err, domain.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, domain.ErrNotFound):

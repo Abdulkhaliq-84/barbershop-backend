@@ -61,7 +61,7 @@ func (s shop) draft(t *testing.T, barber shared.StaffID, customer shared.UserID)
 func attempt(key uuid.UUID, hash byte, drafts ...*domain.Appointment) app.BookingAttempt {
 	s := drafts[0].Snapshot()
 	return app.BookingAttempt{
-		Customer: s.Customer, Branch: s.Branch,
+		Requester: s.Customer, Branch: s.Branch,
 		Key: key, RequestHash: make32(hash), Now: t0, Drafts: drafts,
 		Allow:        func(int) error { return nil },
 		StillWorking: func(context.Context, *domain.Appointment) (bool, error) { return true, nil },
@@ -221,7 +221,7 @@ func TestIdempotencyKey(t *testing.T) {
 
 	// Nobody looked free — the first request just took the time. The key
 	// still finds it; a new key is refused and not kept.
-	empty := app.BookingAttempt{Customer: customer, Branch: sh.branch, Key: key, RequestHash: make32(7), Now: t0}
+	empty := app.BookingAttempt{Requester: customer, Branch: sh.branch, Key: key, RequestHash: make32(7), Now: t0, Allow: func(int) error { return nil }}
 	if a, replayed, err := s.Book(t.Context(), empty); err != nil || !replayed || a.ID() != first.ID() {
 		t.Errorf("no drafts, known key: %v, %v, %v", a, replayed, err)
 	}

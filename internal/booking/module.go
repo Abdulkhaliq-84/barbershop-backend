@@ -9,6 +9,7 @@ package booking
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -31,7 +32,7 @@ type Deps struct {
 	Business   *business.Module   // bookable branches and their barbers
 	Catalog    *catalog.Module    // the menu: who performs what, for how long, at what price
 	Scheduling *scheduling.Module // working windows
-	Events     *outbox.Bus        // where booking's events are published
+	Events     *outbox.Bus        // where booking's events are published, and its tasks scheduled
 }
 
 // Module is the wired booking module.
@@ -47,8 +48,11 @@ func New(d Deps) *Module {
 		appointments, d.Clock,
 	)
 	store := postgres.NewStore(appointments, d.Events)
-	book := app.NewBookHandlers(availability, store)
-	manage := app.NewManageHandlers(acl.NewStaff(d.Business), acl.NewBranches(d.Business), store, d.Clock)
+	staff := acl.NewStaff(d.Business)
+	book := app.NewBookHandlers(availability, store, staff)
+	manage := app.NewManageHandlers(staff, acl.NewBranches(d.Business), store, d.Clock)
+	// The worker role expires the bookings the shop didn't answer in time.
+	d.Events.Every("booking.expire_pending", time.Minute, app.NewExpirer(store, d.Clock).Run)
 	return &Module{http: httpapi.NewHandlers(availability, book, manage, d.Logger)}
 }
 

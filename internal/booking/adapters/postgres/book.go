@@ -53,10 +53,11 @@ const exclusionViolation = "23P01"
 // Book saves the first of attempt.Drafts whose barber is still free, in one
 // transaction:
 //
-//  1. claim the customer's Idempotency-Key — or, if a request with it
+//  1. claim the requester's Idempotency-Key — or, if a request with it
 //     already booked, return that appointment (replayed = true);
-//  2. lock the customer at the branch and check their limit of upcoming
-//     bookings, so two requests at once can't both take the last place;
+//  2. for a customer's booking (attempt.Allow set), lock the customer at the
+//     branch and check their limit of upcoming bookings, so two requests at
+//     once can't both take the last place;
 //  3. for each draft, in a savepoint: lock its barber's working time
 //     (database.LockStaff), check they still work then, and insert. The
 //     exclusion constraint refuses a barber who was booked meanwhile
@@ -73,33 +74,35 @@ func (s *Store) Book(ctx context.Context, attempt app.BookingAttempt) (booked *d
 		return nil, false, err
 	}
 	defer s.inFlight.Release(1)
-	customer, branch := attempt.Customer, attempt.Branch
+	requester, branch := attempt.Requester, attempt.Branch
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		claimed, err := q.ClaimIdempotencyKey(ctx, sqlcgen.ClaimIdempotencyKeyParams{
-			CustomerID: customer.UUID(), Key: attempt.Key, RequestHash: attempt.RequestHash, CreatedAt: attempt.Now,
+			RequesterID: requester.UUID(), Key: attempt.Key, RequestHash: attempt.RequestHash, CreatedAt: attempt.Now,
 		})
 		if err != nil {
 			return fmt.Errorf("claim idempotency key: %w", err)
 		}
 		if claimed == 0 {
 			var ok bool
-			booked, ok, err = replay(ctx, q, customer, attempt.Key, attempt.RequestHash)
+			booked, ok, err = replay(ctx, q, requester, attempt.Key, attempt.RequestHash)
 			replayed = ok
 			return err
 		}
 		if len(attempt.Drafts) == 0 {
 			return domain.ErrSlotUnavailable
 		}
-		if err := q.LockCustomerAtBranch(ctx, sqlcgen.LockCustomerAtBranchParams{CustomerID: customer.String(), BranchID: branch.String()}); err != nil {
-			return fmt.Errorf("lock customer: %w", err)
-		}
-		active, err := q.CountActiveBookings(ctx, sqlcgen.CountActiveBookingsParams{CustomerID: customer.UUID(), BranchID: branch.UUID(), Now: attempt.Now})
-		if err != nil {
-			return fmt.Errorf("count bookings: %w", err)
-		}
-		if err := attempt.Allow(int(active)); err != nil {
-			return err
+		if attempt.Allow != nil { // a customer's own booking: their limit applies
+			if err := q.LockCustomerAtBranch(ctx, sqlcgen.LockCustomerAtBranchParams{CustomerID: requester.String(), BranchID: branch.String()}); err != nil {
+				return fmt.Errorf("lock customer: %w", err)
+			}
+			active, err := q.CountActiveBookings(ctx, sqlcgen.CountActiveBookingsParams{CustomerID: pgUUID(requester.UUID()), BranchID: branch.UUID(), Now: attempt.Now})
+			if err != nil {
+				return fmt.Errorf("count bookings: %w", err)
+			}
+			if err := attempt.Allow(int(active)); err != nil {
+				return err
+			}
 		}
 		for _, draft := range attempt.Drafts {
 			ok, err := s.try(ctx, tx, draft, attempt.StillWorking)
@@ -110,7 +113,7 @@ func (s *Store) Book(ctx context.Context, attempt app.BookingAttempt) (booked *d
 				continue
 			}
 			if err := q.SettleIdempotencyKey(ctx, sqlcgen.SettleIdempotencyKeyParams{
-				AppointmentID: pgUUID(draft.ID().UUID()), CustomerID: customer.UUID(), Key: attempt.Key,
+				AppointmentID: pgUUID(draft.ID().UUID()), RequesterID: requester.UUID(), Key: attempt.Key,
 			}); err != nil {
 				return fmt.Errorf("settle idempotency key: %w", err)
 			}
@@ -150,14 +153,14 @@ func (s *Store) try(ctx context.Context, tx pgx.Tx, draft *domain.Appointment, s
 	return true, nil
 }
 
-// Replay returns what an earlier request with the customer's key booked, if
-// it asked for the same thing; nothing if the key is new.
-func (s *Store) Replay(ctx context.Context, customer shared.UserID, key uuid.UUID, requestHash []byte) (*domain.Appointment, bool, error) {
-	return replay(ctx, sqlcgen.New(s.pool), customer, key, requestHash)
+// Replay returns what an earlier request with the requester's key booked,
+// if it asked for the same thing; nothing if the key is new.
+func (s *Store) Replay(ctx context.Context, requester shared.UserID, key uuid.UUID, requestHash []byte) (*domain.Appointment, bool, error) {
+	return replay(ctx, sqlcgen.New(s.pool), requester, key, requestHash)
 }
 
-func replay(ctx context.Context, q *sqlcgen.Queries, customer shared.UserID, key uuid.UUID, requestHash []byte) (*domain.Appointment, bool, error) {
-	row, err := q.IdempotencyKey(ctx, sqlcgen.IdempotencyKeyParams{CustomerID: customer.UUID(), Key: key})
+func replay(ctx context.Context, q *sqlcgen.Queries, requester shared.UserID, key uuid.UUID, requestHash []byte) (*domain.Appointment, bool, error) {
+	row, err := q.IdempotencyKey(ctx, sqlcgen.IdempotencyKeyParams{RequesterID: requester.UUID(), Key: key})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -167,7 +170,13 @@ func replay(ctx context.Context, q *sqlcgen.Queries, customer shared.UserID, key
 	if !bytes.Equal(row.RequestHash, requestHash) || !row.AppointmentID.Valid {
 		return nil, false, domain.ErrIdempotencyReused
 	}
-	a, err := load(ctx, q, customer, shared.IDFromUUID[domain.AppointmentTag](row.AppointmentID.Bytes))
+	// The key is the requester's, so its appointment is too — a walk-in the
+	// shop booked has no customer to look it up by.
+	booked, err := q.AppointmentByID(ctx, row.AppointmentID.Bytes)
+	if err != nil {
+		return nil, false, fmt.Errorf("load replayed appointment: %w", err)
+	}
+	a, err := withItems(ctx, q, appointmentRow(booked))
 	return a, err == nil, err
 }
 
@@ -179,7 +188,7 @@ func insert(ctx context.Context, q *sqlcgen.Queries, a *domain.Appointment) erro
 	}
 	if err := q.InsertAppointment(ctx, sqlcgen.InsertAppointmentParams{
 		ID: s.ID.UUID(), BusinessID: s.Business.UUID(), BranchID: s.Branch.UUID(), StaffID: s.Barber.UUID(),
-		CustomerID: s.Customer.UUID(), Status: string(s.Status), Source: string(s.Source), Assignment: string(s.Assignment),
+		CustomerID: optional(s.Customer), CustomerName: s.CustomerName, Status: string(s.Status), Source: string(s.Source), Assignment: string(s.Assignment),
 		StartsAt: s.Start, EndsAt: s.End, BusyUntil: s.BusyUntil,
 		PriceAmount: s.Price.Amount(), PriceCurrency: string(s.Price.Currency()),
 		CustomerNote: s.Note, PendingUntil: s.PendingUntil, CancellableUntil: s.CancellableUntil,
@@ -220,7 +229,7 @@ func (s *Store) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event)
 			a := e.Appointment
 			ev, err = outbox.NewEvent(events.TypeAppointmentBooked, a.CreatedAt, events.AppointmentBooked{
 				AppointmentID: a.ID.UUID(), BusinessID: a.Business.UUID(), BranchID: a.Branch.UUID(),
-				BarberID: a.Barber.UUID(), CustomerID: a.Customer.UUID(), Status: string(a.Status),
+				BarberID: a.Barber.UUID(), CustomerID: customerIDOf(a.Customer), Source: string(a.Source), Status: string(a.Status),
 				StartsAt: a.Start, EndsAt: a.End,
 			})
 		case domain.StatusChanged:
@@ -250,17 +259,26 @@ func statusChanged(e domain.StatusChanged) (outbox.Event, error) {
 		domain.StatusCancelled: events.TypeAppointmentCancelled,
 		domain.StatusCompleted: events.TypeAppointmentCompleted,
 		domain.StatusNoShow:    events.TypeAppointmentNoShow,
+		domain.StatusExpired:   events.TypeAppointmentExpired,
 	}[a.Status]
 	if !ok {
 		return outbox.Event{}, fmt.Errorf("no contract for a change to %s", a.Status)
 	}
 	p := events.AppointmentStatusChanged{
 		AppointmentID: a.ID.UUID(), BusinessID: a.Business.UUID(), BranchID: a.Branch.UUID(),
-		BarberID: a.Barber.UUID(), CustomerID: a.Customer.UUID(), From: string(e.From), Status: string(a.Status),
+		BarberID: a.Barber.UUID(), CustomerID: customerIDOf(a.Customer), From: string(e.From), Status: string(a.Status),
 		StartsAt: a.Start, EndsAt: a.End, ChangedAt: a.UpdatedAt,
 	}
 	if c := a.Cancellation; c != nil {
 		p.CancelledBy, p.Reason = string(c.By), c.Reason
 	}
 	return outbox.NewEvent(typ, a.UpdatedAt, p)
+}
+
+// customerIDOf is the events' customer_id: none for a walk-in.
+func customerIDOf(id shared.UserID) *uuid.UUID {
+	if id.IsZero() {
+		return nil
+	}
+	return new(id.UUID())
 }
