@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -25,7 +26,17 @@ type store struct {
 	branches   map[shared.BranchID]domain.Branch
 	deliveries []domain.Delivery
 	saved      *domain.Device // the last SaveDevice call's
-	err        error          // what every call fails with
+	forgotten  []domain.DeviceID
+	err        error // what every call fails with
+}
+
+func (s *store) ForgetDevice(_ context.Context, id domain.DeviceID) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.forgotten = append(s.forgotten, id)
+	s.devices = slices.DeleteFunc(s.devices, func(d domain.Device) bool { return d.ID == id })
+	return nil
 }
 
 func (s *store) SaveDevice(_ context.Context, d domain.Device) (domain.Device, error) {
@@ -91,24 +102,28 @@ func (s *store) RecordDelivery(_ context.Context, d domain.Delivery) error {
 	return s.err
 }
 
-// pusher records pushes, failing for the devices in fail.
+// pusher records pushes, failing with fail's error for the devices in it.
 type pusher struct {
-	sent []app.Push
-	fail map[domain.DeviceID]bool
+	sent  []app.Push
+	tried int
+	fail  map[domain.DeviceID]error
 }
 
 func (p *pusher) Send(_ context.Context, push app.Push) error {
-	if p.fail[push.Device.ID] {
-		return errors.New("push service unavailable")
+	p.tried++
+	if err := p.fail[push.Device.ID]; err != nil {
+		return err
 	}
 	p.sent = append(p.sent, push)
 	return nil
 }
 
+var errUnavailable = errors.New("push service unavailable")
+
 func setup(t *testing.T) (*app.Handlers, *store, *pusher) {
 	t.Helper()
 	s := &store{branches: map[shared.BranchID]domain.Branch{}}
-	p := &pusher{fail: map[domain.DeviceID]bool{}}
+	p := &pusher{fail: map[domain.DeviceID]error{}}
 	return app.NewHandlers(s, p, clock.NewFake(now)), s, p
 }
 
@@ -229,13 +244,16 @@ func TestNotify(t *testing.T) {
 		if push.Data["kind"] != "booking_confirmed" || push.Data["appointment_id"] != c.Appointment.String() || len(push.Data) != 2 {
 			t.Errorf("push data %v", push.Data)
 		}
+		if push.CollapseKey != c.Event.String() {
+			t.Errorf("collapse key %q, want the event's ID", push.CollapseKey)
+		}
 	}
 	if len(s.deliveries) != 2 {
 		t.Fatalf("logged %d deliveries, want 2", len(s.deliveries))
 	}
 	for _, d := range s.deliveries {
 		if d.Event != c.Event || d.User != customer || d.Kind != domain.BookingConfirmed ||
-			d.Appointment != c.Appointment || !d.SentAt.Equal(now) {
+			d.Appointment != c.Appointment || d.Outcome != domain.Sent || !d.SentAt.Equal(now) {
 			t.Errorf("delivery %+v", d)
 		}
 	}
@@ -296,7 +314,7 @@ func TestNotifyPartialFailure(t *testing.T) {
 	customer := shared.NewID[shared.UserTag]()
 	broken, fine := device(t, customer, shared.Arabic), device(t, customer, shared.English)
 	s.devices = []domain.Device{broken, fine}
-	p.fail[broken.ID] = true
+	p.fail[broken.ID] = errUnavailable
 
 	c := change(customer, b)
 	err := h.Notify(t.Context(), c)
@@ -307,7 +325,7 @@ func TestNotifyPartialFailure(t *testing.T) {
 		t.Errorf("the error shows the token: %v", err)
 	}
 
-	p.fail[broken.ID] = false
+	delete(p.fail, broken.ID)
 	if err := h.Notify(t.Context(), c); err != nil || len(p.sent) != 2 || p.sent[1].Device.ID != broken.ID {
 		t.Errorf("the retry: %v, %d pushes; want only the device missed", err, len(p.sent))
 	}
@@ -322,5 +340,57 @@ func TestNotifyStoreDown(t *testing.T) {
 	s.err = errors.New("database down")
 	if err := h.Notify(t.Context(), change(customer, b)); err == nil || len(p.sent) != 0 {
 		t.Errorf("store down: %v, %d pushes; want an error and none", err, len(p.sent))
+	}
+}
+
+// The push service no longer knows a device: it is forgotten, nothing is
+// logged as delivered, and the event isn't retried for it.
+func TestNotifyDeviceGone(t *testing.T) {
+	h, s, p := setup(t)
+	b := riyadh(t)
+	s.branches[b.ID] = b
+	customer := shared.NewID[shared.UserTag]()
+	gone, fine := device(t, customer, shared.Arabic), device(t, customer, shared.English)
+	s.devices = []domain.Device{gone, fine}
+	p.fail[gone.ID] = fmt.Errorf("fcm: %w", app.ErrDeviceGone)
+
+	if err := h.Notify(t.Context(), change(customer, b)); err != nil {
+		t.Fatalf("a device gone: %v, want no error (nothing to retry)", err)
+	}
+	if !slices.Equal(s.forgotten, []domain.DeviceID{gone.ID}) || len(s.devices) != 1 || s.devices[0].ID != fine.ID {
+		t.Errorf("forgotten %v, left %d devices; want only the gone one forgotten", s.forgotten, len(s.devices))
+	}
+	if len(s.deliveries) != 1 || s.deliveries[0].Device != fine.ID {
+		t.Errorf("deliveries %+v, want only the other device's", s.deliveries)
+	}
+
+	// Forgetting fails (the database is down): retry the event.
+	s.devices = append(s.devices, gone)
+	s.err = errors.New("database down")
+	if err := h.Notify(t.Context(), change(customer, b)); err == nil {
+		t.Error("forgetting failed: want an error, so the outbox retries")
+	}
+}
+
+// The push service refuses a push for good: logged as rejected, the device
+// kept, and the push not tried again when the event comes back.
+func TestNotifyRejected(t *testing.T) {
+	h, s, p := setup(t)
+	b := riyadh(t)
+	s.branches[b.ID] = b
+	customer := shared.NewID[shared.UserTag]()
+	d := device(t, customer, shared.Arabic)
+	s.devices = []domain.Device{d}
+	p.fail[d.ID] = fmt.Errorf("fcm: %w", app.ErrPushRejected)
+
+	c := change(customer, b)
+	if err := h.Notify(t.Context(), c); err != nil {
+		t.Fatalf("rejected: %v, want no error (retrying won't help)", err)
+	}
+	if len(s.deliveries) != 1 || s.deliveries[0].Outcome != domain.Rejected || len(s.devices) != 1 || len(s.forgotten) != 0 {
+		t.Fatalf("deliveries %+v, %d devices; want one rejected, the device kept", s.deliveries, len(s.devices))
+	}
+	if err := h.Notify(t.Context(), c); err != nil || p.tried != 1 {
+		t.Errorf("the event again: %v, %d tries; want it not tried again", err, p.tried)
 	}
 }

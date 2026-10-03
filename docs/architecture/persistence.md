@@ -131,6 +131,7 @@ CREATE INDEX ON notification.devices (user_id, updated_at DESC, id DESC);
 CREATE TABLE notification.deliveries (
     event_id uuid, device_id uuid, user_id uuid NOT NULL, kind text NOT NULL,
     appointment_id uuid, sent_at timestamptz NOT NULL,
+    outcome text NOT NULL,                       -- sent | rejected (never retried) — M7.2
     PRIMARY KEY (event_id, device_id)
 );
 CREATE INDEX ON notification.deliveries (user_id, sent_at DESC);

@@ -435,6 +435,15 @@ Ports: `PushSender` (FCM), `SMSSender` (console in dev → provider in M7), late
   it reached.
 - **Sender.** Console only so far (FCM in M7.2). Notices to the shop come in M7.4.
 
+**Live since M7.2 (ADR-0034):** `PUSH_PROVIDER=fcm` sends through Firebase Cloud Messaging.
+- **Sign-in.** It signs in as a service account whose key is a mounted file.
+- **Retries.** Throttling, Google's errors and timeouts are retried briefly, then left to the
+  outbox.
+- **Final answers.** A device FCM no longer knows is forgotten. A push FCM refuses for good is
+  recorded as `rejected` and not tried again, and the device is kept.
+- **Once on the phone.** Each push carries the event's ID as its collapse key, so a repeat
+  shows once.
+
 ### 3.9 `media`
 
 Uploads for logos, branch photos, avatars (public) and CR documents (private — served only through

@@ -96,7 +96,9 @@ func TestLoadErrors(t *testing.T) {
 		{"relative media dir in staging", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=staging", "MEDIA_DIR=var/media"}, "MEDIA_DIR must be an absolute path"},
 		{"unknown sms provider", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "SMS_PROVIDER=pigeon"}, "SMS_PROVIDER"},
 		{"console sms in production", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=production"}, "not allowed in production"},
-		{"unknown push provider", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "PUSH_PROVIDER=pigeon"}, "PUSH_PROVIDER must be console"},
+		{"unknown push provider", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "PUSH_PROVIDER=pigeon"}, "PUSH_PROVIDER must be console or fcm"},
+		{"fcm without a key", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "PUSH_PROVIDER=fcm"}, "FCM_CREDENTIALS_FILE must be the absolute path"},
+		{"fcm with a relative key path", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "PUSH_PROVIDER=fcm", "FCM_CREDENTIALS_FILE=secrets/fcm.json"}, "FCM_CREDENTIALS_FILE must be the absolute path"},
 		{"console push in production", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=production"}, "PUSH_PROVIDER=console writes notifications to the log"},
 		{"unknown environment", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=qa"}, "APP_ENV"},
 		{"unknown log format", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "LOG_FORMAT=xml"}, "LOG_FORMAT"},
@@ -149,7 +151,7 @@ func TestRequiredEnvironment(t *testing.T) {
 
 func TestAllTimeoutsMustBePositive(t *testing.T) {
 	t.Parallel()
-	for _, key := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "WORKER_SHUTDOWN_TIMEOUT"} {
+	for _, key := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "WORKER_SHUTDOWN_TIMEOUT", "FCM_TIMEOUT"} {
 		for _, value := range []string{"0", "0s", "-1s", "invalid-sensitive-value", "999999999999999999999h"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				t.Parallel()

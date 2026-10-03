@@ -38,3 +38,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0031](0031-open-now.md) | Open now: scheduling's events, the week as a multirange, each branch's own time zone | Accepted |
 | [0032](0032-branch-page.md) | The branch's public page: one snapshot of discovery's copies, shown only if search would show it | Accepted |
 | [0033](0033-notifications-devices-and-pushes.md) | Notifications: devices per user, pushes from booking's events, sent once per device | Accepted |
+| [0034](0034-fcm-sender.md) | Pushes through FCM: a service account signs in, bounded retries, three kinds of failure | Accepted |

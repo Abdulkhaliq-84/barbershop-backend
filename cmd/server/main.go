@@ -196,9 +196,18 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule, Events: bus,
 	})
 	discoveryModule := discovery.New(discovery.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
-	// PUSH_PROVIDER=console is the only provider so far (config refuses it
-	// in production): a nil sender is the console.
-	notificationModule := notification.New(notification.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
+	pushes := notification.Push{Provider: cfg.Push.Provider, Timeout: cfg.Push.FCMTimeout}
+	if cfg.Push.Provider == "fcm" {
+		// The key is a secret file mounted next to the container, never
+		// an environment variable (those leak into process listings).
+		if pushes.Credentials, err = os.ReadFile(cfg.Push.FCMCredentialsFile); err != nil {
+			return nil, fmt.Errorf("read FCM_CREDENTIALS_FILE: %w", err)
+		}
+	}
+	notificationModule, err := notification.New(notification.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Push: pushes})
+	if err != nil {
+		return nil, err
+	}
 	subscribe(bus, billingModule, discoveryModule, notificationModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))

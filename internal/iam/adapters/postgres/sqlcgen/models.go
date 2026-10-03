@@ -290,6 +290,7 @@ type NotificationDelivery struct {
 	Kind          string
 	AppointmentID pgtype.UUID
 	SentAt        time.Time
+	Outcome       string
 }
 
 type NotificationDevice struct {

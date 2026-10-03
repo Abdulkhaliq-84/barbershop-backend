@@ -199,13 +199,14 @@ func TestKeepBranch(t *testing.T) {
 }
 
 func TestDeliveries(t *testing.T) {
-	s := postgres.NewStore(migrated(t))
+	pool := migrated(t)
+	s := postgres.NewStore(pool)
 	ctx := t.Context()
 	user := shared.NewID[shared.UserTag]()
 	event, phone, tablet := uuid.New(), shared.NewID[domain.DeviceTag](), shared.NewID[domain.DeviceTag]()
 	d := domain.Delivery{
 		Event: event, Device: phone, User: user, Kind: domain.BookingConfirmed,
-		Appointment: shared.NewID[shared.AppointmentTag](), SentAt: t0,
+		Appointment: shared.NewID[shared.AppointmentTag](), Outcome: domain.Sent, SentAt: t0,
 	}
 	if done, err := s.Delivered(ctx, event, phone); err != nil || done {
 		t.Errorf("before sending: %v, %v", done, err)
@@ -226,7 +227,64 @@ func TestDeliveries(t *testing.T) {
 		t.Errorf("another event: %v, %v; want not delivered", done, err)
 	}
 	// A notice about no appointment (later kinds) has none to record.
-	if err := s.RecordDelivery(ctx, domain.Delivery{Event: uuid.New(), Device: phone, User: user, Kind: "welcome", SentAt: t0}); err != nil {
+	if err := s.RecordDelivery(ctx, domain.Delivery{Event: uuid.New(), Device: phone, User: user, Kind: "welcome", Outcome: domain.Sent, SentAt: t0}); err != nil {
 		t.Errorf("no appointment: %v", err)
+	}
+
+	// A push the service refused counts as done too: it isn't tried again.
+	refused := domain.Delivery{Event: uuid.New(), Device: tablet, User: user, Kind: domain.BookingConfirmed, Outcome: domain.Rejected, SentAt: t0}
+	if err := s.RecordDelivery(ctx, refused); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := s.Delivered(ctx, refused.Event, tablet); err != nil || !done {
+		t.Errorf("after a refusal: %v, %v; want done", done, err)
+	}
+	outcomes := map[uuid.UUID]string{}
+	rows, err := pool.Query(ctx, `SELECT event_id, outcome FROM notification.deliveries`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var outcome string
+		if err := rows.Scan(&id, &outcome); err != nil {
+			t.Fatal(err)
+		}
+		outcomes[id] = outcome
+	}
+	if rows.Err() != nil || outcomes[event] != "sent" || outcomes[refused.Event] != "rejected" {
+		t.Errorf("outcomes %v, %v", outcomes, rows.Err())
+	}
+	// Only the outcomes the code knows.
+	if err := s.RecordDelivery(ctx, domain.Delivery{Event: uuid.New(), Device: phone, User: user, Kind: "x", Outcome: "lost", SentAt: t0}); err == nil {
+		t.Error("an unknown outcome was stored")
+	}
+}
+
+// A device the push service no longer knows is forgotten, whoever's it is.
+func TestForgetDevice(t *testing.T) {
+	s := postgres.NewStore(migrated(t))
+	ctx := t.Context()
+	alice := shared.NewID[shared.UserTag]()
+	gone, err := s.SaveDevice(ctx, device(t, alice, tokenN(1), t0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := s.SaveDevice(ctx, device(t, alice, tokenN(2), t0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // forgetting twice is harmless
+		if err := s.ForgetDevice(ctx, gone.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ds, err := s.Devices(ctx, alice); err != nil || len(ds) != 1 || ds[0].ID != kept.ID {
+		t.Errorf("devices after forgetting one: %+v, %v", ds, err)
+	}
+	// The same phone registering again later is a new device.
+	again, err := s.SaveDevice(ctx, device(t, alice, tokenN(1), t0.Add(time.Hour)))
+	if err != nil || again.ID == gone.ID {
+		t.Errorf("registered again: %+v, %v; want a new device", again, err)
 	}
 }

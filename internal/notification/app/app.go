@@ -23,12 +23,28 @@ type Push struct {
 	Title  string
 	Body   string
 	Data   map[string]string
+	// CollapseKey is the event's ID: if a retry pushes the same notice
+	// again, the phone shows it once.
+	CollapseKey string
 }
 
-// PushSender delivers pushes: the console in development, FCM later (M7.2).
+// PushSender delivers pushes: the console in development, FCM in production.
+// It returns ErrDeviceGone or ErrPushRejected when trying again won't help;
+// any other error is worth retrying later.
 type PushSender interface {
 	Send(ctx context.Context, p Push) error
 }
+
+// What a PushSender returns when retrying won't help.
+var (
+	// ErrDeviceGone means the push service no longer knows the device: the
+	// app was uninstalled, or the token was replaced. It is forgotten.
+	ErrDeviceGone = errors.New("notification: the push service no longer knows the device")
+	// ErrPushRejected means the push service refused this push for good
+	// (it says the token or the message is invalid). It is logged as
+	// rejected and not tried again; the device is kept.
+	ErrPushRejected = errors.New("notification: the push service rejected the push")
+)
 
 // Handlers are notification's use cases.
 type Handlers struct {
@@ -106,9 +122,9 @@ type AppointmentChange struct {
 
 // Notify pushes the customer what they should hear about an appointment
 // change, on each of their devices, in each device's language. An event
-// can arrive more than once: a device it already reached is skipped. If a
-// push fails, the others are still tried, and the error makes the outbox
-// retry the event later.
+// can arrive more than once: a device it already reached (or that refused
+// it) is skipped. If a push fails, the others are still tried, and the
+// error makes the outbox retry the event later.
 func (h *Handlers) Notify(ctx context.Context, c AppointmentChange) error {
 	kind, ok := domain.CustomerNotice(c.What, c.Status, c.CancelledBy)
 	if !ok || c.Customer.IsZero() {
@@ -144,13 +160,21 @@ func (h *Handlers) pushOnce(ctx context.Context, c AppointmentChange, kind domai
 	if err != nil {
 		return err
 	}
-	err = h.push.Send(ctx, Push{Device: d, Title: title, Body: body, Data: map[string]string{
+	err = h.push.Send(ctx, Push{Device: d, Title: title, Body: body, CollapseKey: c.Event.String(), Data: map[string]string{
 		"kind": string(kind), "appointment_id": c.Appointment.String(),
 	}})
-	if err != nil {
+	outcome := domain.Sent
+	switch {
+	case errors.Is(err, ErrDeviceGone):
+		// Uninstalled, or its token replaced: no push will ever reach it.
+		return h.store.ForgetDevice(ctx, d.ID)
+	case errors.Is(err, ErrPushRejected):
+		outcome = domain.Rejected
+	case err != nil:
 		return fmt.Errorf("push to device %s: %w", d.ID, err)
 	}
 	return h.store.RecordDelivery(ctx, domain.Delivery{
-		Event: c.Event, Device: d.ID, User: d.User, Kind: kind, Appointment: c.Appointment, SentAt: h.clock.Now(),
+		Event: c.Event, Device: d.ID, User: d.User, Kind: kind, Appointment: c.Appointment,
+		Outcome: outcome, SentAt: h.clock.Now(),
 	})
 }
