@@ -50,6 +50,16 @@ func (h *Handlers) KeepHours(ctx context.Context, o domain.OpeningHours) error {
 	return nil
 }
 
+// Branch returns the branch's public page, open now or not by the clock;
+// domain.ErrNotFound unless search would show the branch.
+func (h *Handlers) Branch(ctx context.Context, id shared.BranchID) (domain.Page, error) {
+	p, err := h.listings.Page(ctx, id, h.clock.Now())
+	if err != nil {
+		return domain.Page{}, fmt.Errorf("branch page: %w", err)
+	}
+	return p, nil
+}
+
 // Search is what a customer looks for: the branches of a city, near a
 // point, or with a name, or several of these at once; optionally only
 // those offering a kind of service, or open now.

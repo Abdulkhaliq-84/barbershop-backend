@@ -104,7 +104,7 @@ GitHub Actions · GHCR · release-please · Trivy · CodeQL
 - [x] M3 — Business onboarding: verification, branches, staff, plans
 - [x] M4 — Catalog + scheduling: services, opening hours, barber schedules
 - [x] M5 — Booking core: availability engine, booking lifecycle
-- [ ] M6 — Discovery: map / city / text search
+- [x] M6 — Discovery: city, nearby and name search, categories, open now, branch pages
 - [ ] M7 — Notifications: push, SMS, reminders
 - [ ] M8 — Hardening + Flutter hand-off
 

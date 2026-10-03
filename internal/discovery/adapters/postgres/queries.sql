@@ -121,29 +121,61 @@ LIMIT @page_size;
 -- Saves discovery's copy of a service, unless the copy already holds this
 -- version or a newer one: events can arrive twice and out of order.
 INSERT INTO discovery.branch_services (
-    service_id, branch_id, business_id, version, offered, category_code, price_from, updated_at
+    service_id, branch_id, business_id, version, offered, category_code, price_from, updated_at,
+    name_ar, name_en, duration_minutes, sort_order
 ) VALUES (
-    @service_id, @branch_id, @business_id, @version, @offered, @category_code, @price_from, @updated_at
+    @service_id, @branch_id, @business_id, @version, @offered, @category_code, @price_from, @updated_at,
+    @name_ar, @name_en, @duration_minutes, @sort_order
 )
 ON CONFLICT (service_id) DO UPDATE SET
-    branch_id     = excluded.branch_id,
-    business_id   = excluded.business_id,
-    version       = excluded.version,
-    offered       = excluded.offered,
-    category_code = excluded.category_code,
-    price_from    = excluded.price_from,
-    updated_at    = excluded.updated_at
+    branch_id        = excluded.branch_id,
+    business_id      = excluded.business_id,
+    version          = excluded.version,
+    offered          = excluded.offered,
+    category_code    = excluded.category_code,
+    price_from       = excluded.price_from,
+    updated_at       = excluded.updated_at,
+    name_ar          = excluded.name_ar,
+    name_en          = excluded.name_en,
+    duration_minutes = excluded.duration_minutes,
+    sort_order       = excluded.sort_order
 WHERE discovery.branch_services.version < excluded.version;
 
 -- name: KeepHours :execrows
 -- Saves discovery's copy of a branch's opening hours, unless the copy
 -- already holds this version or a newer one. open is the week as text,
--- e.g. '{[540,1260),[1980,2700)}'.
-INSERT INTO discovery.branch_hours (branch_id, business_id, version, open, updated_at)
-VALUES (@branch_id, @business_id, @version, (@open::text)::int4multirange, @updated_at)
+-- e.g. '{[540,1260),[1980,2700)}'; intervals the same week as set, as JSON
+-- pairs, e.g. [[540,1260],[1980,2700]].
+INSERT INTO discovery.branch_hours (branch_id, business_id, version, open, intervals, updated_at)
+VALUES (@branch_id, @business_id, @version, (@open::text)::int4multirange, @intervals::jsonb, @updated_at)
 ON CONFLICT (branch_id) DO UPDATE SET
     business_id = excluded.business_id,
     version     = excluded.version,
     open        = excluded.open,
+    intervals   = excluded.intervals,
     updated_at  = excluded.updated_at
 WHERE discovery.branch_hours.version < excluded.version;
+
+-- name: BranchPage :one
+-- A listed branch offering a service, as its public page shows it: the
+-- listing, the least a service there costs, whether it is open at the
+-- instant at, and its week as set ([] if its hours were never heard of).
+-- No row: not listed, not offering anything, or no such branch.
+SELECT l.branch_id, l.business_id, l.version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, l.updated_at,
+       (SELECT min(s.price_from) FROM discovery.branch_services s
+        WHERE s.branch_id = l.branch_id AND s.offered)::bigint AS price_from,
+       coalesce(discovery.open_at(h.open, @at::timestamptz, l.timezone), false)::bool AS open_now,
+       coalesce(h.intervals, '[]')::jsonb AS intervals
+FROM discovery.branch_listings l
+LEFT JOIN discovery.branch_hours h ON h.branch_id = l.branch_id
+WHERE l.branch_id = @branch_id AND listed
+  AND EXISTS (SELECT FROM discovery.branch_services s WHERE s.branch_id = l.branch_id AND s.offered);
+
+-- name: BranchMenu :many
+-- The services a branch offers, as its menu shows them: by sort order, then
+-- Arabic name in code point order (the same on every machine), then ID.
+SELECT service_id, category_code, name_ar, name_en, duration_minutes, price_from
+FROM discovery.branch_services
+WHERE branch_id = @branch_id AND offered
+ORDER BY sort_order, name_ar COLLATE "C", service_id;

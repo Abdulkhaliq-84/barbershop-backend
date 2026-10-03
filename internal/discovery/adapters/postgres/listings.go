@@ -3,10 +3,12 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,9 +58,18 @@ func (r *Listings) KeepService(ctx context.Context, s domain.Service) (bool, err
 	if err != nil {
 		return false, err
 	}
+	minutes, err := toInt32(int(s.Duration / time.Minute))
+	if err != nil {
+		return false, err
+	}
+	sortOrder, err := toInt32(s.SortOrder)
+	if err != nil {
+		return false, err
+	}
 	n, err := sqlcgen.New(r.pool).KeepService(ctx, sqlcgen.KeepServiceParams{
 		ServiceID: s.Service.UUID(), BranchID: s.Branch.UUID(), BusinessID: s.Business.UUID(), Version: version,
 		Offered: s.Offered, CategoryCode: s.Category.Code(), PriceFrom: s.PriceFrom.Amount(), UpdatedAt: s.UpdatedAt,
+		NameAr: s.Name.Ar(), NameEn: s.Name.En(), DurationMinutes: minutes, SortOrder: sortOrder,
 	})
 	if err != nil {
 		return false, fmt.Errorf("keep service: %w", err)
@@ -81,9 +92,13 @@ func (r *Listings) KeepHours(ctx context.Context, h domain.OpeningHours) (bool, 
 	if err != nil {
 		return false, err
 	}
+	intervals, err := json.Marshal(append([][2]int{}, h.Open...)) // [] rather than null when closed
+	if err != nil {
+		return false, err
+	}
 	n, err := sqlcgen.New(r.pool).KeepHours(ctx, sqlcgen.KeepHoursParams{
 		BranchID: h.Branch.UUID(), BusinessID: h.Business.UUID(), Version: version,
-		Open: "{" + strings.Join(ranges, ",") + "}", UpdatedAt: h.UpdatedAt,
+		Open: "{" + strings.Join(ranges, ",") + "}", Intervals: intervals, UpdatedAt: h.UpdatedAt,
 	})
 	if err != nil {
 		return false, fmt.Errorf("keep opening hours: %w", err)
@@ -185,6 +200,67 @@ func (r *Listings) Matching(ctx context.Context, f domain.Filter, after *domain.
 		near[i] = sqlcgen.ListingsNearRow(row)
 	}
 	return found(near, func(f *domain.Found, key float64) { f.Score = key })
+}
+
+// Page reads the branch's page and its menu from one snapshot (a
+// repeatable-read transaction), so the price from and the menu agree even
+// while a service event is being applied.
+func (r *Listings) Page(ctx context.Context, branch shared.BranchID, at time.Time) (domain.Page, error) {
+	var (
+		row  sqlcgen.BranchPageRow
+		menu []sqlcgen.BranchMenuRow
+	)
+	opts := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
+	err := pgx.BeginTxFunc(ctx, r.pool, opts, func(tx pgx.Tx) (err error) {
+		q := sqlcgen.New(tx)
+		if row, err = q.BranchPage(ctx, sqlcgen.BranchPageParams{BranchID: branch.UUID(), At: at}); err != nil {
+			return err
+		}
+		menu, err = q.BranchMenu(ctx, branch.UUID())
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Page{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Page{}, fmt.Errorf("branch page: %w", err)
+	}
+	f, err := toFound(sqlcgen.ListingsInCityRow{
+		BranchID: row.BranchID, BusinessID: row.BusinessID, Version: row.Version, Listed: row.Listed,
+		NameAr: row.NameAr, NameEn: row.NameEn, CityCode: row.CityCode, District: row.District, Address: row.Address,
+		Latitude: row.Latitude, Longitude: row.Longitude, Phone: row.Phone, Timezone: row.Timezone, UpdatedAt: row.UpdatedAt,
+		PriceFrom: row.PriceFrom, OpenNow: row.OpenNow,
+	})
+	if err != nil {
+		return domain.Page{}, err
+	}
+	p := domain.Page{Found: f, Menu: make([]domain.MenuItem, 0, len(menu))}
+	if err := json.Unmarshal(row.Intervals, &p.Hours); err != nil {
+		return domain.Page{}, fmt.Errorf("branch %s: stored hours: %w", row.BranchID, err)
+	}
+	for _, m := range menu {
+		item, err := toMenuItem(m)
+		if err != nil {
+			return domain.Page{}, fmt.Errorf("branch %s: %w", row.BranchID, err)
+		}
+		p.Menu = append(p.Menu, item)
+	}
+	return p, nil
+}
+
+func toMenuItem(row sqlcgen.BranchMenuRow) (domain.MenuItem, error) {
+	category, err := shared.ParseCategory(row.CategoryCode)
+	if err != nil {
+		return domain.MenuItem{}, fmt.Errorf("service %s: category %q: %w", row.ServiceID, row.CategoryCode, err)
+	}
+	name, err := shared.NewLocalizedText(row.NameAr, row.NameEn)
+	if err != nil {
+		return domain.MenuItem{}, fmt.Errorf("service %s: name: %w", row.ServiceID, err)
+	}
+	return domain.MenuItem{
+		Service: shared.IDFromUUID[shared.ServiceTag](row.ServiceID), Category: category, Name: name,
+		Duration: time.Duration(row.DurationMinutes) * time.Minute, PriceFrom: shared.Halalas(row.PriceFrom),
+	}, nil
 }
 
 // setMatchThreshold sets how close part of a name must be to a search to

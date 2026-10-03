@@ -72,7 +72,7 @@ CREATE TABLE booking.appointments (
 CREATE INDEX ON booking.appointments (business_id, branch_id, lower(during));
 CREATE INDEX ON booking.appointments (customer_id, lower(during) DESC);
 
--- Search (M6): copies kept from events, the newest version winning (ADR-0027–0031)
+-- Search (M6): copies kept from events, the newest version winning (ADR-0027–0032)
 CREATE TABLE discovery.branch_listings (
     branch_id     uuid PRIMARY KEY,
     business_id   uuid NOT NULL,
@@ -99,7 +99,9 @@ CREATE TABLE discovery.branch_services (
     version       integer NOT NULL,
     offered       boolean NOT NULL,                  -- active, and someone performs it
     category_code text NOT NULL,
-    price_from    bigint NOT NULL                    -- the cheapest performer's, in halalas
+    price_from    bigint NOT NULL,                   -- the cheapest performer's, in halalas
+    name_ar, name_en text NOT NULL,                  -- for the branch's page (M6.6)
+    duration_minutes, sort_order integer NOT NULL
 );
 CREATE INDEX ON discovery.branch_services (branch_id, category_code, price_from) WHERE offered;
 
@@ -108,7 +110,8 @@ CREATE INDEX ON discovery.branch_services (branch_id, category_code, price_from)
 CREATE TABLE discovery.branch_hours (
     branch_id     uuid PRIMARY KEY,
     version       integer NOT NULL,                  -- the calendar's
-    open          int4multirange NOT NULL            -- minutes after Sunday 00:00, local
+    open          int4multirange NOT NULL,           -- minutes after Sunday 00:00, local (merged)
+    intervals     jsonb NOT NULL                     -- the same week as set, for showing it (M6.6)
 );
 
 -- Nearby query shape

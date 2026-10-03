@@ -78,16 +78,19 @@ func (m *Module) PerformingStaff(ctx context.Context, business shared.BusinessID
 func (m *Module) HTTP() *httpapi.Handlers { return m.http }
 
 // ServiceChanged is a service event (created or updated) with the service
-// as it is from Version on: whether customers can choose it, what kind it
-// is, and the least it costs.
+// as it is from Version on: whether customers can choose it, what it is,
+// and the least it costs.
 type ServiceChanged struct {
 	BusinessID shared.BusinessID
 	BranchID   shared.BranchID
 	ServiceID  ServiceID
 	Version    int
-	Offered    bool         // active, and someone performs it: customers can choose it
-	Category   string       // a shared.Categories code
-	PriceFrom  shared.Money // the least a customer pays for it (its own price while nobody performs it)
+	Offered    bool   // active, and someone performs it: customers can choose it
+	Category   string // a shared.Categories code
+	Name       shared.LocalizedText
+	Duration   time.Duration // its own; a performer's may differ
+	PriceFrom  shared.Money  // the least a customer pays for it (its own price while nobody performs it)
+	SortOrder  int           // where the branch's menu shows it, lowest first
 	At         time.Time
 }
 
@@ -124,11 +127,16 @@ func decodeServiceChanged(e outbox.Event) (ServiceChanged, error) {
 	if err != nil {
 		return ServiceChanged{}, fmt.Errorf("decode %s %s: price: %w", e.Type, e.ID, err)
 	}
+	name, err := shared.NewLocalizedText(s.Name.Ar, s.Name.En)
+	if err != nil {
+		return ServiceChanged{}, fmt.Errorf("decode %s %s: name: %w", e.Type, e.ID, err)
+	}
 	return ServiceChanged{
 		BusinessID: shared.IDFromUUID[shared.BusinessTag](p.BusinessID),
 		BranchID:   shared.IDFromUUID[shared.BranchTag](p.BranchID),
 		ServiceID:  shared.IDFromUUID[domain.ServiceTag](p.ServiceID),
 		Version:    s.Version, Offered: s.Active && s.PriceFrom != nil,
-		Category: s.CategoryCode, PriceFrom: price, At: e.OccurredAt,
+		Category: s.CategoryCode, Name: name, Duration: time.Duration(s.DurationMinutes) * time.Minute,
+		PriceFrom: price, SortOrder: s.SortOrder, At: e.OccurredAt,
 	}, nil
 }

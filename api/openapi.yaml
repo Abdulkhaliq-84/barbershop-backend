@@ -703,6 +703,34 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /v1/branches/{branch_id}:
+    parameters:
+      - $ref: "#/components/parameters/BranchID"
+    get:
+      operationId: getBranchPage
+      tags: [discovery]
+      security: []
+      summary: A branch's public page (public)
+      description: |
+        What a customer sees of a branch before booking: where it is, its
+        weekly opening hours and whether it is open now, and its menu, the
+        services they can choose, each from its cheapest barber's price.
+        Pass a service's `id` to `GET /v1/branches/{branch_id}/availability`.
+
+        Kept from the businesses' changes, like `GET /v1/branches`: a change
+        shows here moments after it is made. Only a branch that search would
+        show answers (published, and offering a service); anything else is
+        `404`.
+      responses:
+        "200":
+          description: The branch's page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /v1/branches/{branch_id}/availability:
     parameters:
       - $ref: "#/components/parameters/BranchID"
@@ -2701,6 +2729,78 @@ components:
           description: |
             Open at this moment, by its weekly opening hours in its own time
             zone (holidays aren't known yet).
+
+    BranchPage:
+      type: object
+      description: A branch's public page.
+      required: [id, name, city, district, address, location, timezone, price_from, open_now, opening_hours, services]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        city:
+          $ref: "#/components/schemas/City"
+        district:
+          type: string
+          example: العليا
+        address:
+          type: string
+          example: شارع العليا العام
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        phone:
+          type: string
+          description: The shop's public number (E.164); absent if it has none.
+          example: "+966551234567"
+        timezone:
+          type: string
+          description: The branch's IANA time zone; `opening_hours` are in it.
+          example: Asia/Riyadh
+        price_from:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: The least a customer pays for a service here.
+        open_now:
+          type: boolean
+          description: Open at this moment, by its weekly opening hours (holidays aren't known yet).
+        opening_hours:
+          type: array
+          description: |
+            All seven days, Sunday first, in the branch's time zone. A
+            `closes` at or before `opens` is the next day.
+          items:
+            $ref: "#/components/schemas/DayHours"
+        services:
+          type: array
+          description: The services customers can choose here, in the shop's order.
+          items:
+            $ref: "#/components/schemas/BranchService"
+
+    BranchService:
+      type: object
+      description: A service on a branch's menu.
+      required: [id, category, name, duration_minutes, price_from]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Pass as one of `service_ids` to the branch's availability.
+        category:
+          type: string
+          description: A code from `GET /v1/service-categories`.
+          example: beard
+        name:
+          $ref: "#/components/schemas/LocalizedText"
+        duration_minutes:
+          type: integer
+          description: The service's own length; a barber's may differ (availability says).
+          example: 30
+        price_from:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: The least a customer pays for it, the cheapest barber's price.
 
     BranchListingPage:
       type: object
