@@ -35,6 +35,8 @@ import (
 	iamhttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/media"
 	mediahttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/media/adapters/httpapi"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification"
+	notificationhttp "github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/adapters/httpapi"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/config"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
@@ -126,23 +128,25 @@ func run(ctx context.Context, args, environ []string, stdout io.Writer) error {
 // Every module calls its type Handlers, and an embedded field is named after
 // its type, so two of them would clash; the aliases give each a distinct name.
 type (
-	iamAPI        = iamhttp.Handlers
-	businessAPI   = businesshttp.Handlers
-	mediaAPI      = mediahttp.Handlers
-	catalogAPI    = cataloghttp.Handlers
-	schedulingAPI = schedulinghttp.Handlers
-	bookingAPI    = bookinghttp.Handlers
-	discoveryAPI  = discoveryhttp.Handlers
+	iamAPI          = iamhttp.Handlers
+	businessAPI     = businesshttp.Handlers
+	mediaAPI        = mediahttp.Handlers
+	catalogAPI      = cataloghttp.Handlers
+	schedulingAPI   = schedulinghttp.Handlers
+	bookingAPI      = bookinghttp.Handlers
+	discoveryAPI    = discoveryhttp.Handlers
+	notificationAPI = notificationhttp.Handlers
 )
 
 type apiServer struct {
-	*iamAPI        // iam: /v1/auth/*, /v1/me
-	*businessAPI   // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
-	*mediaAPI      // media: /v1/media/* (signed downloads)
-	*catalogAPI    // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
-	*schedulingAPI // scheduling: /v1/businesses/{id}/branches/{id}/opening-hours
-	*bookingAPI    // booking: /v1/branches/{id}/availability
-	*discoveryAPI  // discovery: /v1/branches, /v1/cities
+	*iamAPI          // iam: /v1/auth/*, /v1/me
+	*businessAPI     // business: /v1/businesses/* (incl. branches, staff), /v1/invitations/accept, /v1/me/memberships
+	*mediaAPI        // media: /v1/media/* (signed downloads)
+	*catalogAPI      // catalog: /v1/service-categories, /v1/businesses/{id}/branches/{id}/services
+	*schedulingAPI   // scheduling: /v1/businesses/{id}/branches/{id}/opening-hours
+	*bookingAPI      // booking: /v1/branches/{id}/availability
+	*discoveryAPI    // discovery: /v1/branches, /v1/cities
+	*notificationAPI // notification: /v1/me/devices
 }
 
 // application is every module, wired: the API for the api role, the outbox
@@ -192,12 +196,15 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 		Business: businessModule, Catalog: catalogModule, Scheduling: schedulingModule, Events: bus,
 	})
 	discoveryModule := discovery.New(discovery.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
-	subscribe(bus, billingModule, discoveryModule)
+	// PUSH_PROVIDER=console is the only provider so far (config refuses it
+	// in production): a nil sender is the console.
+	notificationModule := notification.New(notification.Deps{Pool: pool, Clock: clock.System{}, Logger: logger})
+	subscribe(bus, billingModule, discoveryModule, notificationModule)
 
 	router := httpx.NewRouter(logger, httpx.NewHealth(pool, logger))
 	api := apiServer{
 		iamModule.HTTP(), businessModule.HTTP(), mediaModule.HTTP(), catalogModule.HTTP(), schedulingModule.HTTP(),
-		bookingModule.HTTP(), discoveryModule.HTTP(),
+		bookingModule.HTTP(), discoveryModule.HTTP(), notificationModule.HTTP(),
 	}
 	if err := httpx.MountAPI(router, api, logger, iamModule.Authenticate); err != nil {
 		return nil, err
@@ -228,7 +235,7 @@ func (r *branchReadiness) BranchReadiness(ctx context.Context, biz shared.Busine
 
 // subscribe wires who reacts to which event. Subscriber names are stored in
 // queued jobs: never rename one (add a new name and retire the old).
-func subscribe(bus *outbox.Bus, billingModule *billing.Module, discoveryModule *discovery.Module) {
+func subscribe(bus *outbox.Bus, billingModule *billing.Module, discoveryModule *discovery.Module, notificationModule *notification.Module) {
 	// An approved business starts its free trial.
 	business.OnApproved(bus, "billing.start_trial", func(ctx context.Context, e business.Approved) error {
 		return billingModule.StartTrial(ctx, e.BusinessID, e.ApprovedAt)
@@ -246,6 +253,15 @@ func subscribe(bus *outbox.Bus, billingModule *billing.Module, discoveryModule *
 	// And of when each branch is open, for "open now".
 	scheduling.OnOpeningHoursChanged(bus, "discovery.keep_hours", func(ctx context.Context, e scheduling.OpeningHoursChanged) error {
 		return discoveryModule.KeepHours(ctx, discovery.OpeningHours(e))
+	})
+	// Notifications name the branch and give the time in its zone, so they
+	// keep a copy of each branch too; and tell customers what happened to
+	// their bookings.
+	business.OnBranchChanged(bus, "notification.keep_branch", func(ctx context.Context, e business.BranchChanged) error {
+		return notificationModule.KeepBranch(ctx, notification.Branch(e))
+	})
+	booking.OnAppointmentChanged(bus, "notification.appointment", func(ctx context.Context, e booking.AppointmentChanged) error {
+		return notificationModule.AppointmentChanged(ctx, notification.AppointmentChanged(e))
 	})
 }
 

@@ -72,6 +72,8 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
               desc: discovery is downstream (it reads other modules' events), so no module depends on it
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: notification is downstream (it reads other modules' events), so no module depends on it
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
               desc: use the business root package, never its internals
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media/
@@ -88,6 +90,8 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
               desc: discovery is downstream (it reads other modules' events), so no module depends on it
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: notification is downstream (it reads other modules' events), so no module depends on it
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
               desc: booking depends on business, so business must not depend on booking
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam/
@@ -108,6 +112,8 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
               desc: discovery is downstream (it reads other modules' events), so no module depends on it
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: notification is downstream (it reads other modules' events), so no module depends on it
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
               desc: booking depends on catalog, so catalog must not depend on booking
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
@@ -128,6 +134,8 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
               desc: discovery is downstream (it reads other modules' events), so no module depends on it
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: notification is downstream (it reads other modules' events), so no module depends on it
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
               desc: booking depends on scheduling, so scheduling must not depend on booking
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
@@ -148,6 +156,8 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
               desc: discovery is downstream (it reads other modules' events), so no module depends on it
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: notification is downstream (it reads other modules' events), so no module depends on it
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business/
               desc: use the business root package (through adapters/acl), never its internals
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog/
@@ -168,6 +178,8 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
               desc: discovery is downstream (it reads other modules' events), so no module depends on it
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: notification is downstream (it reads other modules' events), so no module depends on it
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
               desc: billing must not depend on other modules
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
@@ -185,6 +197,8 @@ linters:
           deny:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
               desc: discovery is downstream (it reads other modules' events), so no module depends on it
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: notification is downstream (it reads other modules' events), so no module depends on it
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
               desc: media must not depend on other modules
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
@@ -215,6 +229,31 @@ linters:
               desc: discovery must not depend on other modules (main feeds it their events)
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media
               desc: discovery must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
+              desc: discovery must not depend on other modules (main feeds it their events)
+        # notification depends on no other module: it keeps the branch names
+        # and hears about bookings from the events main subscribes it to
+        # (ADR-0033).
+        notification-keeps-to-itself:
+          files:
+            - "**/internal/notification/**"
+          deny:
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/iam
+              desc: notification must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/business
+              desc: notification must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/catalog
+              desc: notification must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling
+              desc: notification must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/booking
+              desc: notification must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/billing
+              desc: notification must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/media
+              desc: notification must not depend on other modules (main feeds it their events)
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
+              desc: notification must not depend on other modules (main feeds it their events)
         # Platform plumbing must never depend on business modules.
         platform-has-no-business:
           files:
@@ -235,6 +274,8 @@ linters:
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling
               desc: platform code must not import business modules
             - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery
+              desc: platform code must not import business modules
+            - pkg: github.com/Abdulkhaliq-84/barbershop-backend/internal/notification
               desc: platform code must not import business modules
   exclusions:
     presets:

@@ -35,6 +35,14 @@ type Config struct {
 	Auth     Auth
 	Media    Media
 	Worker   Worker
+	Push     Push
+}
+
+// Push configures notifications to devices.
+type Push struct {
+	// Provider delivers them. Only "console" (development: writes them to
+	// the log) exists until FCM arrives in M7.2.
+	Provider string `env:"PUSH_PROVIDER" envDefault:"console"`
 }
 
 // Worker configures the background worker role (outbox deliveries).
@@ -188,6 +196,12 @@ func (c Config) validate() error {
 	}
 	if c.Env == EnvProduction && c.Auth.SMSProvider == "console" {
 		errs = append(errs, errors.New("SMS_PROVIDER=console prints login codes to the log and is not allowed in production"))
+	}
+	if c.Push.Provider != "console" {
+		errs = append(errs, errors.New("PUSH_PROVIDER must be console (the only provider so far)"))
+	}
+	if c.Env == EnvProduction && c.Push.Provider == "console" {
+		errs = append(errs, errors.New("PUSH_PROVIDER=console writes notifications to the log instead of sending them and is not allowed in production"))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)

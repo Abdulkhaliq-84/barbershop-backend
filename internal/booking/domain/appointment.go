@@ -9,11 +9,12 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
-// AppointmentTag marks appointment IDs (only booking uses them).
-type AppointmentTag struct{}
+// AppointmentTag marks appointment IDs. Notifications refer to them too, so
+// the marker lives in shared.
+type AppointmentTag = shared.AppointmentTag
 
 // AppointmentID identifies an appointment.
-type AppointmentID = shared.ID[AppointmentTag]
+type AppointmentID = shared.AppointmentID
 
 // Status is where an appointment is in its life (domain-model.md §3.5).
 type Status string

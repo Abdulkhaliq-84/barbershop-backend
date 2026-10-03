@@ -37,3 +37,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0030](0030-categories-and-price-from.md) | Categories and price from: catalog's events, a copy per service, answered at search time | Accepted |
 | [0031](0031-open-now.md) | Open now: scheduling's events, the week as a multirange, each branch's own time zone | Accepted |
 | [0032](0032-branch-page.md) | The branch's public page: one snapshot of discovery's copies, shown only if search would show it | Accepted |
+| [0033](0033-notifications-devices-and-pushes.md) | Notifications: devices per user, pushes from booking's events, sent once per device | Accepted |

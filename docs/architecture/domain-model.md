@@ -421,6 +421,20 @@ Device tokens (user, platform, token, locale), ar/en templates, delivery log. Re
 
 Ports: `PushSender` (FCM), `SMSSender` (console in dev → provider in M7), later `WhatsAppSender`, `EmailSender`.
 
+**Live since M7.1 (ADR-0033):** the `notification` module, which depends on no other module.
+- **Devices.** `POST /v1/me/devices` registers an app install: its push token, platform and
+  language. A token belongs to whoever signed in on that phone last, and a user keeps their 10
+  newest devices. `DELETE /v1/me/devices/{id}` is called on sign-out. The token is a credential,
+  never logged or returned.
+- **What the customer hears.** Pushes from booking's events (`booking.OnAppointmentChanged`):
+  booked (request sent, or confirmed), confirmed, declined, expired, and cancelled by the shop.
+  Nothing for their own cancellation, completed or no-show, and nothing for walk-ins.
+- **Wording.** In each device's language, with the branch's name and the time in its time zone,
+  from notification's own copy of the branch (business's events).
+- **Once.** The deliveries log is keyed by (event, device), so a retried event skips the devices
+  it reached.
+- **Sender.** Console only so far (FCM in M7.2). Notices to the shop come in M7.4.
+
 ### 3.9 `media`
 
 Uploads for logos, branch photos, avatars (public) and CR documents (private — served only through

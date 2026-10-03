@@ -52,7 +52,12 @@ at search time from one index, and only branches offering something shown (ADR-0
 now — scheduling's opening hours events, the week kept as an `int4multirange` in each branch's
 own time zone, `discovery.open_at` checked per search at the use case's clock (ADR-0031); M6.6
 the branch's public page `GET /v1/branches/{id}` — profile, week, open now and menu from one
-repeatable-read snapshot, `404` unless search would show it (ADR-0032).
+repeatable-read snapshot, `404` unless search would show it (ADR-0032). M7 (notifications) is in
+progress: M7.1 the `notification` module — devices per user (`POST`/`DELETE /v1/me/devices`,
+the token a credential that redacts itself), the customer's pushes from booking's events
+(`booking.OnAppointmentChanged`) in each device's language and the branch's time zone, sent once
+per (event, device) through a deliveries log, and a console sender refused in production
+(ADR-0033).
 
 ## 2. Where things are
 
@@ -64,7 +69,7 @@ repeatable-read snapshot, `404` unless search would show it (ADR-0032).
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0032) |
+| Why a decision was made | `docs/adr/` (0001–0033) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 

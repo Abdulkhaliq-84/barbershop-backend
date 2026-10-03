@@ -275,6 +275,33 @@ type MediaObject struct {
 	CreatedAt   time.Time
 }
 
+type NotificationBranch struct {
+	BranchID uuid.UUID
+	Version  int32
+	NameAr   string
+	NameEn   string
+	Timezone string
+}
+
+type NotificationDelivery struct {
+	EventID       uuid.UUID
+	DeviceID      uuid.UUID
+	UserID        uuid.UUID
+	Kind          string
+	AppointmentID pgtype.UUID
+	SentAt        time.Time
+}
+
+type NotificationDevice struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Token     string
+	Platform  string
+	Locale    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type SchedulingBarberHour struct {
 	BusinessID      uuid.UUID
 	BranchID        uuid.UUID

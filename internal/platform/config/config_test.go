@@ -96,6 +96,8 @@ func TestLoadErrors(t *testing.T) {
 		{"relative media dir in staging", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=staging", "MEDIA_DIR=var/media"}, "MEDIA_DIR must be an absolute path"},
 		{"unknown sms provider", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "SMS_PROVIDER=pigeon"}, "SMS_PROVIDER"},
 		{"console sms in production", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=production"}, "not allowed in production"},
+		{"unknown push provider", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "PUSH_PROVIDER=pigeon"}, "PUSH_PROVIDER must be console"},
+		{"console push in production", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=production"}, "PUSH_PROVIDER=console writes notifications to the log"},
 		{"unknown environment", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=qa"}, "APP_ENV"},
 		{"unknown log format", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "LOG_FORMAT=xml"}, "LOG_FORMAT"},
 		{"bad log level", []string{dbURL, otpSecret, tokenSecret, mediaSecret, "LOG_LEVEL=loud"}, "LOG_LEVEL"},
@@ -165,7 +167,7 @@ func TestAllTimeoutsMustBePositive(t *testing.T) {
 
 func TestConfigurationErrorsDoNotEchoInput(t *testing.T) {
 	t.Parallel()
-	for _, key := range []string{"APP_ENV", "LOG_FORMAT", "LOG_LEVEL", "SMS_PROVIDER", "DATABASE_MAX_CONNS"} {
+	for _, key := range []string{"APP_ENV", "LOG_FORMAT", "LOG_LEVEL", "SMS_PROVIDER", "PUSH_PROVIDER", "DATABASE_MAX_CONNS"} {
 		_, err := config.Load([]string{dbURL, otpSecret, tokenSecret, mediaSecret, "APP_ENV=test", key + "=+966551234567-private"})
 		if err == nil || strings.Contains(err.Error(), "+966551234567-private") {
 			t.Fatalf("unsafe error for %s: %v", key, err)

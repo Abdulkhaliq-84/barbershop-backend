@@ -35,7 +35,7 @@ type BookingAppointment struct {
 	PriceCurrency    string
 	CustomerNote     string
 	PendingUntil     pgtype.Timestamptz
-	CancelledBy      *string
+	CancelledBy      pgtype.Text
 	CancelReason     string
 	CancelledAt      pgtype.Timestamptz
 	Version          int32
@@ -74,7 +74,7 @@ type BusinessBranch struct {
 	Address              string
 	Latitude             float64
 	Longitude            float64
-	Phone                *string
+	Phone                pgtype.Text
 	Timezone             string
 	Status               string
 	MinLeadMinutes       int32
@@ -251,13 +251,13 @@ type IamSession struct {
 	CreatedAt       time.Time
 	LastRefreshedAt time.Time
 	RevokedAt       pgtype.Timestamptz
-	RevokeReason    *string
+	RevokeReason    pgtype.Text
 }
 
 type IamUser struct {
 	ID           uuid.UUID
 	Phone        string
-	Name         *string
+	Name         pgtype.Text
 	Locale       string
 	Status       string
 	PlatformRole string
