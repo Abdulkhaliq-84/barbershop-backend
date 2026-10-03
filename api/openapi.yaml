@@ -619,14 +619,15 @@ paths:
         Only branches offering a service customers can choose (active, with
         a barber) are shown. Each comes with `price_from`, the least a
         customer pays for a service there (for one of `category`'s, if
-        given).
+        given), and `open_now`, whether it is open at this moment by its
+        weekly hours in its own time zone. `open_now=true` keeps only those.
 
         None of a city, a place or a name, only one of `lat` and `lng`, or a
         `q` with fewer than two letters or digits: `400`.
 
         A list kept from the businesses' changes: a branch appears or
         changes here moments after its owner publishes or edits it, or
-        changes its services.
+        changes its services or opening hours.
 
         A city that isn't in `GET /v1/cities`: `422 unknown_city`. A category
         that isn't in `GET /v1/service-categories`: `422 unknown_category`.
@@ -656,6 +657,11 @@ paths:
             type: string
             pattern: "^[a-z][a-z_]{1,39}$"
             example: beard
+        - name: open_now
+          in: query
+          description: "`true`: only branches open at this moment. `false` or absent: open or not."
+          schema:
+            type: boolean
         - name: lat
           in: query
           description: Search near this latitude (with `lng`), e.g. the customer's location.
@@ -2661,7 +2667,7 @@ components:
     BranchListing:
       type: object
       description: A branch as customers find it.
-      required: [id, name, city, district, address, location, price_from]
+      required: [id, name, city, district, address, location, price_from, open_now]
       properties:
         id:
           type: string
@@ -2690,6 +2696,11 @@ components:
             The least a customer pays for a service here (for one of
             `category`'s, if the search gave one): the cheapest barber's
             price.
+        open_now:
+          type: boolean
+          description: |
+            Open at this moment, by its weekly opening hours in its own time
+            zone (holidays aren't known yet).
 
     BranchListingPage:
       type: object

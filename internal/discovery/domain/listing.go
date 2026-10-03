@@ -45,6 +45,21 @@ type Service struct {
 	UpdatedAt time.Time
 }
 
+// OpeningHours is discovery's copy of a branch's weekly opening hours, as
+// of Version (the calendar's, not the branch's). Each of Open is [start,
+// end) in minutes after Sunday 00:00 in the branch's own time zone; one
+// past Saturday midnight ends after MinutesPerWeek. None: closed all week.
+type OpeningHours struct {
+	Branch    shared.BranchID
+	Business  shared.BusinessID
+	Version   int
+	Open      [][2]int
+	UpdatedAt time.Time
+}
+
+// MinutesPerWeek is how many minutes a week has.
+const MinutesPerWeek = 7 * 24 * 60
+
 // PageSize is how many listings one page holds.
 const PageSize = 20
 
@@ -54,6 +69,7 @@ var (
 	ErrRadius        = errors.New("search: the radius is out of range")
 	ErrQueryTooShort = errors.New("search: a name to search for needs at least two letters")
 	ErrNotSAR        = errors.New("discovery: prices are kept in SAR")
+	ErrBadHours      = errors.New("discovery: opening hours must be within two weeks of minutes, each ending after it starts")
 )
 
 // Search radius limits, in kilometres.
@@ -71,21 +87,27 @@ type Near struct {
 
 // Filter narrows a search: only City's branches (nil: any city), only
 // names matching Text (normalised by ParseQuery; "": any name), only
-// branches offering a service in Category (nil: any service).
+// branches offering a service in Category (nil: any service), only those
+// open at At (OpenNow). At is required: every branch found says whether
+// it is open then.
 type Filter struct {
 	City     *shared.City
 	Text     string
 	Category *shared.Category
+	OpenNow  bool
+	At       time.Time
 }
 
 // Found is a listing a search found. PriceFrom is the least a customer
 // pays for a service there (one of the category's, if the search gave
-// one). DistanceM is how far it is from the point searched near, in
-// metres; Score how well its name matches the text searched for, from 0
-// to 1. Each is 0 when the search didn't ask for it.
+// one); OpenNow whether it is open at the filter's At. DistanceM is how far
+// it is from the point searched near, in metres; Score how well its name
+// matches the text searched for, from 0 to 1. Each is 0 when the search
+// didn't ask for it.
 type Found struct {
 	Listing
 	PriceFrom shared.Money
+	OpenNow   bool
 	DistanceM float64
 	Score     float64
 }
@@ -111,10 +133,12 @@ type Listings interface {
 	Keep(ctx context.Context, l Listing) (bool, error)
 	// KeepService saves s the same way.
 	KeepService(ctx context.Context, s Service) (bool, error)
-	// InCity returns up to limit listed branches in city offering a service
-	// in category (nil: any), by Arabic name then ID, starting after the
-	// given position (nil: from the start).
-	InCity(ctx context.Context, city shared.City, category *shared.Category, after *Position, limit int) ([]Found, error)
+	// KeepHours saves h the same way.
+	KeepHours(ctx context.Context, h OpeningHours) (bool, error)
+	// InCity returns up to limit listed branches in f.City (required) that
+	// pass f, by Arabic name then ID, starting after the given position
+	// (nil: from the start). f.Text is not used: a name search is Matching.
+	InCity(ctx context.Context, f Filter, after *Position, limit int) ([]Found, error)
 	// Near returns up to limit listed branches within near's radius that
 	// pass f, nearest first then by ID, starting after the given position
 	// (nil: from the start).

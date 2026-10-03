@@ -184,7 +184,10 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 4. M6.4 — catalog's events: the categories filter and the price from; only branches offering
    something are shown ([ADR-0030](adr/0030-categories-and-price-from.md)).
    *Your turn:* sort by starting price.
-5. M6.5 — scheduling's events: open now; the branch's public page `GET /v1/branches/{id}`.
+5. M6.5 — scheduling's events: open now, by each branch's weekly hours in its own time zone
+   ([ADR-0031](adr/0031-open-now.md)). *Your turn:* when a closed branch opens next.
+6. M6.6 — the branch's public page `GET /v1/branches/{id}`: profile, weekly hours, open now,
+   and the menu (catalog's events carry the services' names and durations).
 
 ### Design track (in parallel, in Figma)
 

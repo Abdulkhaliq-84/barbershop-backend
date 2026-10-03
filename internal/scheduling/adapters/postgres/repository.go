@@ -12,8 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/adapters/postgres/sqlcgen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/scheduling/events"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -23,11 +25,21 @@ const uniqueViolation = "23505"
 
 // Calendars implements domain.Calendars.
 type Calendars struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	events EventPublisher
 }
 
-// NewCalendars returns the repository.
-func NewCalendars(pool *pgxpool.Pool) *Calendars { return &Calendars{pool: pool} }
+// EventPublisher saves events inside the caller's transaction: the outbox
+// (ADR-0009). An event is published if and only if its change commits.
+type EventPublisher interface {
+	PublishTx(ctx context.Context, tx pgx.Tx, events ...outbox.Event) error
+}
+
+// NewCalendars returns the repository. It publishes the calendars' events
+// through events.
+func NewCalendars(pool *pgxpool.Pool, events EventPublisher) *Calendars {
+	return &Calendars{pool: pool, events: events}
+}
 
 // Get returns the branch's calendar, or a new closed one.
 func (r *Calendars) Get(ctx context.Context, business shared.BusinessID, branch shared.BranchID) (*domain.BranchCalendar, error) {
@@ -88,12 +100,48 @@ func (r *Calendars) Update(ctx context.Context, business shared.BusinessID, bran
 		if err != nil {
 			return fmt.Errorf("save calendar: %w", err)
 		}
-		return saveHours(ctx, q, cal)
+		if err := saveHours(ctx, q, cal); err != nil {
+			return err
+		}
+		return r.publish(ctx, tx, cal.Events())
 	})
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "branch_calendars_pkey" {
 		return domain.ErrVersionConflict
 	}
 	return err
+}
+
+// publish hands the calendar's events to the outbox inside tx, in the
+// contract's JSON shape (package events).
+func (r *Calendars) publish(ctx context.Context, tx pgx.Tx, recorded []domain.Event) error {
+	out := make([]outbox.Event, 0, len(recorded))
+	for _, e := range recorded {
+		var (
+			ev  outbox.Event
+			err error
+		)
+		switch e := e.(type) {
+		case domain.OpeningHoursChangedEvent:
+			hours := []events.Interval{}
+			for _, i := range e.Hours.Intervals() {
+				hours = append(hours, events.Interval{Weekday: int(i.Day), StartMinute: i.Start, Minutes: i.Minutes})
+			}
+			ev, err = outbox.NewEvent(events.TypeOpeningHoursChanged, e.At, events.OpeningHoursChanged{
+				BusinessID: e.Business.UUID(), BranchID: e.Branch.UUID(), ChangedAt: e.At,
+				Calendar: events.Calendar{Version: e.Version, Hours: hours},
+			})
+		default:
+			err = fmt.Errorf("no contract for event %T", e)
+		}
+		if err != nil {
+			return err
+		}
+		out = append(out, ev)
+	}
+	if err := r.events.PublishTx(ctx, tx, out...); err != nil {
+		return fmt.Errorf("publish events: %w", err)
+	}
+	return nil
 }
 
 func loadCalendar(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.SchedulingBranchCalendar) (*domain.BranchCalendar, error) {

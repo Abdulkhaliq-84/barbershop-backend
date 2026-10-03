@@ -1,9 +1,10 @@
 // Package discovery is the search module: how customers find branches
 // (docs/architecture/domain-model.md §3.6, ADR-0027).
 //
-// It keeps its own copy of every branch and of what each sells, a read
-// model built only from business's and catalog's events: main subscribes
-// it to them (KeepBranch, KeepService). It depends on no other module and
+// It keeps its own copy of every branch, of what each sells and of when it
+// is open, a read model built only from business's, catalog's and
+// scheduling's events: main subscribes it to them (KeepBranch, KeepService,
+// KeepHours). It depends on no other module and
 // never reads their tables, so searching can't slow down or lock those
 // modules, and the copy can take whatever shape searching needs.
 //
@@ -23,12 +24,14 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery/adapters/postgres"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/discovery/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 // Deps are what the module needs from the outside world.
 type Deps struct {
 	Pool   *pgxpool.Pool
+	Clock  clock.Clock // what "open now" means
 	Logger *slog.Logger
 }
 
@@ -40,7 +43,7 @@ type Module struct {
 
 // New wires the module.
 func New(d Deps) *Module {
-	uc := app.NewHandlers(postgres.NewListings(d.Pool))
+	uc := app.NewHandlers(postgres.NewListings(d.Pool), d.Clock)
 	return &Module{uc: uc, http: httpapi.NewHandlers(uc, d.Logger)}
 }
 
@@ -105,5 +108,26 @@ func (m *Module) KeepService(ctx context.Context, s Service) error {
 	return m.uc.KeepService(ctx, domain.Service{
 		Service: s.ServiceID, Branch: s.BranchID, Business: s.BusinessID, Version: s.Version,
 		Offered: s.Offered, Category: category, PriceFrom: s.PriceFrom, UpdatedAt: s.At,
+	})
+}
+
+// OpeningHours is a branch's weekly opening hours as of Version, as
+// scheduling's events describe them: each of Open is [start, end) in
+// minutes after Sunday 00:00 in the branch's own time zone. Its fields
+// match scheduling.OpeningHoursChanged one for one, so main converts one to
+// the other with a plain conversion.
+type OpeningHours struct {
+	BusinessID shared.BusinessID
+	BranchID   shared.BranchID
+	Version    int
+	Open       [][2]int
+	At         time.Time
+}
+
+// KeepHours updates discovery's copy of a branch's opening hours. An older
+// version than the copy's changes nothing, like KeepBranch.
+func (m *Module) KeepHours(ctx context.Context, h OpeningHours) error {
+	return m.uc.KeepHours(ctx, domain.OpeningHours{
+		Branch: h.BranchID, Business: h.BusinessID, Version: h.Version, Open: h.Open, UpdatedAt: h.At,
 	})
 }

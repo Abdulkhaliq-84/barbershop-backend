@@ -177,6 +177,14 @@ type CatalogServiceOffering struct {
 	DurationMinutes pgtype.Int2
 }
 
+type DiscoveryBranchHour struct {
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+	Version    int32
+	Open       pgtype.Multirange[pgtype.Range[pgtype.Int4]]
+	UpdatedAt  time.Time
+}
+
 type DiscoveryBranchListing struct {
 	BranchID   uuid.UUID
 	BusinessID uuid.UUID

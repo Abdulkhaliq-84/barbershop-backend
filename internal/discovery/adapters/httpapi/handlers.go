@@ -70,6 +70,7 @@ func (h *Handlers) SearchBranches(ctx context.Context, req apigen.SearchBranches
 			District: f.District, Address: f.Address,
 			Location:  apigen.GeoPoint{Latitude: f.Location.Lat(), Longitude: f.Location.Lng()},
 			PriceFrom: apigen.Money{Amount: f.PriceFrom.Amount(), Currency: apigen.MoneyCurrency(f.PriceFrom.Currency())},
+			OpenNow:   f.OpenNow,
 		}
 		if s.Near != nil {
 			item.DistanceM = new(int(math.Round(f.DistanceM)))
@@ -102,6 +103,7 @@ func searchOf(p apigen.SearchBranchesParams) (app.Search, error) {
 		}
 		s.City = &city
 	}
+	s.OpenNow = p.OpenNow != nil && *p.OpenNow
 	if p.Category != nil {
 		category, err := shared.ParseCategory(*p.Category)
 		if err != nil {

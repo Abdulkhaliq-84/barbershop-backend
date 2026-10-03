@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
@@ -16,6 +17,7 @@ type BranchCalendar struct {
 	hours     WeeklyHours
 	version   int // 0 until first saved
 	updatedAt time.Time
+	events    []Event // recorded since it was loaded, published when saved
 }
 
 // NewBranchCalendar is a branch that hasn't set its hours: closed all week.
@@ -28,12 +30,17 @@ func RehydrateBranchCalendar(business shared.BusinessID, branch shared.BranchID,
 	return &BranchCalendar{business: business, branch: branch, hours: hours, version: version, updatedAt: updatedAt}
 }
 
-// SetOpeningHours replaces the weekly opening hours.
+// SetOpeningHours replaces the weekly opening hours, and records the event
+// that tells other modules.
 func (c *BranchCalendar) SetOpeningHours(hours WeeklyHours, now time.Time) {
 	c.hours = hours
 	c.version++
 	c.updatedAt = now.UTC().Truncate(time.Microsecond)
+	c.events = append(c.events, OpeningHoursChangedEvent{Business: c.business, Branch: c.branch, At: c.updatedAt, Version: c.version, Hours: hours})
 }
+
+// Events returns what happened to the calendar since it was loaded.
+func (c *BranchCalendar) Events() []Event { return slices.Clone(c.events) }
 
 // BusinessID returns the branch's business.
 func (c *BranchCalendar) BusinessID() shared.BusinessID { return c.business }
