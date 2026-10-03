@@ -90,7 +90,7 @@ func TestNotificationAPI(t *testing.T) {
 	deliveries := func(kind string) int {
 		var n int
 		if err := a.pool.QueryRow(t.Context(),
-			`SELECT count(*) FROM notification.deliveries WHERE kind = $1 AND appointment_id = $2`, kind, appointment).Scan(&n); err != nil {
+			`SELECT count(*) FROM notification.deliveries WHERE kind = $1 AND appointment_id = $2 AND outcome = 'sent'`, kind, appointment).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n

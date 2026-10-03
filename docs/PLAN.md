@@ -197,8 +197,10 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    English, sent once per (event, device), and a console sender
    ([ADR-0033](adr/0033-notifications-devices-and-pushes.md)).
    *Your turn:* `GET /v1/me/notifications` from the deliveries log.
-2. M7.2 — the FCM sender: an HTTP client with timeouts, retries with backoff, dead tokens
-   removed.
+2. M7.2 — the FCM sender: a service account signs in (RS256 assertion, cached access token), an
+   HTTP client with timeouts, retries with jittered backoff and `Retry-After`, devices FCM no
+   longer knows forgotten, refused pushes recorded ([ADR-0034](adr/0034-fcm-sender.md)).
+   *Your turn:* push to a user's devices concurrently (`errgroup` with a limit).
 3. M7.3 — reminders: a scheduled River job one hour before the start, which checks the status
    again when it fires. *Your turn:* the 24 h reminder.
 4. M7.4 — the shop's notifications: new bookings to answer, cancellations, the business approved

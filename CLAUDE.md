@@ -57,7 +57,10 @@ progress: M7.1 the `notification` module — devices per user (`POST`/`DELETE /v
 the token a credential that redacts itself), the customer's pushes from booking's events
 (`booking.OnAppointmentChanged`) in each device's language and the branch's time zone, sent once
 per (event, device) through a deliveries log, and a console sender refused in production
-(ADR-0033).
+(ADR-0033); M7.2 the FCM sender — a service account's RS256 assertion traded for a cached access
+token, every wait bounded (`FCM_TIMEOUT`), throttling and Google's errors retried with jittered
+backoff and `Retry-After` before the outbox's own retry, devices FCM no longer knows forgotten,
+refused pushes recorded as `rejected`, the event ID as collapse key (ADR-0034).
 
 ## 2. Where things are
 
@@ -69,7 +72,7 @@ per (event, device) through a deliveries log, and a console sender refused in pr
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0033) |
+| Why a decision was made | `docs/adr/` (0001–0034) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
@@ -187,7 +190,8 @@ Database tests skip unless `TEST_DATABASE_URL` is set (in CI a missing URL fails
 Login locally: `make run`, `POST /v1/auth/otp/request`, read the code from the API log (`SMS_PROVIDER=console`), `POST /v1/auth/otp/verify`
 → `tokens.access_token` opens `GET /v1/me` (`Authorization: Bearer …`). `TOKEN_SIGNING_SECRET`, `OTP_SECRET` and `MEDIA_SIGNING_SECRET` have
 public dev values in the Makefile/compose; they are refused when `APP_ENV` is staging or production. Uploaded files go to
-`MEDIA_DIR` (default `var/media`, git-ignored; absolute path required outside development). Make a platform admin locally:
+`MEDIA_DIR` (default `var/media`, git-ignored; absolute path required outside development). Pushes go to the
+worker's log (`PUSH_PROVIDER=console`); `PUSH_PROVIDER=fcm` needs `FCM_CREDENTIALS_FILE`, a mounted key file, never committed. Make a platform admin locally:
 `UPDATE iam.users SET platform_role = 'admin' WHERE phone = '+9665…'`, then refresh the token.
 
 ## 12. Don'ts

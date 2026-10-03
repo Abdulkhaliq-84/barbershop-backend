@@ -83,6 +83,16 @@ func (q *Queries) DevicesOfUser(ctx context.Context, userID uuid.UUID) ([]Notifi
 	return items, nil
 }
 
+const forgetDevice = `-- name: ForgetDevice :exec
+DELETE FROM notification.devices WHERE id = $1
+`
+
+// Drops a device the push service no longer knows, whoever's it is.
+func (q *Queries) ForgetDevice(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, forgetDevice, id)
+	return err
+}
+
 const keepBranch = `-- name: KeepBranch :execrows
 INSERT INTO notification.branches (branch_id, version, name_ar, name_en, timezone)
 VALUES ($1, $2, $3, $4, $5)
@@ -119,8 +129,8 @@ func (q *Queries) KeepBranch(ctx context.Context, arg KeepBranchParams) (int64, 
 }
 
 const recordDelivery = `-- name: RecordDelivery :exec
-INSERT INTO notification.deliveries (event_id, device_id, user_id, kind, appointment_id, sent_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO notification.deliveries (event_id, device_id, user_id, kind, appointment_id, outcome, sent_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (event_id, device_id) DO NOTHING
 `
 
@@ -130,10 +140,11 @@ type RecordDeliveryParams struct {
 	UserID        uuid.UUID
 	Kind          string
 	AppointmentID *uuid.UUID
+	Outcome       string
 	SentAt        time.Time
 }
 
-// Logs a push sent. Recorded twice (a retry), it stays one row.
+// Logs a push's outcome. Recorded twice (a retry), it stays one row.
 func (q *Queries) RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error {
 	_, err := q.db.Exec(ctx, recordDelivery,
 		arg.EventID,
@@ -141,6 +152,7 @@ func (q *Queries) RecordDelivery(ctx context.Context, arg RecordDeliveryParams) 
 		arg.UserID,
 		arg.Kind,
 		arg.AppointmentID,
+		arg.Outcome,
 		arg.SentAt,
 	)
 	return err

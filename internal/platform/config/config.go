@@ -40,9 +40,16 @@ type Config struct {
 
 // Push configures notifications to devices.
 type Push struct {
-	// Provider delivers them. Only "console" (development: writes them to
-	// the log) exists until FCM arrives in M7.2.
+	// Provider delivers them: "console" writes them to the log (development
+	// only), "fcm" sends them through Firebase Cloud Messaging.
 	Provider string `env:"PUSH_PROVIDER" envDefault:"console"`
+	// FCMCredentialsFile is the absolute path of the Firebase service
+	// account's JSON key (PUSH_PROVIDER=fcm). A secret: whoever holds it can
+	// push to every install of the app. Mount it; never bake it into an
+	// image or commit it.
+	FCMCredentialsFile string `env:"FCM_CREDENTIALS_FILE"`
+	// FCMTimeout bounds each request to Google, connecting included.
+	FCMTimeout time.Duration `env:"FCM_TIMEOUT" envDefault:"5s"`
 }
 
 // Worker configures the background worker role (outbox deliveries).
@@ -163,6 +170,7 @@ func (c Config) validate() error {
 		{"DATABASE_STATEMENT_TIMEOUT", c.Database.StatementTimeout},
 		{"DATABASE_LOCK_TIMEOUT", c.Database.LockTimeout},
 		{"DATABASE_IDLE_IN_TRANSACTION_SESSION_TIMEOUT", c.Database.IdleInTxTimeout},
+		{"FCM_TIMEOUT", c.Push.FCMTimeout},
 	} {
 		if t.value <= 0 {
 			errs = append(errs, fmt.Errorf("%s must be positive", t.key))
@@ -197,8 +205,14 @@ func (c Config) validate() error {
 	if c.Env == EnvProduction && c.Auth.SMSProvider == "console" {
 		errs = append(errs, errors.New("SMS_PROVIDER=console prints login codes to the log and is not allowed in production"))
 	}
-	if c.Push.Provider != "console" {
-		errs = append(errs, errors.New("PUSH_PROVIDER must be console (the only provider so far)"))
+	switch c.Push.Provider {
+	case "console":
+	case "fcm":
+		if !filepath.IsAbs(c.Push.FCMCredentialsFile) {
+			errs = append(errs, errors.New("FCM_CREDENTIALS_FILE must be the absolute path of the service account key when PUSH_PROVIDER=fcm"))
+		}
+	default:
+		errs = append(errs, errors.New("PUSH_PROVIDER must be console or fcm"))
 	}
 	if c.Env == EnvProduction && c.Push.Provider == "console" {
 		errs = append(errs, errors.New("PUSH_PROVIDER=console writes notifications to the log instead of sending them and is not allowed in production"))

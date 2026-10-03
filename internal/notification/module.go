@@ -13,6 +13,7 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -33,9 +34,19 @@ type Deps struct {
 	Pool   *pgxpool.Pool
 	Clock  clock.Clock
 	Logger *slog.Logger
-	// Push delivers notifications; nil = the development console sender
-	// (PUSH_PROVIDER=console, refused in production).
-	Push app.PushSender
+	Push   Push
+}
+
+// Push says how notifications reach phones.
+type Push struct {
+	// Provider is "fcm" (Firebase Cloud Messaging) or "console" (written
+	// to the log: development only, refused in production by config).
+	// Empty means console.
+	Provider string
+	// Credentials is the Firebase service account's JSON key (fcm).
+	Credentials []byte
+	// Timeout bounds each request to Google (fcm).
+	Timeout time.Duration
 }
 
 // Module is the wired notification module.
@@ -44,14 +55,24 @@ type Module struct {
 	http *httpapi.Handlers
 }
 
-// New wires the module.
-func New(d Deps) *Module {
-	sender := d.Push
-	if sender == nil {
+// New wires the module. It fails if the push provider's credentials are
+// unusable, so a misconfigured deploy stops at startup.
+func New(d Deps) (*Module, error) {
+	var sender app.PushSender
+	switch d.Push.Provider {
+	case "fcm":
+		fcm, err := push.NewFCM(push.FCMConfig{Credentials: d.Push.Credentials, Timeout: d.Push.Timeout}, d.Logger)
+		if err != nil {
+			return nil, err
+		}
+		sender = fcm
+	case "console", "":
 		sender = push.NewConsole(d.Logger)
+	default:
+		return nil, errors.New("notification: unknown push provider")
 	}
 	uc := app.NewHandlers(postgres.NewStore(d.Pool), sender, d.Clock)
-	return &Module{uc: uc, http: httpapi.NewHandlers(uc, d.Logger)}
+	return &Module{uc: uc, http: httpapi.NewHandlers(uc, d.Logger)}, nil
 }
 
 // HTTP returns the handlers for the notification API operations.

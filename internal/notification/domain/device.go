@@ -116,13 +116,23 @@ type Branch struct {
 	Timezone string // IANA; a message gives times in it
 }
 
-// Delivery records one event pushed to one device.
+// Outcome is what the push service did with a push.
+type Outcome string
+
+// Outcomes.
+const (
+	Sent     Outcome = "sent"     // accepted for delivery
+	Rejected Outcome = "rejected" // refused for good: not tried again
+)
+
+// Delivery records one event pushed to one device, and what came of it.
 type Delivery struct {
 	Event       uuid.UUID
 	Device      DeviceID
 	User        shared.UserID
 	Kind        Kind
 	Appointment shared.AppointmentID
+	Outcome     Outcome
 	SentAt      time.Time
 }
 
@@ -136,14 +146,18 @@ type Store interface {
 	// RemoveDevice unregisters the user's device; ErrNotFound if the user
 	// has no such device.
 	RemoveDevice(ctx context.Context, user shared.UserID, id DeviceID) error
+	// ForgetDevice drops a device the push service no longer knows,
+	// whoever's it is. Forgetting one already gone is harmless.
+	ForgetDevice(ctx context.Context, id DeviceID) error
 	// Devices returns the user's devices, newest first.
 	Devices(ctx context.Context, user shared.UserID) ([]Device, error)
 	// KeepBranch saves b unless the copy is of the same or a newer version.
 	KeepBranch(ctx context.Context, b Branch) (bool, error)
 	// Branch returns the copy; ErrUnknownBranch if none yet.
 	Branch(ctx context.Context, id shared.BranchID) (Branch, error)
-	// Delivered reports whether event was already pushed to device.
+	// Delivered reports whether event was already pushed to device, or
+	// refused by the push service for it.
 	Delivered(ctx context.Context, event uuid.UUID, device DeviceID) (bool, error)
-	// RecordDelivery logs a push sent; recording one twice is harmless.
+	// RecordDelivery logs a push's outcome; recording one twice is harmless.
 	RecordDelivery(ctx context.Context, d Delivery) error
 }

@@ -61,6 +61,14 @@ func (s *Store) RemoveDevice(ctx context.Context, user shared.UserID, id domain.
 	return nil
 }
 
+// ForgetDevice drops a device the push service no longer knows.
+func (s *Store) ForgetDevice(ctx context.Context, id domain.DeviceID) error {
+	if err := sqlcgen.New(s.pool).ForgetDevice(ctx, id.UUID()); err != nil {
+		return fmt.Errorf("forget device: %w", err)
+	}
+	return nil
+}
+
 // Devices returns the user's devices, newest first.
 func (s *Store) Devices(ctx context.Context, user shared.UserID) ([]domain.Device, error) {
 	rows, err := sqlcgen.New(s.pool).DevicesOfUser(ctx, user.UUID())
@@ -132,10 +140,11 @@ func (s *Store) Delivered(ctx context.Context, event uuid.UUID, device domain.De
 	return done, nil
 }
 
-// RecordDelivery logs a push sent.
+// RecordDelivery logs a push's outcome.
 func (s *Store) RecordDelivery(ctx context.Context, d domain.Delivery) error {
 	p := sqlcgen.RecordDeliveryParams{
-		EventID: d.Event, DeviceID: d.Device.UUID(), UserID: d.User.UUID(), Kind: string(d.Kind), SentAt: d.SentAt,
+		EventID: d.Event, DeviceID: d.Device.UUID(), UserID: d.User.UUID(), Kind: string(d.Kind),
+		Outcome: string(d.Outcome), SentAt: d.SentAt,
 	}
 	if !d.Appointment.IsZero() {
 		p.AppointmentID = new(d.Appointment.UUID())

@@ -29,6 +29,10 @@ WHERE old.user_id = @user_id
 -- name: RemoveDevice :execrows
 DELETE FROM notification.devices WHERE id = @id AND user_id = @user_id;
 
+-- name: ForgetDevice :exec
+-- Drops a device the push service no longer knows, whoever's it is.
+DELETE FROM notification.devices WHERE id = @id;
+
 -- name: DevicesOfUser :many
 -- A user's devices, newest first.
 SELECT id, user_id, token, platform, locale, created_at, updated_at
@@ -57,7 +61,7 @@ WHERE branch_id = @branch_id;
 SELECT EXISTS (SELECT FROM notification.deliveries WHERE event_id = @event_id AND device_id = @device_id);
 
 -- name: RecordDelivery :exec
--- Logs a push sent. Recorded twice (a retry), it stays one row.
-INSERT INTO notification.deliveries (event_id, device_id, user_id, kind, appointment_id, sent_at)
-VALUES (@event_id, @device_id, @user_id, @kind, @appointment_id, @sent_at)
+-- Logs a push's outcome. Recorded twice (a retry), it stays one row.
+INSERT INTO notification.deliveries (event_id, device_id, user_id, kind, appointment_id, outcome, sent_at)
+VALUES (@event_id, @device_id, @user_id, @kind, @appointment_id, @outcome, @sent_at)
 ON CONFLICT (event_id, device_id) DO NOTHING;

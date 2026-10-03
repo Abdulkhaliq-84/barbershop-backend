@@ -10,6 +10,11 @@ coverage.out
 .env.*
 !.env.example
 
+# Secret keys (e.g. FCM_CREDENTIALS_FILE): mounted at run time, never committed
+/secrets/
+*firebase-adminsdk*.json
+*service-account*.json
+
 # Editors and OS
 .idea/
 .vscode/

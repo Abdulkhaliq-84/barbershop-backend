@@ -9,6 +9,9 @@ coverage.out
 *.md
 .env
 .env.*
+secrets
+*firebase-adminsdk*.json
+*service-account*.json
 compose.yaml
 Dockerfile
 .dockerignore
