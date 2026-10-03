@@ -11,6 +11,7 @@ const (
 	BookingDeclined  Kind = "booking_declined"  // the shop said no
 	BookingExpired   Kind = "booking_expired"   // the shop didn't answer in time
 	BookingCancelled Kind = "booking_cancelled" // the shop cancelled it
+	BookingReminder  Kind = "booking_reminder"  // it starts within the hour
 )
 
 // CustomerNotice says what to tell a customer when something happens to

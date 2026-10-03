@@ -118,6 +118,24 @@ type AppointmentChange struct {
 	Status      string
 	CancelledBy string
 	StartsAt    time.Time
+	At          time.Time // when it happened
+}
+
+// AppointmentChanged keeps notification's copy of the appointment (for its
+// reminder), then tells the customer what they should hear about it.
+func (h *Handlers) AppointmentChanged(ctx context.Context, c AppointmentChange) error {
+	if status, ok := domain.AppointmentStatusOf(c.Status); ok && !c.Customer.IsZero() {
+		a := domain.Appointment{
+			ID: c.Appointment, Customer: c.Customer, Branch: c.Branch, StartsAt: c.StartsAt, Status: status,
+		}
+		if status == domain.AppointmentConfirmed {
+			a.ConfirmedAt = c.At
+		}
+		if err := h.store.KeepAppointment(ctx, a); err != nil {
+			return fmt.Errorf("appointment %s: %w", c.Appointment, err)
+		}
+	}
+	return h.Notify(ctx, c)
 }
 
 // Notify pushes the customer what they should hear about an appointment
@@ -130,38 +148,103 @@ func (h *Handlers) Notify(ctx context.Context, c AppointmentChange) error {
 	if !ok || c.Customer.IsZero() {
 		return nil
 	}
-	branch, err := h.store.Branch(ctx, c.Branch)
+	return h.send(ctx, notice{
+		event: c.Event, kind: kind, appointment: c.Appointment, branch: c.Branch, customer: c.Customer, startsAt: c.StartsAt,
+	})
+}
+
+// ReminderBatch is how many reminders one transaction queues: a run never
+// holds many rows locked for long.
+const ReminderBatch = 100
+
+// RemindDue queues a reminder for every appointment due one, a batch at a
+// time. The worker runs it every minute; overlapping runs skip each
+// other's rows.
+func (h *Handlers) RemindDue(ctx context.Context) error {
+	for {
+		n, err := h.store.ClaimReminders(ctx, h.clock.Now(), ReminderBatch)
+		if err != nil {
+			return err
+		}
+		if n < ReminderBatch {
+			return nil
+		}
+	}
+}
+
+// Reminder is an appointment's reminder, as RemindDue queued it.
+type Reminder struct {
+	Event       uuid.UUID // the queued event's ID
+	Appointment shared.AppointmentID
+	Customer    shared.UserID
+	Branch      shared.BranchID
+	StartsAt    time.Time
+}
+
+// SendReminder pushes a queued reminder to the customer's devices, unless
+// the appointment changed since it was queued (cancelled in the meantime).
+// Like Notify, it reaches each device once, however often it runs.
+func (h *Handlers) SendReminder(ctx context.Context, r Reminder) error {
+	a, err := h.store.Appointment(ctx, r.Appointment)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reminder for %s: %w", r.Appointment, err)
+	}
+	if a.Status != domain.AppointmentConfirmed || !a.StartsAt.Equal(r.StartsAt) {
+		return nil
+	}
+	return h.send(ctx, notice{
+		event: r.Event, kind: domain.BookingReminder, appointment: r.Appointment, branch: r.Branch,
+		customer: r.Customer, startsAt: r.StartsAt,
+	})
+}
+
+// notice is one thing to tell a customer about an appointment.
+type notice struct {
+	event       uuid.UUID // what each device is reached once for
+	kind        domain.Kind
+	appointment shared.AppointmentID
+	branch      shared.BranchID
+	customer    shared.UserID
+	startsAt    time.Time
+}
+
+// send pushes n to each of the customer's devices it hasn't reached yet.
+func (h *Handlers) send(ctx context.Context, n notice) error {
+	branch, err := h.store.Branch(ctx, n.branch)
 	if err != nil {
 		// Usually the branch's own event hasn't arrived yet: try again later.
-		return fmt.Errorf("notify %s: %w", c.Appointment, err)
+		return fmt.Errorf("notify %s: %w", n.appointment, err)
 	}
-	devices, err := h.store.Devices(ctx, c.Customer)
+	devices, err := h.store.Devices(ctx, n.customer)
 	if err != nil {
-		return fmt.Errorf("notify %s: %w", c.Appointment, err)
+		return fmt.Errorf("notify %s: %w", n.appointment, err)
 	}
 	var failed []error
 	for _, d := range devices {
-		if err := h.pushOnce(ctx, c, kind, branch, d); err != nil {
+		if err := h.pushOnce(ctx, n, branch, d); err != nil {
 			failed = append(failed, err)
 		}
 	}
 	if err := errors.Join(failed...); err != nil {
-		return fmt.Errorf("notify %s: %w", c.Appointment, err)
+		return fmt.Errorf("notify %s: %w", n.appointment, err)
 	}
 	return nil
 }
 
-func (h *Handlers) pushOnce(ctx context.Context, c AppointmentChange, kind domain.Kind, branch domain.Branch, d domain.Device) error {
-	done, err := h.store.Delivered(ctx, c.Event, d.ID)
+func (h *Handlers) pushOnce(ctx context.Context, n notice, branch domain.Branch, d domain.Device) error {
+	done, err := h.store.Delivered(ctx, n.event, d.ID)
 	if err != nil || done {
 		return err
 	}
-	title, body, err := domain.Message(kind, d.Locale, branch, c.StartsAt)
+	title, body, err := domain.Message(n.kind, d.Locale, branch, n.startsAt)
 	if err != nil {
 		return err
 	}
-	err = h.push.Send(ctx, Push{Device: d, Title: title, Body: body, CollapseKey: c.Event.String(), Data: map[string]string{
-		"kind": string(kind), "appointment_id": c.Appointment.String(),
+	err = h.push.Send(ctx, Push{Device: d, Title: title, Body: body, CollapseKey: n.event.String(), Data: map[string]string{
+		"kind": string(n.kind), "appointment_id": n.appointment.String(),
 	}})
 	outcome := domain.Sent
 	switch {
@@ -174,7 +257,7 @@ func (h *Handlers) pushOnce(ctx context.Context, c AppointmentChange, kind domai
 		return fmt.Errorf("push to device %s: %w", d.ID, err)
 	}
 	return h.store.RecordDelivery(ctx, domain.Delivery{
-		Event: c.Event, Device: d.ID, User: d.User, Kind: kind, Appointment: c.Appointment,
+		Event: n.event, Device: d.ID, User: d.User, Kind: n.kind, Appointment: n.appointment,
 		Outcome: outcome, SentAt: h.clock.Now(),
 	})
 }

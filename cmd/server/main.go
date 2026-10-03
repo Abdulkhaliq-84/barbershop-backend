@@ -204,7 +204,7 @@ func newApplication(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) 
 			return nil, fmt.Errorf("read FCM_CREDENTIALS_FILE: %w", err)
 		}
 	}
-	notificationModule, err := notification.New(notification.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Push: pushes})
+	notificationModule, err := notification.New(notification.Deps{Pool: pool, Clock: clock.System{}, Logger: logger, Push: pushes, Events: bus})
 	if err != nil {
 		return nil, err
 	}

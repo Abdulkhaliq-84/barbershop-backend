@@ -444,6 +444,16 @@ Ports: `PushSender` (FCM), `SMSSender` (console in dev → provider in M7), late
 - **Once on the phone.** Each push carries the event's ID as its collapse key, so a repeat
   shows once.
 
+**Live since M7.3 (ADR-0035):** reminders an hour before the start.
+- **A copy of each customer's booking.** Notification keeps one from booking's events. The
+  status only moves forward (pending → confirmed → closed), so a late event can't revive a
+  cancelled booking.
+- **Queued every minute.** A task queues one outbox event per reminder due, in the
+  transaction that marks it. A reminder is due for a booking that is confirmed, starts within
+  the hour and was confirmed at least an hour before.
+- **Checked again before sending.** The subscriber checks the copy again before pushing, so a
+  booking cancelled in the meantime gets nothing.
+
 ### 3.9 `media`
 
 Uploads for logos, branch photos, avatars (public) and CR documents (private — served only through

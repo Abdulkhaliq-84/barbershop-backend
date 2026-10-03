@@ -10,7 +10,37 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const appointmentByID = `-- name: AppointmentByID :one
+SELECT appointment_id, customer_id, branch_id, starts_at, status, confirmed_at
+FROM notification.appointments
+WHERE appointment_id = $1
+`
+
+type AppointmentByIDRow struct {
+	AppointmentID uuid.UUID
+	CustomerID    uuid.UUID
+	BranchID      uuid.UUID
+	StartsAt      time.Time
+	Status        string
+	ConfirmedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) AppointmentByID(ctx context.Context, appointmentID uuid.UUID) (AppointmentByIDRow, error) {
+	row := q.db.QueryRow(ctx, appointmentByID, appointmentID)
+	var i AppointmentByIDRow
+	err := row.Scan(
+		&i.AppointmentID,
+		&i.CustomerID,
+		&i.BranchID,
+		&i.StartsAt,
+		&i.Status,
+		&i.ConfirmedAt,
+	)
+	return i, err
+}
 
 const branchByID = `-- name: BranchByID :one
 SELECT branch_id, version, name_ar, name_en, timezone
@@ -83,6 +113,65 @@ func (q *Queries) DevicesOfUser(ctx context.Context, userID uuid.UUID) ([]Notifi
 	return items, nil
 }
 
+const dueReminders = `-- name: DueReminders :many
+SELECT appointment_id, customer_id, branch_id, starts_at
+FROM notification.appointments
+WHERE status = 'confirmed' AND reminded_at IS NULL
+  AND starts_at > $1 AND starts_at <= $2
+  AND confirmed_at <= starts_at - $3::interval
+ORDER BY starts_at, appointment_id
+LIMIT $4
+FOR UPDATE SKIP LOCKED
+`
+
+type DueRemindersParams struct {
+	Now   time.Time
+	Until time.Time
+	Lead  pgtype.Interval
+	Batch int32
+}
+
+type DueRemindersRow struct {
+	AppointmentID uuid.UUID
+	CustomerID    uuid.UUID
+	BranchID      uuid.UUID
+	StartsAt      time.Time
+}
+
+// Appointments due their reminder now: confirmed, not yet reminded,
+// starting within the lead time but not started, and confirmed at least
+// that long before they start. Rows another worker is claiming are
+// skipped.
+func (q *Queries) DueReminders(ctx context.Context, arg DueRemindersParams) ([]DueRemindersRow, error) {
+	rows, err := q.db.Query(ctx, dueReminders,
+		arg.Now,
+		arg.Until,
+		arg.Lead,
+		arg.Batch,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DueRemindersRow{}
+	for rows.Next() {
+		var i DueRemindersRow
+		if err := rows.Scan(
+			&i.AppointmentID,
+			&i.CustomerID,
+			&i.BranchID,
+			&i.StartsAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const forgetDevice = `-- name: ForgetDevice :exec
 DELETE FROM notification.devices WHERE id = $1
 `
@@ -90,6 +179,40 @@ DELETE FROM notification.devices WHERE id = $1
 // Drops a device the push service no longer knows, whoever's it is.
 func (q *Queries) ForgetDevice(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, forgetDevice, id)
+	return err
+}
+
+const keepAppointment = `-- name: KeepAppointment :exec
+INSERT INTO notification.appointments (appointment_id, customer_id, branch_id, starts_at, status, confirmed_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (appointment_id) DO UPDATE SET
+    status       = excluded.status,
+    confirmed_at = coalesce(notification.appointments.confirmed_at, excluded.confirmed_at)
+WHERE (CASE excluded.status WHEN 'pending' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END)
+    > (CASE notification.appointments.status WHEN 'pending' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END)
+`
+
+type KeepAppointmentParams struct {
+	AppointmentID uuid.UUID
+	CustomerID    uuid.UUID
+	BranchID      uuid.UUID
+	StartsAt      time.Time
+	Status        string
+	ConfirmedAt   pgtype.Timestamptz
+}
+
+// Saves notification's copy of an appointment. Booking's events can arrive
+// twice and in any order, so the status only moves forward (pending, then
+// confirmed, then closed); the first confirmation's time is kept.
+func (q *Queries) KeepAppointment(ctx context.Context, arg KeepAppointmentParams) error {
+	_, err := q.db.Exec(ctx, keepAppointment,
+		arg.AppointmentID,
+		arg.CustomerID,
+		arg.BranchID,
+		arg.StartsAt,
+		arg.Status,
+		arg.ConfirmedAt,
+	)
 	return err
 }
 
@@ -126,6 +249,20 @@ func (q *Queries) KeepBranch(ctx context.Context, arg KeepBranchParams) (int64, 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const markReminded = `-- name: MarkReminded :exec
+UPDATE notification.appointments SET reminded_at = $1 WHERE appointment_id = ANY($2::uuid[])
+`
+
+type MarkRemindedParams struct {
+	Now pgtype.Timestamptz
+	Ids []uuid.UUID
+}
+
+func (q *Queries) MarkReminded(ctx context.Context, arg MarkRemindedParams) error {
+	_, err := q.db.Exec(ctx, markReminded, arg.Now, arg.Ids)
+	return err
 }
 
 const recordDelivery = `-- name: RecordDelivery :exec

@@ -275,6 +275,16 @@ type MediaObject struct {
 	CreatedAt   time.Time
 }
 
+type NotificationAppointment struct {
+	AppointmentID uuid.UUID
+	CustomerID    uuid.UUID
+	BranchID      uuid.UUID
+	StartsAt      time.Time
+	Status        string
+	ConfirmedAt   *time.Time
+	RemindedAt    *time.Time
+}
+
 type NotificationBranch struct {
 	BranchID uuid.UUID
 	Version  int32

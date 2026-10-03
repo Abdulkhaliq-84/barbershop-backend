@@ -11,22 +11,33 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/adapters/postgres/sqlcgen"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/events"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
 var _ domain.Store = (*Store)(nil)
 
-// Store implements domain.Store.
-type Store struct {
-	pool *pgxpool.Pool
+// EventPublisher saves events inside the caller's transaction (the outbox).
+type EventPublisher interface {
+	PublishTx(ctx context.Context, tx pgx.Tx, events ...outbox.Event) error
 }
 
-// NewStore returns the store.
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+// Store implements domain.Store.
+type Store struct {
+	pool   *pgxpool.Pool
+	events EventPublisher
+}
+
+// NewStore returns the store; it queues reminders through events.
+func NewStore(pool *pgxpool.Pool, events EventPublisher) *Store {
+	return &Store{pool: pool, events: events}
+}
 
 // SaveDevice registers d by its token and keeps only the user's newest
 // devices, in one transaction.
@@ -153,4 +164,80 @@ func (s *Store) RecordDelivery(ctx context.Context, d domain.Delivery) error {
 		return fmt.Errorf("record delivery: %w", err)
 	}
 	return nil
+}
+
+// KeepAppointment saves the copy of an appointment; its status only moves
+// forward.
+func (s *Store) KeepAppointment(ctx context.Context, a domain.Appointment) error {
+	p := sqlcgen.KeepAppointmentParams{
+		AppointmentID: a.ID.UUID(), CustomerID: a.Customer.UUID(), BranchID: a.Branch.UUID(),
+		StartsAt: a.StartsAt, Status: string(a.Status),
+	}
+	if !a.ConfirmedAt.IsZero() {
+		p.ConfirmedAt = pgtype.Timestamptz{Time: a.ConfirmedAt, Valid: true}
+	}
+	if err := sqlcgen.New(s.pool).KeepAppointment(ctx, p); err != nil {
+		return fmt.Errorf("keep appointment: %w", err)
+	}
+	return nil
+}
+
+// Appointment returns the copy of an appointment.
+func (s *Store) Appointment(ctx context.Context, id shared.AppointmentID) (domain.Appointment, error) {
+	row, err := sqlcgen.New(s.pool).AppointmentByID(ctx, id.UUID())
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Appointment{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Appointment{}, fmt.Errorf("appointment: %w", err)
+	}
+	a := domain.Appointment{
+		ID: id, Customer: shared.IDFromUUID[shared.UserTag](row.CustomerID), Branch: shared.IDFromUUID[shared.BranchTag](row.BranchID),
+		StartsAt: row.StartsAt.UTC(), Status: domain.AppointmentStatus(row.Status),
+	}
+	if row.ConfirmedAt.Valid {
+		a.ConfirmedAt = row.ConfirmedAt.Time.UTC()
+	}
+	return a, nil
+}
+
+// ClaimReminders marks up to limit due appointments reminded and queues a
+// reminder for each, in one transaction: a reminder is queued exactly once,
+// and if the transaction fails, neither happens.
+func (s *Store) ClaimReminders(ctx context.Context, now time.Time, limit int) (int, error) {
+	if limit < 1 || limit > math.MaxInt32 {
+		return 0, fmt.Errorf("claim reminders: limit %d", limit)
+	}
+	batch := int32(limit)
+	var claimed int
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		rows, err := q.DueReminders(ctx, sqlcgen.DueRemindersParams{
+			Now: now, Until: now.Add(domain.ReminderLead),
+			Lead:  pgtype.Interval{Microseconds: domain.ReminderLead.Microseconds(), Valid: true},
+			Batch: batch,
+		})
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		ids := make([]uuid.UUID, len(rows))
+		due := make([]outbox.Event, len(rows))
+		for i, r := range rows {
+			ids[i] = r.AppointmentID
+			if due[i], err = outbox.NewEvent(events.TypeReminderDue, now, events.ReminderDue{
+				AppointmentID: r.AppointmentID, CustomerID: r.CustomerID, BranchID: r.BranchID, StartsAt: r.StartsAt.UTC(),
+			}); err != nil {
+				return err
+			}
+		}
+		if err := q.MarkReminded(ctx, sqlcgen.MarkRemindedParams{Now: pgtype.Timestamptz{Time: now, Valid: true}, Ids: ids}); err != nil {
+			return err
+		}
+		claimed = len(rows)
+		return s.events.PublishTx(ctx, tx, due...)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("claim reminders: %w", err)
+	}
+	return claimed, nil
 }

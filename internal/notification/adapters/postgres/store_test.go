@@ -14,6 +14,7 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/domain"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/database/dbtest"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -26,6 +27,17 @@ func migrated(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	return pool
+}
+
+// newStore is a store on a fresh database, queueing reminders in its outbox.
+func newStore(t *testing.T) (*postgres.Store, *pgxpool.Pool) {
+	t.Helper()
+	pool := migrated(t)
+	bus, err := outbox.New(pool, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return postgres.NewStore(pool, bus), pool
 }
 
 // device is a new registration of token for user, at.
@@ -44,7 +56,7 @@ func device(t *testing.T, user shared.UserID, token string, at time.Time) domain
 func tokenN(i int) string { return fmt.Sprintf("fcm-token-%04d-abcdefghijklmnopqrstuvwxyz", i) }
 
 func TestSaveDevice(t *testing.T) {
-	s := postgres.NewStore(migrated(t))
+	s, _ := newStore(t)
 	ctx := t.Context()
 	alice, bob := shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag]()
 
@@ -90,7 +102,7 @@ func TestSaveDevice(t *testing.T) {
 // A user keeps only their newest MaxDevicesPerUser devices; nobody else's
 // are touched.
 func TestSaveDeviceKeepsNewest(t *testing.T) {
-	s := postgres.NewStore(migrated(t))
+	s, _ := newStore(t)
 	ctx := t.Context()
 	alice, bob := shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag]()
 	if _, err := s.SaveDevice(ctx, device(t, bob, tokenN(99), t0)); err != nil {
@@ -132,7 +144,7 @@ func TestSaveDeviceKeepsNewest(t *testing.T) {
 }
 
 func TestRemoveDevice(t *testing.T) {
-	s := postgres.NewStore(migrated(t))
+	s, _ := newStore(t)
 	ctx := t.Context()
 	alice, bob := shared.NewID[shared.UserTag](), shared.NewID[shared.UserTag]()
 	d, err := s.SaveDevice(ctx, device(t, alice, tokenN(1), t0))
@@ -163,7 +175,7 @@ func branch(t *testing.T, id shared.BranchID, version int, ar, en, tz string) do
 }
 
 func TestKeepBranch(t *testing.T) {
-	s := postgres.NewStore(migrated(t))
+	s, _ := newStore(t)
 	ctx := t.Context()
 	id := shared.NewID[shared.BranchTag]()
 	if _, err := s.Branch(ctx, id); !errors.Is(err, domain.ErrUnknownBranch) {
@@ -199,8 +211,7 @@ func TestKeepBranch(t *testing.T) {
 }
 
 func TestDeliveries(t *testing.T) {
-	pool := migrated(t)
-	s := postgres.NewStore(pool)
+	s, pool := newStore(t)
 	ctx := t.Context()
 	user := shared.NewID[shared.UserTag]()
 	event, phone, tablet := uuid.New(), shared.NewID[domain.DeviceTag](), shared.NewID[domain.DeviceTag]()
@@ -263,7 +274,7 @@ func TestDeliveries(t *testing.T) {
 
 // A device the push service no longer knows is forgotten, whoever's it is.
 func TestForgetDevice(t *testing.T) {
-	s := postgres.NewStore(migrated(t))
+	s, _ := newStore(t)
 	ctx := t.Context()
 	alice := shared.NewID[shared.UserTag]()
 	gone, err := s.SaveDevice(ctx, device(t, alice, tokenN(1), t0))

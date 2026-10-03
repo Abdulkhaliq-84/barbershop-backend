@@ -96,6 +96,18 @@ func TestNotificationAPI(t *testing.T) {
 		return n
 	}
 	until(t, "the booking pushes", func() bool { return deliveries("booking_confirmed") == 2 })
+	// Notification keeps its own copy of the booking, for the reminder.
+	copied := func() (status string, confirmed bool) {
+		t.Helper()
+		if err := a.pool.QueryRow(t.Context(), `SELECT status, confirmed_at IS NOT NULL FROM notification.appointments WHERE appointment_id = $1`,
+			appointment).Scan(&status, &confirmed); err != nil {
+			t.Fatal(err)
+		}
+		return status, confirmed
+	}
+	if status, confirmed := copied(); status != "confirmed" || !confirmed {
+		t.Errorf("the copy: %s, confirmed at a time: %v", status, confirmed)
+	}
 	byDevice := map[string]map[string]any{}
 	for _, p := range a.logs.pushes() {
 		byDevice[str(p["device_id"])] = p
@@ -121,6 +133,9 @@ func TestNotificationAPI(t *testing.T) {
 		t.Fatalf("the shop cancels: %d %v", r.status, r.body)
 	}
 	until(t, "the cancellation push", func() bool { return deliveries("booking_cancelled") == 1 })
+	if status, _ := copied(); status != "closed" {
+		t.Errorf("the copy after the cancellation: %s, want closed", status)
+	}
 	var device string
 	if err := a.pool.QueryRow(t.Context(),
 		`SELECT device_id FROM notification.deliveries WHERE kind = 'booking_cancelled'`).Scan(&device); err != nil || device != phone {

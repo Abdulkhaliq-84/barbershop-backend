@@ -34,7 +34,7 @@ scheduling.override_hours, scheduling.time_off (EXCLUDE: no overlapping time off
 booking.appointments, booking.appointment_items, booking.idempotency_keys
 discovery.branch_listings, discovery.branch_services, discovery.branch_hours  (cities are reference data in code — ADR-0027)
 billing.subscriptions  (plans are reference data in code — ADR-0019)
-notification.devices, notification.branches, notification.deliveries  (messages are in code — ADR-0033)
+notification.devices, notification.branches, notification.deliveries, notification.appointments  (messages are in code — ADR-0033)
 media.objects
 river.*   (job queue / outbox — created and upgraded by River's own migrator, run by database.Migrate)
 ```
@@ -135,6 +135,17 @@ CREATE TABLE notification.deliveries (
     PRIMARY KEY (event_id, device_id)
 );
 CREATE INDEX ON notification.deliveries (user_id, sent_at DESC);
+
+-- A customer's booking as reminders see it (ADR-0035), kept from booking's
+-- events; a status only moves forward: pending → confirmed → closed.
+CREATE TABLE notification.appointments (
+    appointment_id uuid PRIMARY KEY,
+    customer_id uuid NOT NULL, branch_id uuid NOT NULL, starts_at timestamptz NOT NULL,
+    status text NOT NULL,                        -- pending | confirmed | closed
+    confirmed_at timestamptz,                    -- reminded only if confirmed ≥ 1 h before the start
+    reminded_at timestamptz                      -- set in the transaction that queues the reminder
+);
+CREATE INDEX ON notification.appointments (starts_at) WHERE status = 'confirmed' AND reminded_at IS NULL;
 
 -- Nearby query shape
 -- SELECT … FROM discovery.branch_listings
