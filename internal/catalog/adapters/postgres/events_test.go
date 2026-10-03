@@ -82,7 +82,7 @@ func TestServiceEvents(t *testing.T) {
 	}
 
 	business, branch := shared.NewID[shared.BusinessTag](), shared.NewID[shared.BranchTag]()
-	s := newService(t, business, branch, 0, t0)
+	s := newService(t, business, branch, 7, t0)
 	if err := repo.Add(ctx, s); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestServiceEvents(t *testing.T) {
 		Service: events.Service{
 			Version: 1, Active: true, CategoryCode: "haircut",
 			Name:            events.LocalizedText{Ar: "قص شعر", En: "Haircut"},
-			DurationMinutes: 30, Price: events.Money{Amount: 6000, Currency: "SAR"},
+			DurationMinutes: 30, Price: events.Money{Amount: 6000, Currency: "SAR"}, SortOrder: 7,
 		},
 	}
 	if created.event.Type != events.TypeServiceCreated || !sameChange(created.payload, want) || created.tx != serviceTx(s) {

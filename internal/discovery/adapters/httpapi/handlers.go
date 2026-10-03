@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -69,7 +70,7 @@ func (h *Handlers) SearchBranches(ctx context.Context, req apigen.SearchBranches
 			Id: f.Branch.UUID(), Name: toAPIText(f.Name), City: toAPICity(f.City),
 			District: f.District, Address: f.Address,
 			Location:  apigen.GeoPoint{Latitude: f.Location.Lat(), Longitude: f.Location.Lng()},
-			PriceFrom: apigen.Money{Amount: f.PriceFrom.Amount(), Currency: apigen.MoneyCurrency(f.PriceFrom.Currency())},
+			PriceFrom: toAPIMoney(f.PriceFrom),
 			OpenNow:   f.OpenNow,
 		}
 		if s.Near != nil {
@@ -81,6 +82,58 @@ func (h *Handlers) SearchBranches(ctx context.Context, req apigen.SearchBranches
 		out.NextCursor = new(encodeCursor(*page.Next, s.Order()))
 	}
 	return out, nil
+}
+
+// GetBranchPage handles GET /v1/branches/{branch_id}.
+func (h *Handlers) GetBranchPage(ctx context.Context, req apigen.GetBranchPageRequestObject) (apigen.GetBranchPageResponseObject, error) {
+	p, err := h.uc.Branch(ctx, shared.IDFromUUID[shared.BranchTag](req.BranchId))
+	if err != nil {
+		problem := h.problem(ctx, err)
+		return apigen.GetBranchPagedefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: problem.Status}, nil
+	}
+	out := apigen.GetBranchPage200JSONResponse{
+		Id: p.Branch.UUID(), Name: toAPIText(p.Name), City: toAPICity(p.City), District: p.District, Address: p.Address,
+		Location: apigen.GeoPoint{Latitude: p.Location.Lat(), Longitude: p.Location.Lng()},
+		Timezone: p.Timezone, PriceFrom: toAPIMoney(p.PriceFrom), OpenNow: p.OpenNow,
+		OpeningHours: toAPIWeek(p.Hours), Services: make([]apigen.BranchService, 0, len(p.Menu)),
+	}
+	if p.Phone != "" {
+		out.Phone = new(p.Phone)
+	}
+	for _, m := range p.Menu {
+		out.Services = append(out.Services, apigen.BranchService{
+			Id: m.Service.UUID(), Category: m.Category.Code(), Name: toAPIText(m.Name),
+			DurationMinutes: int(m.Duration / time.Minute), PriceFrom: toAPIMoney(m.PriceFrom),
+		})
+	}
+	return out, nil
+}
+
+// toAPIWeek shows a week as the owners' API does: all seven days, Sunday
+// first, each interval on the day it starts, as opening and closing times
+// ("24:00" for midnight at the day's end; a close at or before the opening
+// is the next day).
+func toAPIWeek(week [][2]int) []apigen.DayHours {
+	const day = 24 * 60
+	days := make([]apigen.DayHours, 7)
+	for d := range days {
+		days[d] = apigen.DayHours{Weekday: apigen.Weekday(strings.ToLower(time.Weekday(d).String())), Intervals: []apigen.TimeRange{}}
+	}
+	for _, w := range week {
+		d, opens := w[0]/day%7, w[0]%day
+		closes := opens + w[1] - w[0]
+		if closes != day {
+			closes %= day
+		}
+		days[d].Intervals = append(days[d].Intervals, apigen.TimeRange{Opens: clock(opens), Closes: clock(closes)})
+	}
+	return days
+}
+
+func clock(minutes int) string { return fmt.Sprintf("%02d:%02d", minutes/60, minutes%60) }
+
+func toAPIMoney(m shared.Money) apigen.Money {
+	return apigen.Money{Amount: m.Amount(), Currency: apigen.MoneyCurrency(m.Currency())}
 }
 
 // Errors in the search's parameters that the spec can't express.
@@ -209,6 +262,8 @@ func (h *Handlers) problem(ctx context.Context, err error) apigen.Problem {
 	switch {
 	case errors.Is(err, shared.ErrUnknownCity):
 		status, code, detail = http.StatusUnprocessableEntity, "unknown_city", "city: not one of the cities in GET /v1/cities"
+	case errors.Is(err, domain.ErrNotFound):
+		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, shared.ErrUnknownCategory):
 		status, code, detail = http.StatusUnprocessableEntity, "unknown_category", "category: not one of the categories in GET /v1/service-categories"
 	case errors.Is(err, errBadCursor):

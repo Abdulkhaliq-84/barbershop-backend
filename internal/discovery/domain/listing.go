@@ -41,7 +41,10 @@ type Service struct {
 	Version   int  // the service's version this copy is of
 	Offered   bool // active, and someone performs it: customers can choose it
 	Category  shared.Category
-	PriceFrom shared.Money // the least a customer pays for it, in SAR
+	Name      shared.LocalizedText
+	Duration  time.Duration // its own; a barber's may differ
+	PriceFrom shared.Money  // the least a customer pays for it, in SAR
+	SortOrder int           // the menu's order, lowest first
 	UpdatedAt time.Time
 }
 
@@ -70,7 +73,26 @@ var (
 	ErrQueryTooShort = errors.New("search: a name to search for needs at least two letters")
 	ErrNotSAR        = errors.New("discovery: prices are kept in SAR")
 	ErrBadHours      = errors.New("discovery: opening hours must be within two weeks of minutes, each ending after it starts")
+	ErrNotFound      = errors.New("discovery: no such branch shown")
 )
+
+// Page is a branch as its public page shows it: what search shows of it,
+// its week as the owner set it ([start, end) minutes after Sunday 00:00,
+// branch-local), and its menu.
+type Page struct {
+	Found
+	Hours [][2]int
+	Menu  []MenuItem
+}
+
+// MenuItem is a service a branch offers: customers can choose it.
+type MenuItem struct {
+	Service   shared.ServiceID
+	Category  shared.Category
+	Name      shared.LocalizedText
+	Duration  time.Duration // its own; a barber's may differ
+	PriceFrom shared.Money  // the cheapest barber's price
+}
 
 // Search radius limits, in kilometres.
 const (
@@ -147,4 +169,7 @@ type Listings interface {
 	// f.Text (required) and pass f, best match first then by ID, starting
 	// after the given position (nil: from the start).
 	Matching(ctx context.Context, f Filter, after *Position, limit int) ([]Found, error)
+	// Page returns the branch's public page, open now or not at the
+	// instant at; ErrNotFound unless search would show it.
+	Page(ctx context.Context, branch shared.BranchID, at time.Time) (Page, error)
 }

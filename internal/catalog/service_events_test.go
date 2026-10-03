@@ -17,8 +17,8 @@ func TestDecodeServiceChanged(t *testing.T) {
 	biz, branch, service := uuid.New(), uuid.New(), uuid.New()
 	sar := func(n int64) events.Money { return events.Money{Amount: n, Currency: "SAR"} }
 	state := events.Service{
-		Version: 4, Active: true, CategoryCode: "beard", Name: events.LocalizedText{Ar: "تهذيب اللحية"},
-		DurationMinutes: 20, Price: sar(4000), PriceFrom: new(sar(3500)),
+		Version: 4, Active: true, CategoryCode: "beard", Name: events.LocalizedText{Ar: "تهذيب اللحية", En: "Beard trim"},
+		DurationMinutes: 20, Price: sar(4000), PriceFrom: new(sar(3500)), SortOrder: 3,
 	}
 	event := func(eventType string, s events.Service) outbox.Event {
 		t.Helper()
@@ -28,10 +28,11 @@ func TestDecodeServiceChanged(t *testing.T) {
 		}
 		return e
 	}
+	name, _ := shared.NewLocalizedText("تهذيب اللحية", "Beard trim")
 	want := ServiceChanged{
 		BusinessID: shared.IDFromUUID[shared.BusinessTag](biz), BranchID: shared.IDFromUUID[shared.BranchTag](branch),
 		ServiceID: shared.IDFromUUID[shared.ServiceTag](service), Version: 4, Offered: true, Category: "beard",
-		PriceFrom: shared.Halalas(3500), At: at,
+		Name: name, Duration: 20 * time.Minute, PriceFrom: shared.Halalas(3500), SortOrder: 3, At: at,
 	}
 	off := state
 	off.Active = false
@@ -61,7 +62,9 @@ func TestDecodeServiceChanged(t *testing.T) {
 	noVersion.Version = 0
 	dollars := state
 	dollars.PriceFrom = &events.Money{Amount: 1000, Currency: "USD"}
-	for name, s := range map[string]events.Service{"no version": noVersion, "an unknown currency": dollars} {
+	noArabic := state
+	noArabic.Name = events.LocalizedText{En: "Beard trim"}
+	for name, s := range map[string]events.Service{"no version": noVersion, "an unknown currency": dollars, "no Arabic name": noArabic} {
 		if _, err := decodeServiceChanged(event(events.TypeServiceUpdated, s)); err == nil {
 			t.Errorf("%s was accepted", name)
 		}

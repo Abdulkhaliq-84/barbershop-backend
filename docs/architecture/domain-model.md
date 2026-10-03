@@ -379,6 +379,14 @@ Arabic normalisation for search: strip diacritics/tatweel, unify alef forms (أ 
   in `tz`, or that minute a week later. The instant comes from the use case's clock.
 - Every search says `open_now`; `open_now=true` keeps only the open. Holidays aren't known yet.
 
+**Live since M6.6 (ADR-0032):** the branch's public page, `GET /v1/branches/{branch_id}`.
+- The listing with its price from and open now; the week as the owner set it (seven days,
+  Sunday first); the menu (offered services by the shop's order, each with its id, category,
+  name, duration and price from).
+- Catalog's service events add `sort_order`; discovery's service copy keeps names, durations and
+  order, and the hours' copy keeps the intervals as set beside the merged multirange.
+- Read from one repeatable-read snapshot; `404` unless search would show the branch.
+
 ### 3.7 `billing` — Plans and entitlements
 
 | Aggregate | Key fields | Invariants |

@@ -187,7 +187,8 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
 5. M6.5 — scheduling's events: open now, by each branch's weekly hours in its own time zone
    ([ADR-0031](adr/0031-open-now.md)). *Your turn:* when a closed branch opens next.
 6. M6.6 — the branch's public page `GET /v1/branches/{id}`: profile, weekly hours, open now,
-   and the menu (catalog's events carry the services' names and durations).
+   and the menu, from one snapshot of discovery's copies
+   ([ADR-0032](adr/0032-branch-page.md)). *Your turn:* make the page cacheable (ETag).
 
 ### Design track (in parallel, in Figma)
 

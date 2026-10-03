@@ -92,9 +92,12 @@ type Service struct {
 	BranchID   shared.BranchID
 	ServiceID  shared.ServiceID
 	Version    int
-	Offered    bool         // active, and someone performs it
-	Category   string       // a shared.Categories code
+	Offered    bool   // active, and someone performs it
+	Category   string // a shared.Categories code
+	Name       shared.LocalizedText
+	Duration   time.Duration
 	PriceFrom  shared.Money // the least a customer pays for it
+	SortOrder  int          // the menu's order, lowest first
 	At         time.Time
 }
 
@@ -107,7 +110,8 @@ func (m *Module) KeepService(ctx context.Context, s Service) error {
 	}
 	return m.uc.KeepService(ctx, domain.Service{
 		Service: s.ServiceID, Branch: s.BranchID, Business: s.BusinessID, Version: s.Version,
-		Offered: s.Offered, Category: category, PriceFrom: s.PriceFrom, UpdatedAt: s.At,
+		Offered: s.Offered, Category: category, Name: s.Name, Duration: s.Duration,
+		PriceFrom: s.PriceFrom, SortOrder: s.SortOrder, UpdatedAt: s.At,
 	})
 }
 

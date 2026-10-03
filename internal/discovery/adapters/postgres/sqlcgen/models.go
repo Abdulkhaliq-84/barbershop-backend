@@ -183,6 +183,7 @@ type DiscoveryBranchHour struct {
 	Version    int32
 	Open       pgtype.Multirange[pgtype.Range[pgtype.Int4]]
 	UpdatedAt  time.Time
+	Intervals  []byte
 }
 
 type DiscoveryBranchListing struct {
@@ -205,14 +206,18 @@ type DiscoveryBranchListing struct {
 }
 
 type DiscoveryBranchService struct {
-	ServiceID    uuid.UUID
-	BranchID     uuid.UUID
-	BusinessID   uuid.UUID
-	Version      int32
-	Offered      bool
-	CategoryCode string
-	PriceFrom    int64
-	UpdatedAt    time.Time
+	ServiceID       uuid.UUID
+	BranchID        uuid.UUID
+	BusinessID      uuid.UUID
+	Version         int32
+	Offered         bool
+	CategoryCode    string
+	PriceFrom       int64
+	UpdatedAt       time.Time
+	NameAr          string
+	NameEn          string
+	DurationMinutes int32
+	SortOrder       int32
 }
 
 type IamOtpChallenge struct {

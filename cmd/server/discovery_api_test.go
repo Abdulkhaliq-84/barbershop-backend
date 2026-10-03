@@ -69,6 +69,46 @@ func TestDiscoveryAPI(t *testing.T) {
 	if _, ok := b["open_now"].(bool); !ok {
 		t.Errorf("open_now = %v", b["open_now"])
 	}
+
+	// Its public page: the listing, its week as the owner set it (09:00–21:00
+	// every day), and its menu, a moment after the hours' event.
+	branchPage := func(id string) response {
+		t.Helper()
+		return a.do(t, http.MethodGet, "/v1/branches/"+id, "", "")
+	}
+	var p map[string]any
+	until(t, "the branch's page with its week", func() bool {
+		r := branchPage(branch)
+		days, _ := r.body["opening_hours"].([]any)
+		if r.status == http.StatusOK && len(days) == 7 && len(days[0].(map[string]any)["intervals"].([]any)) == 1 {
+			p = r.body
+		}
+		return p != nil
+	})
+	sunday := p["opening_hours"].([]any)[0].(map[string]any)
+	menu, _ := p["services"].([]any)
+	if p["id"] != branch || p["name"].(map[string]any)["ar"] != "فرع العليا" || p["timezone"] != "Asia/Riyadh" ||
+		p["phone"] != "+966551234567" || priceFrom(p) != 6000 || sunday["weekday"] != "sunday" ||
+		sunday["intervals"].([]any)[0].(map[string]any)["opens"] != "09:00" || sunday["intervals"].([]any)[0].(map[string]any)["closes"] != "21:00" {
+		t.Errorf("page = %v", p)
+	}
+	if _, ok := p["open_now"].(bool); !ok {
+		t.Errorf("page open_now = %v", p["open_now"])
+	}
+	if len(menu) != 1 {
+		t.Fatalf("menu = %v", menu)
+	}
+	if m := menu[0].(map[string]any); m["id"] != service || m["category"] != "haircut" || m["name"].(map[string]any)["ar"] != "قص شعر" ||
+		m["name"].(map[string]any)["en"] != "Haircut" ||
+		m["duration_minutes"] != float64(30) || m["price_from"].(map[string]any)["amount"] != float64(6000) {
+		t.Errorf("menu item = %v", m)
+	}
+	if r := branchPage(uuid.NewString()); r.status != http.StatusNotFound || r.body["code"] != "not_found" {
+		t.Errorf("no such branch: %d %v", r.status, r.body)
+	}
+	if r := branchPage("not-a-uuid"); r.status != http.StatusBadRequest {
+		t.Errorf("not an ID: %d %v", r.status, r.body)
+	}
 	// Kept for the branch's public page (M6.5), not listed yet.
 	var phone, timezone string
 	if err := a.pool.QueryRow(t.Context(), `SELECT phone, timezone FROM discovery.branch_listings WHERE branch_id = $1`, branch).Scan(&phone, &timezone); err != nil ||
@@ -218,6 +258,9 @@ func TestDiscoveryAPI(t *testing.T) {
 		t.Fatalf("unpublish: %d %v", r.status, r.body)
 	}
 	until(t, "the unpublished branch to go", func() bool { return len(listed("riyadh")) == 0 })
+	if r := branchPage(branch); r.status != http.StatusNotFound {
+		t.Errorf("an unpublished branch's page: %d %v", r.status, r.body)
+	}
 
 	// A city's listings come 20 a page; next_cursor leads through them.
 	for i := range 21 {

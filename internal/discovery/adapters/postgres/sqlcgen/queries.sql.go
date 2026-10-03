@@ -12,13 +12,126 @@ import (
 	"github.com/google/uuid"
 )
 
+const branchMenu = `-- name: BranchMenu :many
+SELECT service_id, category_code, name_ar, name_en, duration_minutes, price_from
+FROM discovery.branch_services
+WHERE branch_id = $1 AND offered
+ORDER BY sort_order, name_ar COLLATE "C", service_id
+`
+
+type BranchMenuRow struct {
+	ServiceID       uuid.UUID
+	CategoryCode    string
+	NameAr          string
+	NameEn          string
+	DurationMinutes int32
+	PriceFrom       int64
+}
+
+// The services a branch offers, as its menu shows them: by sort order, then
+// Arabic name in code point order (the same on every machine), then ID.
+func (q *Queries) BranchMenu(ctx context.Context, branchID uuid.UUID) ([]BranchMenuRow, error) {
+	rows, err := q.db.Query(ctx, branchMenu, branchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BranchMenuRow{}
+	for rows.Next() {
+		var i BranchMenuRow
+		if err := rows.Scan(
+			&i.ServiceID,
+			&i.CategoryCode,
+			&i.NameAr,
+			&i.NameEn,
+			&i.DurationMinutes,
+			&i.PriceFrom,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const branchPage = `-- name: BranchPage :one
+SELECT l.branch_id, l.business_id, l.version, listed, name_ar, name_en, city_code, district, address,
+       latitude, longitude, phone, timezone, l.updated_at,
+       (SELECT min(s.price_from) FROM discovery.branch_services s
+        WHERE s.branch_id = l.branch_id AND s.offered)::bigint AS price_from,
+       coalesce(discovery.open_at(h.open, $1::timestamptz, l.timezone), false)::bool AS open_now,
+       coalesce(h.intervals, '[]')::jsonb AS intervals
+FROM discovery.branch_listings l
+LEFT JOIN discovery.branch_hours h ON h.branch_id = l.branch_id
+WHERE l.branch_id = $2 AND listed
+  AND EXISTS (SELECT FROM discovery.branch_services s WHERE s.branch_id = l.branch_id AND s.offered)
+`
+
+type BranchPageParams struct {
+	At       time.Time
+	BranchID uuid.UUID
+}
+
+type BranchPageRow struct {
+	BranchID   uuid.UUID
+	BusinessID uuid.UUID
+	Version    int32
+	Listed     bool
+	NameAr     string
+	NameEn     string
+	CityCode   string
+	District   string
+	Address    string
+	Latitude   float64
+	Longitude  float64
+	Phone      string
+	Timezone   string
+	UpdatedAt  time.Time
+	PriceFrom  int64
+	OpenNow    bool
+	Intervals  []byte
+}
+
+// A listed branch offering a service, as its public page shows it: the
+// listing, the least a service there costs, whether it is open at the
+// instant at, and its week as set ([] if its hours were never heard of).
+// No row: not listed, not offering anything, or no such branch.
+func (q *Queries) BranchPage(ctx context.Context, arg BranchPageParams) (BranchPageRow, error) {
+	row := q.db.QueryRow(ctx, branchPage, arg.At, arg.BranchID)
+	var i BranchPageRow
+	err := row.Scan(
+		&i.BranchID,
+		&i.BusinessID,
+		&i.Version,
+		&i.Listed,
+		&i.NameAr,
+		&i.NameEn,
+		&i.CityCode,
+		&i.District,
+		&i.Address,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Phone,
+		&i.Timezone,
+		&i.UpdatedAt,
+		&i.PriceFrom,
+		&i.OpenNow,
+		&i.Intervals,
+	)
+	return i, err
+}
+
 const keepHours = `-- name: KeepHours :execrows
-INSERT INTO discovery.branch_hours (branch_id, business_id, version, open, updated_at)
-VALUES ($1, $2, $3, ($4::text)::int4multirange, $5)
+INSERT INTO discovery.branch_hours (branch_id, business_id, version, open, intervals, updated_at)
+VALUES ($1, $2, $3, ($4::text)::int4multirange, $5::jsonb, $6)
 ON CONFLICT (branch_id) DO UPDATE SET
     business_id = excluded.business_id,
     version     = excluded.version,
     open        = excluded.open,
+    intervals   = excluded.intervals,
     updated_at  = excluded.updated_at
 WHERE discovery.branch_hours.version < excluded.version
 `
@@ -28,18 +141,21 @@ type KeepHoursParams struct {
 	BusinessID uuid.UUID
 	Version    int32
 	Open       string
+	Intervals  []byte
 	UpdatedAt  time.Time
 }
 
 // Saves discovery's copy of a branch's opening hours, unless the copy
 // already holds this version or a newer one. open is the week as text,
-// e.g. '{[540,1260),[1980,2700)}'.
+// e.g. '{[540,1260),[1980,2700)}'; intervals the same week as set, as JSON
+// pairs, e.g. [[540,1260],[1980,2700]].
 func (q *Queries) KeepHours(ctx context.Context, arg KeepHoursParams) (int64, error) {
 	result, err := q.db.Exec(ctx, keepHours,
 		arg.BranchID,
 		arg.BusinessID,
 		arg.Version,
 		arg.Open,
+		arg.Intervals,
 		arg.UpdatedAt,
 	)
 	if err != nil {
@@ -122,30 +238,40 @@ func (q *Queries) KeepListing(ctx context.Context, arg KeepListingParams) (int64
 
 const keepService = `-- name: KeepService :execrows
 INSERT INTO discovery.branch_services (
-    service_id, branch_id, business_id, version, offered, category_code, price_from, updated_at
+    service_id, branch_id, business_id, version, offered, category_code, price_from, updated_at,
+    name_ar, name_en, duration_minutes, sort_order
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12
 )
 ON CONFLICT (service_id) DO UPDATE SET
-    branch_id     = excluded.branch_id,
-    business_id   = excluded.business_id,
-    version       = excluded.version,
-    offered       = excluded.offered,
-    category_code = excluded.category_code,
-    price_from    = excluded.price_from,
-    updated_at    = excluded.updated_at
+    branch_id        = excluded.branch_id,
+    business_id      = excluded.business_id,
+    version          = excluded.version,
+    offered          = excluded.offered,
+    category_code    = excluded.category_code,
+    price_from       = excluded.price_from,
+    updated_at       = excluded.updated_at,
+    name_ar          = excluded.name_ar,
+    name_en          = excluded.name_en,
+    duration_minutes = excluded.duration_minutes,
+    sort_order       = excluded.sort_order
 WHERE discovery.branch_services.version < excluded.version
 `
 
 type KeepServiceParams struct {
-	ServiceID    uuid.UUID
-	BranchID     uuid.UUID
-	BusinessID   uuid.UUID
-	Version      int32
-	Offered      bool
-	CategoryCode string
-	PriceFrom    int64
-	UpdatedAt    time.Time
+	ServiceID       uuid.UUID
+	BranchID        uuid.UUID
+	BusinessID      uuid.UUID
+	Version         int32
+	Offered         bool
+	CategoryCode    string
+	PriceFrom       int64
+	UpdatedAt       time.Time
+	NameAr          string
+	NameEn          string
+	DurationMinutes int32
+	SortOrder       int32
 }
 
 // Saves discovery's copy of a service, unless the copy already holds this
@@ -160,6 +286,10 @@ func (q *Queries) KeepService(ctx context.Context, arg KeepServiceParams) (int64
 		arg.CategoryCode,
 		arg.PriceFrom,
 		arg.UpdatedAt,
+		arg.NameAr,
+		arg.NameEn,
+		arg.DurationMinutes,
+		arg.SortOrder,
 	)
 	if err != nil {
 		return 0, err

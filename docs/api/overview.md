@@ -95,7 +95,7 @@ Client flow (Flutter):
 |---|---|
 | GET | `/v1/cities` — live (M6.1): the cities, largest first, `{code, name}` |
 | GET | `/v1/branches?city=&lat=&lng=&radius_km=&q=&category=&open_now=&cursor=` — live (M6.1–M6.5): near a place (`lat`, `lng`, `radius_km` 1–50, 10 by default) nearest first with `distance_m`; by name (`q`, Arabic-normalised, a letter off still matches) best match first; or a city's branches by Arabic name. They combine (`city` narrows; `q` with a place keeps distance order; `category` keeps branches offering a service of that kind; `open_now=true` keeps those open at this moment). Only branches offering a service; each with `price_from` and `open_now`. 20 a page; `422 unknown_city`, `422 unknown_category`; `400` for none of a city, a place or a name |
-| GET | `/v1/branches/{branch_id}` — public profile (M6.6): hours, open now, services; photos and barbers later |
+| GET | `/v1/branches/{branch_id}` — live (M6.6): the public page: profile, `timezone`, `price_from`, `open_now`, `opening_hours` (seven days, Sunday first, branch-local), `services` (the menu: `id`, `category`, `name`, `duration_minutes`, `price_from`). `404` unless search would show it. Photos and barbers later |
 | GET | `/v1/categories` |
 
 ### Customer booking — M5

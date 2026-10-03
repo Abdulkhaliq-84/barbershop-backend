@@ -23,6 +23,7 @@ type Service struct {
 	// PriceFrom is the least a customer pays for it: the cheapest of its
 	// performers' prices. Absent while nobody performs it.
 	PriceFrom *Money `json:"price_from,omitempty"`
+	SortOrder int    `json:"sort_order"` // where the branch's menu shows it, lowest first (since M6.6)
 }
 
 // LocalizedText is text in Arabic and, optionally, English.

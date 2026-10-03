@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -23,7 +24,17 @@ type listings struct {
 	filter *domain.Filter       // the last search's
 	kept   *domain.Service      // the last KeepService call's
 	hours  *domain.OpeningHours // the last KeepHours call's
+	shown  domain.Page          // what Page returns
+	pageAt time.Time            // the instant of the last Page call
 	err    error
+}
+
+func (l *listings) Page(_ context.Context, branch shared.BranchID, at time.Time) (domain.Page, error) {
+	l.pageAt = at
+	if l.err != nil || branch != l.shown.Branch {
+		return domain.Page{}, cmp.Or(l.err, domain.ErrNotFound)
+	}
+	return l.shown, nil
 }
 
 // now is the fake clock's time in every test: a Thursday morning.
@@ -362,5 +373,24 @@ func TestKeepService(t *testing.T) {
 	}
 	if err := app.NewHandlers(store, clock.NewFake(now)).KeepService(t.Context(), s); err != nil || store.kept == nil || *store.kept != s {
 		t.Errorf("kept %+v, %v", store.kept, err)
+	}
+}
+
+// The page is the store's, open now or not at the clock's now; a branch
+// search wouldn't show is not found.
+func TestBranch(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	b := branches(t, 1)[0]
+	store := &listings{shown: domain.Page{Found: domain.Found{Listing: b, OpenNow: true}, Hours: [][2]int{{540, 1260}}}}
+	clk := clock.NewFake(now)
+	h := app.NewHandlers(store, clk)
+	clk.Set(now.Add(time.Hour))
+	p, err := h.Branch(ctx, b.Branch)
+	if err != nil || p.Branch != b.Branch || !p.OpenNow || len(p.Hours) != 1 || !store.pageAt.Equal(now.Add(time.Hour)) {
+		t.Errorf("page %+v at %v, %v", p, store.pageAt, err)
+	}
+	if _, err := h.Branch(ctx, shared.NewID[shared.BranchTag]()); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("another branch: %v", err)
 	}
 }

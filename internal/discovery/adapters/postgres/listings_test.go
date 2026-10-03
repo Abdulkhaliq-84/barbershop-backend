@@ -57,7 +57,7 @@ func offer(t *testing.T, r *postgres.Listings, l domain.Listing, category string
 	}
 	s := domain.Service{
 		Service: shared.NewID[shared.ServiceTag](), Branch: l.Branch, Business: l.Business, Version: 1,
-		Offered: true, Category: c, PriceFrom: shared.Halalas(halalas), UpdatedAt: t0,
+		Offered: true, Category: c, Name: c.Name(), Duration: 30 * time.Minute, PriceFrom: shared.Halalas(halalas), UpdatedAt: t0,
 	}
 	if _, err := r.KeepService(t.Context(), s); err != nil {
 		t.Fatal(err)
@@ -884,6 +884,88 @@ func TestOpenNow(t *testing.T) {
 			if slices.Sort(open); !slices.Equal(open, want) {
 				t.Errorf("%s, %s: %v, want %v", tt.what, search, open, want)
 			}
+		}
+	}
+}
+
+// The page shows a branch search would show: the listing, its week as set,
+// and its menu in the shop's order; anything else is not found.
+func TestPage(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := migrated(t)
+	r := postgres.NewListings(pool)
+	l := listing(t, "صالون الأناقة")
+	if _, err := r.Keep(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	service := func(category, ar, en string, minutes, sort int, halalas int64, offered bool) domain.Service {
+		t.Helper()
+		s := offer(t, r, l, category, halalas)
+		s.Version, s.Offered, s.Duration, s.SortOrder = 2, offered, time.Duration(minutes)*time.Minute, sort
+		s.Name, _ = shared.NewLocalizedText(ar, en)
+		if _, err := r.KeepService(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	trim := service("beard", "تهذيب اللحية", "Beard trim", 20, 2, 3500, true)
+	cut := service("haircut", "قص الشعر", "", 30, 1, 6000, true)
+	service("kids", "قص الأطفال", "", 25, 0, 2500, false)     // nobody performs it
+	shave := service("shave", "حلاقة", "", 15, 2, 4000, true) // the trim's order too: by name, ت before ح
+
+	// Around the clock: seven back-to-back days, which the multirange merges
+	// into one week-long range; the page shows the seven as set.
+	var week [][2]int
+	for d := range 7 {
+		week = append(week, [2]int{d * 1440, d*1440 + 1440})
+	}
+	if _, err := r.KeepHours(ctx, domain.OpeningHours{Branch: l.Branch, Business: l.Business, Version: 1, Open: week, UpdatedAt: t0}); err != nil {
+		t.Fatal(err)
+	}
+	var merged string
+	if err := pool.QueryRow(ctx, `SELECT open::text FROM discovery.branch_hours WHERE branch_id = $1`, l.Branch.UUID()).Scan(&merged); err != nil || merged != "{[0,10080)}" {
+		t.Fatalf("open = %s, %v", merged, err)
+	}
+	p, err := r.Page(ctx, l.Branch, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Branch != l.Branch || p.Name != l.Name || p.Timezone != "Asia/Riyadh" || p.Phone != l.Phone ||
+		p.PriceFrom != shared.Halalas(3500) || !p.OpenNow || !slices.Equal(p.Hours, week) {
+		t.Errorf("page = %+v", p)
+	}
+	var menu []shared.ServiceID
+	for _, m := range p.Menu {
+		menu = append(menu, m.Service)
+	}
+	if want := []shared.ServiceID{cut.Service, trim.Service, shave.Service}; !slices.Equal(menu, want) {
+		t.Errorf("menu = %v, want haircut, beard trim, shave", menu)
+	}
+	if m := p.Menu[1]; m.Category.Code() != "beard" || m.Name.Ar() != "تهذيب اللحية" || m.Name.En() != "Beard trim" || m.Duration != 20*time.Minute || m.PriceFrom != shared.Halalas(3500) {
+		t.Errorf("the beard trim = %+v", m)
+	}
+
+	// Hours never heard of: none shown, not open.
+	other := listing(t, "صالون آخر")
+	keepOffering(t, r, other)
+	if p, err := r.Page(ctx, other.Branch, t0); err != nil || len(p.Hours) != 0 || p.OpenNow || len(p.Menu) != 1 {
+		t.Errorf("no hours: %+v, %v", p, err)
+	}
+	// Not shown by search, not found here: unpublished, offering nothing,
+	// or no such branch.
+	hidden := other
+	hidden.Version, hidden.Listed = 3, false
+	if _, err := r.Keep(ctx, hidden); err != nil {
+		t.Fatal(err)
+	}
+	idle := listing(t, "صالون بلا خدمات")
+	if _, err := r.Keep(ctx, idle); err != nil {
+		t.Fatal(err)
+	}
+	for name, id := range map[string]shared.BranchID{"unpublished": other.Branch, "offering nothing": idle.Branch, "no such branch": shared.NewID[shared.BranchTag]()} {
+		if _, err := r.Page(ctx, id, t0); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }

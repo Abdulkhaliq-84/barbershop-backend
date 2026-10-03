@@ -185,7 +185,7 @@ func serviceContract(s domain.ServiceSnapshot) events.Service {
 	out := events.Service{
 		Version: s.Version, Active: s.Active, CategoryCode: string(d.Category),
 		Name:            events.LocalizedText{Ar: d.Name.Ar(), En: d.Name.En()},
-		DurationMinutes: int(d.Duration / time.Minute), Price: moneyContract(d.Price),
+		DurationMinutes: int(d.Duration / time.Minute), Price: moneyContract(d.Price), SortOrder: d.SortOrder,
 	}
 	if from, ok := s.PriceFrom(); ok {
 		out.PriceFrom = new(moneyContract(from))
