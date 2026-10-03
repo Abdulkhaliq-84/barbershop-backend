@@ -32,6 +32,10 @@ var messages = map[Kind]map[shared.Language]message{
 		shared.Arabic:  {"أُلغي موعدك", "ألغى %[1]s موعدك %[2]s."},
 		shared.English: {"Booking cancelled", "%[1]s cancelled your booking for %[2]s."},
 	},
+	BookingReminder: {
+		shared.Arabic:  {"موعدك قريب", "%[1]s، %[2]s. نراك قريبًا."},
+		shared.English: {"Your appointment is coming up", "%[1]s, %[2]s. See you soon."},
+	},
 }
 
 // Message words a notice in lang: about branch, for an appointment starting

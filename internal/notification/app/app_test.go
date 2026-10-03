@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -22,12 +23,47 @@ var now = time.Date(2026, 10, 1, 6, 30, 0, 0, time.UTC)
 
 // store is an in-memory domain.Store.
 type store struct {
-	devices    []domain.Device
-	branches   map[shared.BranchID]domain.Branch
-	deliveries []domain.Delivery
-	saved      *domain.Device // the last SaveDevice call's
-	forgotten  []domain.DeviceID
-	err        error // what every call fails with
+	devices      []domain.Device
+	branches     map[shared.BranchID]domain.Branch
+	deliveries   []domain.Delivery
+	saved        *domain.Device // the last SaveDevice call's
+	forgotten    []domain.DeviceID
+	appointments map[shared.AppointmentID]domain.Appointment // as KeepAppointment last saved them
+	claims       []int                                       // what ClaimReminders returns, call by call
+	claimedAt    time.Time                                   // the last ClaimReminders call's now
+	claimCalls   int
+	keepErr      error // what KeepAppointment alone fails with
+	err          error // what every call fails with
+}
+
+func (s *store) KeepAppointment(_ context.Context, a domain.Appointment) error {
+	if err := cmp.Or(s.err, s.keepErr); err != nil {
+		return err
+	}
+	s.appointments[a.ID] = a
+	return nil
+}
+
+func (s *store) Appointment(_ context.Context, id shared.AppointmentID) (domain.Appointment, error) {
+	if s.err != nil {
+		return domain.Appointment{}, s.err
+	}
+	a, ok := s.appointments[id]
+	if !ok {
+		return domain.Appointment{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (s *store) ClaimReminders(_ context.Context, now time.Time, limit int) (int, error) {
+	s.claimCalls++
+	s.claimedAt = now
+	if s.err != nil || len(s.claims) == 0 {
+		return 0, s.err
+	}
+	n := min(s.claims[0], limit)
+	s.claims = s.claims[1:]
+	return n, nil
 }
 
 func (s *store) ForgetDevice(_ context.Context, id domain.DeviceID) error {
@@ -122,7 +158,7 @@ var errUnavailable = errors.New("push service unavailable")
 
 func setup(t *testing.T) (*app.Handlers, *store, *pusher) {
 	t.Helper()
-	s := &store{branches: map[shared.BranchID]domain.Branch{}}
+	s := &store{branches: map[shared.BranchID]domain.Branch{}, appointments: map[shared.AppointmentID]domain.Appointment{}}
 	p := &pusher{fail: map[domain.DeviceID]error{}}
 	return app.NewHandlers(s, p, clock.NewFake(now)), s, p
 }
@@ -392,5 +428,136 @@ func TestNotifyRejected(t *testing.T) {
 	}
 	if err := h.Notify(t.Context(), c); err != nil || p.tried != 1 {
 		t.Errorf("the event again: %v, %d tries; want it not tried again", err, p.tried)
+	}
+}
+
+// Every customer appointment event updates the copy reminders use; walk-ins
+// and statuses notification doesn't know aren't kept.
+func TestAppointmentChangedKeepsCopy(t *testing.T) {
+	h, s, p := setup(t)
+	b := riyadh(t)
+	s.branches[b.ID] = b
+	customer := shared.NewID[shared.UserTag]()
+	s.devices = []domain.Device{device(t, customer, shared.English)}
+	at := now.Add(-time.Hour)
+
+	c := change(customer, b)
+	c.What, c.Status, c.At = "booked", "pending", at
+	if err := h.AppointmentChanged(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	got := s.appointments[c.Appointment]
+	if got.Status != domain.AppointmentPending || !got.ConfirmedAt.IsZero() || got.Customer != customer || got.Branch != b.ID || !got.StartsAt.Equal(c.StartsAt) {
+		t.Errorf("pending: kept %+v", got)
+	}
+	if len(p.sent) != 1 || p.sent[0].Data["kind"] != "booking_requested" {
+		t.Errorf("pending: pushed %v; want the request notice too", p.sent)
+	}
+
+	c.Event, c.What, c.Status, c.At = uuid.New(), "confirmed", "confirmed", at.Add(time.Minute)
+	if err := h.AppointmentChanged(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.appointments[c.Appointment]; got.Status != domain.AppointmentConfirmed || !got.ConfirmedAt.Equal(at.Add(time.Minute)) {
+		t.Errorf("confirmed: kept %+v; want confirmed at the event's time", got)
+	}
+
+	c.Event, c.What, c.Status, c.CancelledBy = uuid.New(), "cancelled", "cancelled", "customer"
+	if err := h.AppointmentChanged(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.appointments[c.Appointment]; got.Status != domain.AppointmentClosed {
+		t.Errorf("cancelled: kept %+v; want closed", got)
+	}
+
+	walkIn := change(shared.UserID{}, b)
+	odd := change(customer, b)
+	odd.Status = "rescheduled"
+	for _, c := range []app.AppointmentChange{walkIn, odd} {
+		if err := h.AppointmentChanged(t.Context(), c); err != nil {
+			t.Fatal(err)
+		}
+		if _, kept := s.appointments[c.Appointment]; kept {
+			t.Errorf("kept %+v; want walk-ins and unknown statuses left out", c)
+		}
+	}
+
+	// The copy can't be saved: retry the event, before anything is pushed
+	// (the retry pushes it).
+	s.keepErr = errors.New("database down")
+	sent := len(p.sent)
+	if err := h.AppointmentChanged(t.Context(), change(customer, b)); err == nil || len(p.sent) != sent {
+		t.Errorf("the copy not saved: %v, %d new pushes; want an error and none", err, len(p.sent)-sent)
+	}
+}
+
+// RemindDue claims batch after batch until one comes back short.
+func TestRemindDue(t *testing.T) {
+	h, s, _ := setup(t)
+	s.claims = []int{app.ReminderBatch, app.ReminderBatch, 3, app.ReminderBatch}
+	if err := h.RemindDue(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if s.claimCalls != 3 || !s.claimedAt.Equal(now) {
+		t.Errorf("%d claims at %s; want 3, at the clock's time", s.claimCalls, s.claimedAt)
+	}
+	s.err = errors.New("database down")
+	if err := h.RemindDue(t.Context()); err == nil {
+		t.Error("store down: want the error (the next run tries again)")
+	}
+}
+
+func TestSendReminder(t *testing.T) {
+	h, s, p := setup(t)
+	b := riyadh(t)
+	s.branches[b.ID] = b
+	customer := shared.NewID[shared.UserTag]()
+	phone := device(t, customer, shared.English)
+	s.devices = []domain.Device{phone}
+	starts := now.Add(45 * time.Minute)
+	confirmed := domain.Appointment{
+		ID: shared.NewID[shared.AppointmentTag](), Customer: customer, Branch: b.ID, StartsAt: starts,
+		Status: domain.AppointmentConfirmed, ConfirmedAt: now.Add(-24 * time.Hour),
+	}
+	s.appointments[confirmed.ID] = confirmed
+	r := app.Reminder{Event: uuid.New(), Appointment: confirmed.ID, Customer: customer, Branch: b.ID, StartsAt: starts}
+
+	for range 2 { // queued twice, or retried: one push
+		if err := h.SendReminder(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(p.sent) != 1 {
+		t.Fatalf("%d pushes, want 1", len(p.sent))
+	}
+	got := p.sent[0]
+	if got.Title != "Your appointment is coming up" || got.Body != "Elegance Salon, Thu 1 Oct, 10:15. See you soon." ||
+		got.Data["kind"] != "booking_reminder" || got.Data["appointment_id"] != confirmed.ID.String() || got.CollapseKey != r.Event.String() {
+		t.Errorf("pushed %+v", got)
+	}
+	if d := s.deliveries[0]; d.Event != r.Event || d.Kind != domain.BookingReminder || d.Appointment != confirmed.ID {
+		t.Errorf("delivery %+v", d)
+	}
+
+	// Changed since it was queued: nothing to remind of.
+	cancelled := confirmed
+	cancelled.ID, cancelled.Status = shared.NewID[shared.AppointmentTag](), domain.AppointmentClosed
+	moved := confirmed
+	moved.ID, moved.StartsAt = shared.NewID[shared.AppointmentTag](), starts.Add(time.Hour)
+	s.appointments[cancelled.ID], s.appointments[moved.ID] = cancelled, moved
+	for name, id := range map[string]shared.AppointmentID{
+		"cancelled": cancelled.ID, "moved": moved.ID, "unknown": shared.NewID[shared.AppointmentTag](),
+	} {
+		r := r
+		r.Event, r.Appointment = uuid.New(), id
+		if err := h.SendReminder(t.Context(), r); err != nil || len(p.sent) != 1 {
+			t.Errorf("%s: %v, %d pushes; want none", name, err, len(p.sent)-1)
+		}
+	}
+
+	// The copy can't be read: retry later.
+	s.err = errors.New("database down")
+	if err := h.SendReminder(t.Context(), app.Reminder{Event: uuid.New(), Appointment: confirmed.ID, StartsAt: starts}); err == nil {
+		t.Error("store down: want an error")
 	}
 }

@@ -39,3 +39,4 @@ Consequences. An ADR is never edited after acceptance — a new ADR supersedes i
 | [0032](0032-branch-page.md) | The branch's public page: one snapshot of discovery's copies, shown only if search would show it | Accepted |
 | [0033](0033-notifications-devices-and-pushes.md) | Notifications: devices per user, pushes from booking's events, sent once per device | Accepted |
 | [0034](0034-fcm-sender.md) | Pushes through FCM: a service account signs in, bounded retries, three kinds of failure | Accepted |
+| [0035](0035-reminders.md) | Reminders: a copy of each booking, a task every minute, one queued event per reminder | Accepted |

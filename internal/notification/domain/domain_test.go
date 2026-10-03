@@ -83,6 +83,14 @@ func TestMessage(t *testing.T) {
 			"cancelled, English", domain.BookingCancelled, shared.English, riyadh,
 			"Booking cancelled", "Elegance Salon cancelled your booking for Thu 1 Oct, 16:30.",
 		},
+		{
+			"reminder, English", domain.BookingReminder, shared.English, riyadh,
+			"Your appointment is coming up", "Elegance Salon, Thu 1 Oct, 16:30. See you soon.",
+		},
+		{
+			"reminder, Arabic", domain.BookingReminder, shared.Arabic, riyadh,
+			"موعدك قريب", "صالون الأناقة، الخميس 1 أكتوبر، 16:30. نراك قريبًا.",
+		},
 		// No English name: the Arabic one, in an English sentence.
 		{
 			"no English name", domain.BookingCancelled, shared.English, branch(t, "حلاق الحي", "", "Asia/Riyadh"),
@@ -115,6 +123,7 @@ func TestMessagesComplete(t *testing.T) {
 	start := time.Date(2026, 12, 6, 6, 5, 0, 0, time.UTC) // Sunday 09:05 in Riyadh
 	kinds := []domain.Kind{
 		domain.BookingRequested, domain.BookingConfirmed, domain.BookingDeclined, domain.BookingExpired, domain.BookingCancelled,
+		domain.BookingReminder,
 	}
 	for _, k := range kinds {
 		for _, lang := range []shared.Language{shared.Arabic, shared.English} {
@@ -202,6 +211,23 @@ func TestParsePlatform(t *testing.T) {
 	for _, p := range []string{"", "iOS", "web", "windows"} {
 		if _, err := domain.ParsePlatform(p); !errors.Is(err, domain.ErrBadPlatform) {
 			t.Errorf("ParsePlatform(%q) = %v, want ErrBadPlatform", p, err)
+		}
+	}
+}
+
+func TestAppointmentStatusOf(t *testing.T) {
+	for booking, want := range map[string]domain.AppointmentStatus{
+		"pending": domain.AppointmentPending, "confirmed": domain.AppointmentConfirmed,
+		"rejected": domain.AppointmentClosed, "cancelled": domain.AppointmentClosed, "expired": domain.AppointmentClosed,
+		"completed": domain.AppointmentClosed, "no_show": domain.AppointmentClosed,
+	} {
+		if got, ok := domain.AppointmentStatusOf(booking); !ok || got != want {
+			t.Errorf("AppointmentStatusOf(%q) = %q, %v; want %q", booking, got, ok, want)
+		}
+	}
+	for _, unknown := range []string{"", "rescheduled", "Confirmed"} {
+		if got, ok := domain.AppointmentStatusOf(unknown); ok {
+			t.Errorf("AppointmentStatusOf(%q) = %q, want unknown", unknown, got)
 		}
 	}
 }

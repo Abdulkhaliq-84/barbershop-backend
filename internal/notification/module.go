@@ -1,10 +1,11 @@
 // Package notification tells people what happened, on their phones
-// (docs/architecture/domain-model.md §3.8, ADR-0033).
+// (docs/architecture/domain-model.md §3.8, ADR-0033 to ADR-0035).
 //
 // It keeps the devices that receive pushes, a copy of what a message says
-// about each branch (its name and time zone, from business's events), and
-// the log of what was sent. main subscribes it to booking's and business's
-// events; it depends on no other module.
+// about each branch (its name and time zone, from business's events), a
+// copy of each customer's booking (for its reminder), and the log of what
+// was sent. main subscribes it to booking's and business's events; it
+// depends on no other module.
 //
 // This root package is the module's public face. Other modules and main use
 // only what is exported here; domain, app and adapters are private (lint
@@ -13,7 +14,9 @@ package notification
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -25,7 +28,9 @@ import (
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/adapters/push"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/app"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/domain"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/notification/events"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/clock"
+	"github.com/Abdulkhaliq-84/barbershop-backend/internal/platform/outbox"
 	"github.com/Abdulkhaliq-84/barbershop-backend/internal/shared"
 )
 
@@ -35,6 +40,8 @@ type Deps struct {
 	Clock  clock.Clock
 	Logger *slog.Logger
 	Push   Push
+	// Events queues reminders and runs the reminder task (worker role).
+	Events *outbox.Bus
 }
 
 // Push says how notifications reach phones.
@@ -71,12 +78,42 @@ func New(d Deps) (*Module, error) {
 	default:
 		return nil, errors.New("notification: unknown push provider")
 	}
-	uc := app.NewHandlers(postgres.NewStore(d.Pool), sender, d.Clock)
+	uc := app.NewHandlers(postgres.NewStore(d.Pool, d.Events), sender, d.Clock)
+	// Every minute, the worker queues the reminders that are due; each is
+	// then sent like any other event, retried until it reaches the phones.
+	d.Events.Every("notification.remind", time.Minute, uc.RemindDue)
+	d.Events.Subscribe("notification.send_reminder", events.TypeReminderDue, func(ctx context.Context, e outbox.Event) error {
+		r, err := decodeReminder(e)
+		if err != nil {
+			return err
+		}
+		return uc.SendReminder(ctx, r)
+	})
 	return &Module{uc: uc, http: httpapi.NewHandlers(uc, d.Logger)}, nil
+}
+
+// decodeReminder reads a queued reminder.
+func decodeReminder(e outbox.Event) (app.Reminder, error) {
+	var p events.ReminderDue
+	if err := json.Unmarshal(e.Payload, &p); err != nil {
+		return app.Reminder{}, fmt.Errorf("decode %s %s: %w", e.Type, e.ID, err)
+	}
+	if p.AppointmentID == uuid.Nil || p.CustomerID == uuid.Nil || p.BranchID == uuid.Nil || p.StartsAt.IsZero() {
+		return app.Reminder{}, fmt.Errorf("decode %s %s: incomplete", e.Type, e.ID)
+	}
+	return app.Reminder{
+		Event: e.ID, Appointment: shared.IDFromUUID[shared.AppointmentTag](p.AppointmentID),
+		Customer: shared.IDFromUUID[shared.UserTag](p.CustomerID), Branch: shared.IDFromUUID[shared.BranchTag](p.BranchID),
+		StartsAt: p.StartsAt.UTC(),
+	}, nil
 }
 
 // HTTP returns the handlers for the notification API operations.
 func (m *Module) HTTP() *httpapi.Handlers { return m.http }
+
+// RemindDue queues the reminders due now. The worker does it every minute;
+// this runs it once more (operations, tests).
+func (m *Module) RemindDue(ctx context.Context) error { return m.uc.RemindDue(ctx) }
 
 // Branch is a branch as of Version, as business's events describe it. Its
 // fields match business.BranchChanged one for one, so main converts one to
@@ -120,12 +157,13 @@ type AppointmentChanged struct {
 	At            time.Time
 }
 
-// AppointmentChanged pushes the customer what they should hear about it, if
+// AppointmentChanged keeps the copy of the appointment its reminder needs,
+// and pushes the customer what they should hear about the change, if
 // anything. Safe to call twice for one event: a device already reached is
 // skipped.
 func (m *Module) AppointmentChanged(ctx context.Context, a AppointmentChanged) error {
-	return m.uc.Notify(ctx, app.AppointmentChange{
+	return m.uc.AppointmentChanged(ctx, app.AppointmentChange{
 		Event: a.EventID, Appointment: a.AppointmentID, Branch: a.BranchID, Customer: a.CustomerID,
-		What: a.What, Status: a.Status, CancelledBy: a.CancelledBy, StartsAt: a.StartsAt,
+		What: a.What, Status: a.Status, CancelledBy: a.CancelledBy, StartsAt: a.StartsAt, At: a.At,
 	})
 }

@@ -201,8 +201,10 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    HTTP client with timeouts, retries with jittered backoff and `Retry-After`, devices FCM no
    longer knows forgotten, refused pushes recorded ([ADR-0034](adr/0034-fcm-sender.md)).
    *Your turn:* push to a user's devices concurrently (`errgroup` with a limit).
-3. M7.3 — reminders: a scheduled River job one hour before the start, which checks the status
-   again when it fires. *Your turn:* the 24 h reminder.
+3. M7.3 — reminders: notification's own copy of each customer's booking (a status only moves
+   forward), a task every minute that queues the reminders due an hour before the start (one
+   outbox event each, in the transaction that marks them), sent after checking the booking is
+   still on ([ADR-0035](adr/0035-reminders.md)). *Your turn:* the 24 h reminder.
 4. M7.4 — the shop's notifications: new bookings to answer, cancellations, the business approved
    or rejected.
 5. M7.5 — a real SMS provider for login codes and staff invitations.

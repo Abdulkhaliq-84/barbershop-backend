@@ -155,6 +155,15 @@ type Store interface {
 	KeepBranch(ctx context.Context, b Branch) (bool, error)
 	// Branch returns the copy; ErrUnknownBranch if none yet.
 	Branch(ctx context.Context, id shared.BranchID) (Branch, error)
+	// KeepAppointment applies a booking event to the copy of an
+	// appointment: a status only moves forward.
+	KeepAppointment(ctx context.Context, a Appointment) error
+	// Appointment returns the copy; ErrNotFound if none.
+	Appointment(ctx context.Context, id shared.AppointmentID) (Appointment, error)
+	// ClaimReminders finds up to limit appointments due their reminder at
+	// now, marks them reminded and queues one reminder each (the outbox),
+	// all in one transaction, and returns how many.
+	ClaimReminders(ctx context.Context, now time.Time, limit int) (int, error)
 	// Delivered reports whether event was already pushed to device, or
 	// refused by the push service for it.
 	Delivered(ctx context.Context, event uuid.UUID, device DeviceID) (bool, error)

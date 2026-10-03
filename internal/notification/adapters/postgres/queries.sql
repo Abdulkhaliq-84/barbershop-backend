@@ -65,3 +65,37 @@ SELECT EXISTS (SELECT FROM notification.deliveries WHERE event_id = @event_id AN
 INSERT INTO notification.deliveries (event_id, device_id, user_id, kind, appointment_id, outcome, sent_at)
 VALUES (@event_id, @device_id, @user_id, @kind, @appointment_id, @outcome, @sent_at)
 ON CONFLICT (event_id, device_id) DO NOTHING;
+
+-- name: KeepAppointment :exec
+-- Saves notification's copy of an appointment. Booking's events can arrive
+-- twice and in any order, so the status only moves forward (pending, then
+-- confirmed, then closed); the first confirmation's time is kept.
+INSERT INTO notification.appointments (appointment_id, customer_id, branch_id, starts_at, status, confirmed_at)
+VALUES (@appointment_id, @customer_id, @branch_id, @starts_at, @status, sqlc.narg(confirmed_at))
+ON CONFLICT (appointment_id) DO UPDATE SET
+    status       = excluded.status,
+    confirmed_at = coalesce(notification.appointments.confirmed_at, excluded.confirmed_at)
+WHERE (CASE excluded.status WHEN 'pending' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END)
+    > (CASE notification.appointments.status WHEN 'pending' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END);
+
+-- name: AppointmentByID :one
+SELECT appointment_id, customer_id, branch_id, starts_at, status, confirmed_at
+FROM notification.appointments
+WHERE appointment_id = @appointment_id;
+
+-- name: DueReminders :many
+-- Appointments due their reminder now: confirmed, not yet reminded,
+-- starting within the lead time but not started, and confirmed at least
+-- that long before they start. Rows another worker is claiming are
+-- skipped.
+SELECT appointment_id, customer_id, branch_id, starts_at
+FROM notification.appointments
+WHERE status = 'confirmed' AND reminded_at IS NULL
+  AND starts_at > @now AND starts_at <= @until
+  AND confirmed_at <= starts_at - @lead::interval
+ORDER BY starts_at, appointment_id
+LIMIT @batch
+FOR UPDATE SKIP LOCKED;
+
+-- name: MarkReminded :exec
+UPDATE notification.appointments SET reminded_at = @now WHERE appointment_id = ANY(@ids::uuid[]);

@@ -60,7 +60,11 @@ per (event, device) through a deliveries log, and a console sender refused in pr
 (ADR-0033); M7.2 the FCM sender — a service account's RS256 assertion traded for a cached access
 token, every wait bounded (`FCM_TIMEOUT`), throttling and Google's errors retried with jittered
 backoff and `Retry-After` before the outbox's own retry, devices FCM no longer knows forgotten,
-refused pushes recorded as `rejected`, the event ID as collapse key (ADR-0034).
+refused pushes recorded as `rejected`, the event ID as collapse key (ADR-0034); M7.3 reminders —
+notification's own copy of each customer's booking (status only moves forward), a task every
+minute queueing one `notification.reminder_due` event per reminder due an hour before the start
+in the transaction that marks it (`FOR UPDATE SKIP LOCKED`), sent after re-checking the copy
+(ADR-0035).
 
 ## 2. Where things are
 
@@ -72,7 +76,7 @@ refused pushes recorded as `rejected`, the event ID as collapse key (ADR-0034).
 | Tenancy, schemas, constraints, time & money | `docs/architecture/persistence.md` |
 | API conventions and endpoint inventory | `docs/api/overview.md` (contract: `api/openapi.yaml` from M2) |
 | Pipeline lifecycle, workflows, releases, future deploy | `docs/operations/ci-cd.md` |
-| Why a decision was made | `docs/adr/` (0001–0034) |
+| Why a decision was made | `docs/adr/` (0001–0035) |
 | Mobile design system (colours, IBM Plex, components, RTL, screens) | `docs/design/design-system.md`, `docs/design/tokens.json`, `docs/design/mockups/` |
 | Node.js → Go idioms for the owner | `docs/learning/node-to-go.md` |
 
