@@ -40,6 +40,8 @@ tags:
     description: Stored files, served through short-lived signed links
   - name: admin
     description: Platform administration (platform admins only)
+  - name: notifications
+    description: The devices that receive the signed-in user's notifications
 
 # Protected by default: an operation is public only if it says `security: []`.
 security:
@@ -191,6 +193,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MembershipList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/me/devices:
+    post:
+      operationId: registerDevice
+      tags: [notifications]
+      summary: Receive notifications on this device
+      description: |
+        Call it after signing in, whenever the push service gives the app a
+        new token, and when the user switches the app's language: pushes to
+        this device are written in `locale`.
+
+        The same token again refreshes its registration. If another account
+        had it (two accounts on one phone), it moves to the signed-in user:
+        only they get pushes on it. A user keeps their newest 10 devices.
+
+        The token is the push service's registration token (FCM). It is
+        never sent back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceRegistration"
+      responses:
+        "200":
+          description: The device, registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /v1/me/devices/{device_id}:
+    parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: removeDevice
+      tags: [notifications]
+      summary: Stop notifications on this device
+      description: Call it when signing out on the device. Someone else's device is `404`.
+      responses:
+        "204":
+          description: Removed
         default:
           $ref: "#/components/responses/Problem"
 
@@ -2801,6 +2854,47 @@ components:
           allOf:
             - $ref: "#/components/schemas/Money"
           description: The least a customer pays for it, the cheapest barber's price.
+
+    DeviceRegistration:
+      type: object
+      additionalProperties: false
+      required: [token, platform, locale]
+      properties:
+        token:
+          type: string
+          minLength: 32
+          maxLength: 4096
+          pattern: '^[A-Za-z0-9:_\-.]+$'
+          description: The push service's registration token for this app install.
+        platform:
+          type: string
+          enum: [ios, android]
+        locale:
+          type: string
+          enum: [ar, en]
+          description: "The app's language: what pushes to this device are written in."
+
+    Device:
+      type: object
+      required: [id, platform, locale, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Keep it to remove the device when signing out.
+        platform:
+          type: string
+          enum: [ios, android]
+        locale:
+          type: string
+          enum: [ar, en]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: When it last registered.
 
     BranchListingPage:
       type: object

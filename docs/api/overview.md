@@ -55,7 +55,8 @@ Stable error codes (grows per milestone): `validation_failed`, `unauthorized`, `
 | POST | `/v1/auth/logout` | user |
 | GET / PATCH | `/v1/me` | user (PATCH: owner exercise) |
 | GET | `/v1/me/memberships` → businesses & roles (drives "Business mode" switch) — live (M3.1) | user |
-| POST / DELETE | `/v1/me/devices` (FCM token) | user — M7 |
+| POST | `/v1/me/devices` — live (M7.1): `{token, platform, locale}` registers this app install for pushes; the same token again refreshes it, another user's moves to the caller; the 10 newest kept; the token is never returned | user |
+| DELETE | `/v1/me/devices/{device_id}` — live (M7.1): on sign-out; `204`, or `404` if it isn't the caller's | user |
 
 **Phone OTP login (M2.2).** Request and verify are live; verify returns `{user, is_new_user, tokens}`.
 
@@ -199,7 +200,7 @@ sequenceDiagram
     B-->>C: 409 slot_unavailable
   else ok
     B-->>C: 201 appointment
-    Note over DB: River worker delivers AppointmentBooked → notification (push to barber)
+    Note over DB: River worker delivers AppointmentBooked → notification (push to the customer since M7.1; the shop in M7.4)
   end
 ```
 

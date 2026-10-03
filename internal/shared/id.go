@@ -18,24 +18,26 @@ type ID[T any] struct {
 }
 
 // Markers for the IDs several modules share. Modules declare their own
-// markers for IDs nobody else needs (e.g. booking's appointments).
+// markers for IDs nobody else needs.
 type (
-	UserTag     struct{}
-	BusinessTag struct{}
-	BranchTag   struct{}
-	StaffTag    struct{}
-	MediaTag    struct{} // a stored file (media module), referenced by others
-	ServiceTag  struct{} // a catalog service, snapshotted by booking
+	UserTag        struct{}
+	BusinessTag    struct{}
+	BranchTag      struct{}
+	StaffTag       struct{}
+	MediaTag       struct{} // a stored file (media module), referenced by others
+	ServiceTag     struct{} // a catalog service, snapshotted by booking
+	AppointmentTag struct{} // a booking, which notifications are about
 )
 
 // Cross-module IDs.
 type (
-	UserID     = ID[UserTag]
-	BusinessID = ID[BusinessTag]
-	BranchID   = ID[BranchTag]
-	StaffID    = ID[StaffTag]
-	MediaID    = ID[MediaTag]
-	ServiceID  = ID[ServiceTag]
+	UserID        = ID[UserTag]
+	BusinessID    = ID[BusinessTag]
+	BranchID      = ID[BranchTag]
+	StaffID       = ID[StaffTag]
+	MediaID       = ID[MediaTag]
+	ServiceID     = ID[ServiceTag]
+	AppointmentID = ID[AppointmentTag]
 )
 
 // NewID returns a new UUIDv7 ID. Version 7 UUIDs start with a timestamp, so

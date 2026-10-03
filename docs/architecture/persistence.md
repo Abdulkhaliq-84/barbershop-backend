@@ -34,7 +34,7 @@ scheduling.override_hours, scheduling.time_off (EXCLUDE: no overlapping time off
 booking.appointments, booking.appointment_items, booking.idempotency_keys
 discovery.branch_listings, discovery.branch_services, discovery.branch_hours  (cities are reference data in code — ADR-0027)
 billing.subscriptions  (plans are reference data in code — ADR-0019)
-notification.device_tokens, notification.deliveries
+notification.devices, notification.branches, notification.deliveries  (messages are in code — ADR-0033)
 media.objects
 river.*   (job queue / outbox — created and upgraded by River's own migrator, run by database.Migrate)
 ```
@@ -113,6 +113,27 @@ CREATE TABLE discovery.branch_hours (
     open          int4multirange NOT NULL,           -- minutes after Sunday 00:00, local (merged)
     intervals     jsonb NOT NULL                     -- the same week as set, for showing it (M6.6)
 );
+
+-- An app install that receives pushes, for one user at a time (ADR-0033).
+-- token is a credential: never logged, never returned.
+CREATE TABLE notification.devices (
+    id         uuid PRIMARY KEY,
+    user_id    uuid NOT NULL,
+    token      text NOT NULL UNIQUE,                 -- registered by another user: moves to them
+    platform   text NOT NULL,                        -- ios | android
+    locale     text NOT NULL,                        -- ar | en: what its pushes are written in
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL                  -- last registered; a user keeps the newest 10
+);
+CREATE INDEX ON notification.devices (user_id, updated_at DESC, id DESC);
+
+-- One row per event pushed to a device: a retried event skips the devices it reached.
+CREATE TABLE notification.deliveries (
+    event_id uuid, device_id uuid, user_id uuid NOT NULL, kind text NOT NULL,
+    appointment_id uuid, sent_at timestamptz NOT NULL,
+    PRIMARY KEY (event_id, device_id)
+);
+CREATE INDEX ON notification.deliveries (user_id, sent_at DESC);
 
 -- Nearby query shape
 -- SELECT … FROM discovery.branch_listings

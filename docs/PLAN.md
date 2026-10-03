@@ -190,6 +190,21 @@ Each milestone ships as a series of **small PRs** (one concept per PR). Every PR
    and the menu, from one snapshot of discovery's copies
    ([ADR-0032](adr/0032-branch-page.md)). *Your turn:* make the page cacheable (ETag).
 
+**M7 in slices** (one PR each):
+
+1. M7.1 — `notification` module: devices (`POST`/`DELETE /v1/me/devices`), a copy of each
+   branch's name and time zone, the customer's pushes from booking's events in Arabic and
+   English, sent once per (event, device), and a console sender
+   ([ADR-0033](adr/0033-notifications-devices-and-pushes.md)).
+   *Your turn:* `GET /v1/me/notifications` from the deliveries log.
+2. M7.2 — the FCM sender: an HTTP client with timeouts, retries with backoff, dead tokens
+   removed.
+3. M7.3 — reminders: a scheduled River job one hour before the start, which checks the status
+   again when it fires. *Your turn:* the 24 h reminder.
+4. M7.4 — the shop's notifications: new bookings to answer, cancellations, the business approved
+   or rejected.
+5. M7.5 — a real SMS provider for login codes and staff invitations.
+
 ### Design track (in parallel, in Figma)
 
 | # | Deliverable | Feeds |
